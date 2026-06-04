@@ -35,6 +35,9 @@
         &:focus-visible {
             @include focused();
         }
+
+        .logo-text-full { display: inline; }
+        .logo-text-short { display: none; }
     }
 
     .layout-topbar-action {
@@ -102,6 +105,11 @@
 
         .layout-topbar-logo-container {
             width: auto;
+        }
+
+        .layout-topbar-logo {
+            .logo-text-full { display: none; }
+            .logo-text-short { display: inline; }
         }
 
         .layout-menu-button {
