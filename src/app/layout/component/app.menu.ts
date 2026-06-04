@@ -25,11 +25,28 @@ export class AppMenu {
         this.model = [
             {
                 label: 'Home',
-                items: [{ label: 'Dashboard', icon: 'pi pi-fw pi-home', routerLink: ['/'] }]
+                items: [{ label: 'หน้าหลัก', icon: 'pi pi-fw pi-home', routerLink: ['/home'] }]
+            },
+            {
+                label: 'Report',
+                items: [
+                    { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/dashboardclone'] },
+                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/'] },
+                    { label: 'จัดการข้อมูล', icon: 'pi pi-fw pi-wrench', routerLink: ['/'] }
+                ]
+            },
+            {
+                label: 'Map',
+                items: [
+                    { label: 'แผนที่', icon: 'pi pi-fw pi-map', routerLink: ['/'] },
+                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/'] },
+                    { label: 'จัดการข้อมูล', icon: 'pi pi-fw pi-wrench', routerLink: ['/'] }
+                ]
             },
             {
                 label: 'UI Components',
                 items: [
+                    { label: 'Dashboard', icon: 'pi pi-fw pi-box', routerLink: ['/'] },
                     { label: 'Form Layout', icon: 'pi pi-fw pi-id-card', routerLink: ['/uikit/formlayout'] },
                     { label: 'Input', icon: 'pi pi-fw pi-check-square', routerLink: ['/uikit/input'] },
                     { label: 'Button', icon: 'pi pi-fw pi-mobile', class: 'rotated-icon', routerLink: ['/uikit/button'] },
