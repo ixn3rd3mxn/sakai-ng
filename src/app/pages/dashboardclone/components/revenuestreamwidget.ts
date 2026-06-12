@@ -44,35 +44,35 @@ export class RevenueStreamWidget {
             datasets: [
                 {
                     type: 'bar',
-                    label: 'ระดับที่ 1',
+                    label: 'แดง',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-800'),
                     data: [0, 50, 50, 0, 50],
                     barThickness: 50
                 },
                 {
                     type: 'bar',
-                    label: 'ระดับที่ 2',
+                    label: 'เหลือง',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-700'),
                     data: [0, 0, 40, 40, 40],
                     barThickness: 50
                 },
                 {
                     type: 'bar',
-                    label: 'ระดับที่ 3',
+                    label: 'เขียว',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-600'),
                     data: [30, 30, 0, 30, 30],
                     barThickness: 50
                 },
                 {
                     type: 'bar',
-                    label: 'ระดับที่ 4',
+                    label: 'ขาว',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-500'),
                     data: [20, 20, 20, 0, 20],
                     barThickness: 50
                 },
                 {
                     type: 'bar',
-                    label: 'ระดับที่ 5',
+                    label: 'ดำ',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-300'),
                     data: [10, 10, 10, 10, 0],
                     // borderRadius: {
