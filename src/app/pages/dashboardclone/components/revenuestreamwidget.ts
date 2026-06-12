@@ -6,8 +6,8 @@ import { LayoutService } from '@/app/layout/service/layout.service';
     standalone: true,
     selector: 'app-revenue-stream-widget',
     imports: [ChartModule],
-    template: `<div class="card mb-8!">
-        <div class="font-semibold text-xl mb-4">Revenue Stream</div>
+    template: `<div class="card" style="margin-bottom: 0.25rem">
+        <div class="font-semibold text-xl mb-4">CBD เคส 5 อันดับสูงสุด</div>
         <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
     </div>`
 })
@@ -40,35 +40,49 @@ export class RevenueStreamWidget {
         const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
         this.chartData.set({
-            labels: ['Q1', 'Q2', 'Q3', 'Q4'],
+            labels: ['CBD1', 'CBD2', 'CBD3', 'CBD4', 'CBD5'],
             datasets: [
                 {
                     type: 'bar',
-                    label: 'Subscriptions',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-400'),
-                    data: [4000, 10000, 15000, 4000],
-                    barThickness: 32
+                    label: 'ระดับที่ 1',
+                    backgroundColor: documentStyle.getPropertyValue('--p-primary-800'),
+                    data: [0, 50, 50, 0, 50],
+                    barThickness: 50
                 },
                 {
                     type: 'bar',
-                    label: 'Advertising',
+                    label: 'ระดับที่ 2',
+                    backgroundColor: documentStyle.getPropertyValue('--p-primary-700'),
+                    data: [0, 0, 40, 40, 40],
+                    barThickness: 50
+                },
+                {
+                    type: 'bar',
+                    label: 'ระดับที่ 3',
+                    backgroundColor: documentStyle.getPropertyValue('--p-primary-600'),
+                    data: [30, 30, 0, 30, 30],
+                    barThickness: 50
+                },
+                {
+                    type: 'bar',
+                    label: 'ระดับที่ 4',
+                    backgroundColor: documentStyle.getPropertyValue('--p-primary-500'),
+                    data: [20, 20, 20, 0, 20],
+                    barThickness: 50
+                },
+                {
+                    type: 'bar',
+                    label: 'ระดับที่ 5',
                     backgroundColor: documentStyle.getPropertyValue('--p-primary-300'),
-                    data: [2100, 8400, 2400, 7500],
-                    barThickness: 32
-                },
-                {
-                    type: 'bar',
-                    label: 'Affiliate',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-200'),
-                    data: [4100, 5200, 3400, 7400],
-                    borderRadius: {
-                        topLeft: 8,
-                        topRight: 8,
-                        bottomLeft: 0,
-                        bottomRight: 0
-                    },
-                    borderSkipped: false,
-                    barThickness: 32
+                    data: [10, 10, 10, 10, 0],
+                    // borderRadius: {
+                    //     topLeft: 8,
+                    //     topRight: 8,
+                    //     bottomLeft: 0,
+                    //     bottomRight: 0
+                    // },
+                    // borderSkipped: false,
+                    barThickness: 50
                 }
             ]
         });
@@ -77,6 +91,10 @@ export class RevenueStreamWidget {
             maintainAspectRatio: false,
             aspectRatio: 0.8,
             plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                },
                 legend: {
                     labels: {
                         color: textColor
