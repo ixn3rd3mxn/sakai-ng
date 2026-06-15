@@ -1,80 +1,100 @@
-import { Component } from '@angular/core';
-import { ButtonModule } from 'primeng/button';
-import { MenuModule } from 'primeng/menu';
+import { afterNextRender, Component, effect, inject, signal } from '@angular/core';
+import { ChartModule } from 'primeng/chart';
+import { LayoutService } from '@/app/layout/service/layout.service';
 
 @Component({
     standalone: true,
     selector: 'app-notifications-widget',
-    imports: [ButtonModule, MenuModule],
-    template: `<div class="card">
-        <div class="flex items-center justify-between mb-6">
-            <div class="font-semibold text-xl">เคส CBD ที่เกิดเหตุบ่อยที่สุด</div>
-            <div>
-                <button pButton type="button" icon="pi pi-ellipsis-v" class="p-button-rounded p-button-text p-button-plain" (click)="menu.toggle($event)"></button>
-                <p-menu #menu [popup]="true" [model]="items"></p-menu>
-            </div>
-        </div>
-
-        <span class="block text-muted-color font-medium mb-4">TODAY</span>
-        <ul class="p-0 mx-0 mt-0 mb-6 list-none">
-            <li class="flex items-center py-2 border-b border-surface">
-                <div class="w-12 h-12 flex items-center justify-center bg-blue-100 dark:bg-blue-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-dollar text-xl! text-blue-500"></i>
-                </div>
-                <span class="text-surface-900 dark:text-surface-0 leading-normal"
-                    >Richard Jones
-                    <span class="text-surface-700 dark:text-surface-100">has purchased a blue t-shirt for <span class="text-primary font-bold">$79.00</span></span>
-                </span>
-            </li>
-            <li class="flex items-center py-2">
-                <div class="w-12 h-12 flex items-center justify-center bg-orange-100 dark:bg-orange-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-download text-xl! text-orange-500"></i>
-                </div>
-                <span class="text-surface-700 dark:text-surface-100 leading-normal">Your request for withdrawal of <span class="text-primary font-bold">$2500.00</span> has been initiated.</span>
-            </li>
-        </ul>
-
-        <span class="block text-muted-color font-medium mb-4">YESTERDAY</span>
-        <ul class="p-0 m-0 list-none mb-6">
-            <li class="flex items-center py-2 border-b border-surface">
-                <div class="w-12 h-12 flex items-center justify-center bg-blue-100 dark:bg-blue-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-dollar text-xl! text-blue-500"></i>
-                </div>
-                <span class="text-surface-900 dark:text-surface-0 leading-normal"
-                    >Keyser Wick
-                    <span class="text-surface-700 dark:text-surface-100">has purchased a black jacket for <span class="text-primary font-bold">$59.00</span></span>
-                </span>
-            </li>
-            <li class="flex items-center py-2 border-b border-surface">
-                <div class="w-12 h-12 flex items-center justify-center bg-pink-100 dark:bg-pink-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-question text-xl! text-pink-500"></i>
-                </div>
-                <span class="text-surface-900 dark:text-surface-0 leading-normal"
-                    >Jane Davis
-                    <span class="text-surface-700 dark:text-surface-100">has posted a new questions about your product.</span>
-                </span>
-            </li>
-        </ul>
-        <span class="block text-muted-color font-medium mb-4">LAST WEEK</span>
-        <ul class="p-0 m-0 list-none">
-            <li class="flex items-center py-2 border-b border-surface">
-                <div class="w-12 h-12 flex items-center justify-center bg-green-100 dark:bg-green-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-arrow-up text-xl! text-green-500"></i>
-                </div>
-                <span class="text-surface-900 dark:text-surface-0 leading-normal">Your revenue has increased by <span class="text-primary font-bold">%25</span>.</span>
-            </li>
-            <li class="flex items-center py-2 border-b border-surface">
-                <div class="w-12 h-12 flex items-center justify-center bg-purple-100 dark:bg-purple-400/10 rounded-full mr-4 shrink-0">
-                    <i class="pi pi-heart text-xl! text-purple-500"></i>
-                </div>
-                <span class="text-surface-900 dark:text-surface-0 leading-normal"><span class="text-primary font-bold">12</span> users have added your products to their wishlist.</span>
-            </li>
-        </ul>
+    imports: [ChartModule],
+    template: `<div class="card mb-8!">
+        <div class="font-semibold text-xl mb-4">เคสระดับความรุนแรง</div>
+        <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
     </div>`
 })
 export class NotificationsWidget {
-    items = [
-        { label: 'Add New', icon: 'pi pi-fw pi-plus' },
-        { label: 'Remove', icon: 'pi pi-fw pi-trash' }
-    ];
+    layoutService = inject(LayoutService);
+
+    chartData = signal<any>(null);
+
+    chartOptions = signal<any>(null);
+
+    constructor() {
+        afterNextRender(() => {
+            setTimeout(() => {
+                this.initChart();
+            }, 150);
+        });
+
+        effect(() => {
+            this.layoutService.layoutConfig().darkTheme;
+            setTimeout(() => {
+                this.initChart();
+            }, 150);
+        });
+    }
+
+    initChart() {
+        const documentStyle = getComputedStyle(document.documentElement);
+        const textColor = documentStyle.getPropertyValue('--text-color');
+        const borderColor = documentStyle.getPropertyValue('--surface-border');
+        const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
+
+        this.chartData.set({
+            labels: ['แดง', 'เหลือง', 'เขียว', 'ขาว', 'ดำ'],
+            datasets: [
+                {
+                    backgroundColor: [
+                        documentStyle.getPropertyValue('--p-primary-600'),
+                        documentStyle.getPropertyValue('--p-primary-500'),
+                        documentStyle.getPropertyValue('--p-primary-400'),
+                        documentStyle.getPropertyValue('--p-primary-300'),
+                        documentStyle.getPropertyValue('--p-primary-200')
+                    ],
+                    data: [40, 35, 30, 27, 17],
+                    borderRadius: {
+                        topLeft: 0,
+                        topRight: 8,
+                        bottomLeft: 0,
+                        bottomRight: 8
+                    },
+                    borderSkipped: false,
+                    barThickness: 50
+                }
+            ]
+        });
+
+        this.chartOptions.set({
+            maintainAspectRatio: false,
+            aspectRatio: 0.8,
+
+            indexAxis: 'y',
+
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color: textMutedColor
+                    },
+                    grid: {
+                        color: borderColor,
+                        borderColor: 'transparent',
+                        drawTicks: false
+                    }
+                },
+                y: {
+                    ticks: {
+                        color: textMutedColor
+                    },
+                    grid: {
+                        color: 'transparent',
+                        borderColor: 'transparent'
+                    }
+                }
+            }
+        });
+    }
 }

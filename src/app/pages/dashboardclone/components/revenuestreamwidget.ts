@@ -70,12 +70,7 @@ export class RevenueStreamWidget {
                             size: 15 // ปรับขนาดตัวเลขตามที่ต้องการ เช่น 16, 18, 20
                         }
                     }
-                },
-				textInside: {
-					text: "GeeksforGeeks",
-					color: 'green',
-					fontSize: 28
-				}
+                }
             }
         });
     }
