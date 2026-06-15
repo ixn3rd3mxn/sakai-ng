@@ -7,8 +7,10 @@ import { LayoutService } from '@/app/layout/service/layout.service';
     selector: 'app-revenue-stream-widget',
     imports: [ChartModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">CBD เคส 5 อันดับสูงสุด</div>
-        <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+        <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
+        <div class="flex justify-center">
+            <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+        </div>
     </div>`
 })
 export class RevenueStreamWidget {
@@ -36,93 +38,44 @@ export class RevenueStreamWidget {
     initChart() {
         const documentStyle = getComputedStyle(document.documentElement);
         const textColor = documentStyle.getPropertyValue('--text-color');
-        const borderColor = documentStyle.getPropertyValue('--surface-border');
-        const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
         this.chartData.set({
-            labels: ['CBD1', 'CBD2', 'CBD3', 'CBD4', 'CBD5'],
+            labels: ['เช้า', 'บ่าย', 'ดึก'],
             datasets: [
                 {
-                    type: 'bar',
-                    label: 'แดง',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-800'),
-                    data: [0, 50, 50, 0, 50],
-                    barThickness: 50
-                },
-                {
-                    type: 'bar',
-                    label: 'เหลือง',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-700'),
-                    data: [0, 0, 40, 40, 40],
-                    barThickness: 50
-                },
-                {
-                    type: 'bar',
-                    label: 'เขียว',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-600'),
-                    data: [30, 30, 0, 30, 30],
-                    barThickness: 50
-                },
-                {
-                    type: 'bar',
-                    label: 'ขาว',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-500'),
-                    data: [20, 20, 20, 0, 20],
-                    barThickness: 50
-                },
-                {
-                    type: 'bar',
-                    label: 'ดำ',
-                    backgroundColor: documentStyle.getPropertyValue('--p-primary-300'),
-                    data: [10, 10, 10, 10, 0],
-                    // borderRadius: {
-                    //     topLeft: 8,
-                    //     topRight: 8,
-                    //     bottomLeft: 0,
-                    //     bottomRight: 0
-                    // },
-                    // borderSkipped: false,
-                    barThickness: 50
+                    data: [150, 120, 90],
+                    backgroundColor: [
+
+                        documentStyle.getPropertyValue('--p-primary-600'),
+                        documentStyle.getPropertyValue('--p-primary-500'),
+                        documentStyle.getPropertyValue('--p-primary-300')
+                    ],
+                    hoverBackgroundColor: [
+
+                        documentStyle.getPropertyValue('--p-primary-500'),
+                        documentStyle.getPropertyValue('--p-primary-400'),
+                        documentStyle.getPropertyValue('--p-primary-200')
+                    ]
                 }
             ]
         });
 
         this.chartOptions.set({
-            maintainAspectRatio: false,
-            aspectRatio: 0.8,
             plugins: {
-                tooltip: {
-                    mode: 'index',
-                    intersect: false
-                },
                 legend: {
                     labels: {
-                        color: textColor
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    stacked: true,
-                    ticks: {
-                        color: textMutedColor
-                    },
-                    grid: {
-                        color: 'transparent',
-                        borderColor: 'transparent'
+                        usePointStyle: true,
+                        color: textColor,
+                        font: {
+                            size: 15 // ปรับขนาดตัวเลขตามที่ต้องการ เช่น 16, 18, 20
+                        }
                     }
                 },
-                y: {
-                    stacked: true,
-                    ticks: {
-                        color: textMutedColor
-                    },
-                    grid: {
-                        color: borderColor,
-                        borderColor: 'transparent',
-                        drawTicks: false
-                    }
-                }
+				textInside: {
+					text: "GeeksforGeeks",
+					color: 'green',
+					fontSize: 28
+				}
             }
         });
     }
