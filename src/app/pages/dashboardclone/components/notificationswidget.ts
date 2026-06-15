@@ -8,7 +8,7 @@ import { MenuModule } from 'primeng/menu';
     imports: [ButtonModule, MenuModule],
     template: `<div class="card">
         <div class="flex items-center justify-between mb-6">
-            <div class="font-semibold text-xl">Notifications</div>
+            <div class="font-semibold text-xl">เคส CBD ที่เกิดเหตุบ่อยที่สุด</div>
             <div>
                 <button pButton type="button" icon="pi pi-ellipsis-v" class="p-button-rounded p-button-text p-button-plain" (click)="menu.toggle($event)"></button>
                 <p-menu #menu [popup]="true" [model]="items"></p-menu>

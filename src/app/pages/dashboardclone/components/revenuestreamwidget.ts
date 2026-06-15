@@ -9,7 +9,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
         <div class="flex justify-center">
-            <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+            <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
         </div>
     </div>`
 })
