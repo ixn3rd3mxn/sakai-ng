@@ -1,4 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { ScrollTopModule } from 'primeng/scrolltop';
+import { SpeedDialModule } from 'primeng/speeddial';
+import { ToastModule } from 'primeng/toast';
+import { MenuItem, MessageService } from 'primeng/api';
 import { NotificationsWidget } from './components/notificationswidget';
 import { StatsWidget } from './components/statswidget';
 import { RecentSalesWidget } from './components/recentsaleswidget';
@@ -7,7 +11,7 @@ import { RevenueStreamWidget } from './components/revenuestreamwidget';
 
 @Component({
     selector: 'app-dashboardclone',
-    imports: [StatsWidget, RecentSalesWidget, BestSellingWidget, RevenueStreamWidget, NotificationsWidget],
+    imports: [StatsWidget, RecentSalesWidget, BestSellingWidget, RevenueStreamWidget, NotificationsWidget, ScrollTopModule],
     template: `
         <div class="grid grid-cols-12 gap-1">
             <app-stats-widget class="contents" />
@@ -18,9 +22,9 @@ import { RevenueStreamWidget } from './components/revenuestreamwidget';
             <div class="col-span-12 xl:col-span-6">
                 <app-recent-sales-widget />
                 <app-best-selling-widget />
-                
             </div>
         </div>
+        <p-scrolltop />
     `
 })
 export class DashboardCloneComponent {}
