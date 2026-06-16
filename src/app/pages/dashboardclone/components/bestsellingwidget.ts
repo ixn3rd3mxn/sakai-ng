@@ -40,7 +40,7 @@ export class BestSellingWidget {
         const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
         this.chartData.set({
-            labels: ['CBD1', 'CBD2', 'CBD3', 'CBD4', 'CBD5', 'CBD6', 'CBD7', 'CBD8', 'CBD9', 'CBD10', 'CBD11', 'CBD12', 'CBD13', 'CBD14', 'CBD15', 'CBD16', 'CBD17', 'CBD18', 'CBD19', 'CBD20', 'CBD21', 'CBD22', 'CBD23', 'CBD24', 'CBD25'],
+            labels: ['CBD1', 'CBD2', 'CBD3', 'CBD4', 'CBD5', 'CBD6', 'CBD7', 'CBD8', 'CBD9', 'CBD10'],
             datasets: [
                 {
                     backgroundColor: [
@@ -50,7 +50,7 @@ export class BestSellingWidget {
                         documentStyle.getPropertyValue('--p-primary-300'),
                         documentStyle.getPropertyValue('--p-primary-200')
                     ],
-                    data: [6, 18, 34, 22, 5, 20, 3, 7, 30, 14, 11, 6, 18, 34, 22, 5, 20, 3, 7, 30, 14, 11, 6, 18, 34],
+                    data: [38, 34, 30, 26, 22, 18, 15, 11, 8, 5],
                     borderRadius: {
                         topLeft: 8,
                         topRight: 8,
