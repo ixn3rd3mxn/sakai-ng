@@ -1,19 +1,16 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { ScrollTopModule } from 'primeng/scrolltop';
-import { SpeedDialModule } from 'primeng/speeddial';
-import { ToastModule } from 'primeng/toast';
-import { MenuItem, MessageService } from 'primeng/api';
 import { NotificationsWidget } from './components/notificationswidget';
 import { StatsWidget } from './components/statswidget';
 import { RecentSalesWidget } from './components/recentsaleswidget';
 import { BestSellingWidget } from './components/bestsellingwidget';
 import { RevenueStreamWidget } from './components/revenuestreamwidget';
+import { SpeedDial } from './components/speeddial';
 
 @Component({
     selector: 'app-dashboardclone',
-    imports: [StatsWidget, RecentSalesWidget, BestSellingWidget, RevenueStreamWidget, NotificationsWidget, ScrollTopModule, ToastModule, SpeedDialModule],
+    imports: [StatsWidget, RecentSalesWidget, BestSellingWidget, RevenueStreamWidget, NotificationsWidget, ScrollTopModule, SpeedDial],
     template: `
-        <p-toast />
         <div class="grid grid-cols-12 gap-1">
             <app-stats-widget class="contents" />
             <div class="col-span-12 xl:col-span-6">
@@ -26,7 +23,7 @@ import { RevenueStreamWidget } from './components/revenuestreamwidget';
             </div>
         </div>
         <p-scrolltop />
-        <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem' }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
+        <app-speed-dial />
     `,
     styles: [`
         :host ::ng-deep .p-scrolltop {
@@ -34,46 +31,5 @@ import { RevenueStreamWidget } from './components/revenuestreamwidget';
             bottom: 1rem !important;
         }
     `],
-    providers: [MessageService]
 })
-export class DashboardCloneComponent implements OnInit {
-    private messageService = inject(MessageService);
-    items: MenuItem[] | null = null;
-
-    ngOnInit() {
-        this.items = [
-            {
-                label: 'บันทึกข้อมูล',
-                icon: 'pi pi-pencil',
-                command: () => {
-                    this.messageService.add({ severity: 'info', summary: 'Add', detail: 'Data Added' });
-                }
-            },
-            {
-                label: 'สลับวันเวลา',
-                icon: 'pi pi-calendar-clock',
-                command: () => {
-                    this.messageService.add({ severity: 'error', summary: 'Delete', detail: 'Data Deleted' });
-                }
-            },
-            {
-                label: 'วันเวลาปัจจุบัน',
-                icon: 'pi pi-refresh',
-                command: () => {
-                    this.messageService.add({ severity: 'success', summary: 'Update', detail: 'Data Updated' });
-                }
-            },
-            {
-                label: 'Upload',
-                icon: 'pi pi-upload',
-                routerLink: ['/fileupload']
-            },
-            {
-                label: 'Angular.dev',
-                icon: 'pi pi-external-link',
-                target: '_blank',
-                url: 'https://angular.dev'
-            }
-        ];
-    }
-}
+export class DashboardCloneComponent {}
