@@ -7,7 +7,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
     selector: 'app-notifications-widget',
     imports: [ChartModule],
     template: `<div class="card mb-8!">
-        <div class="font-semibold text-xl mb-4">เคสระดับความรุนแรง</div>
+        <div class="font-semibold text-xl mb-4">สถิติระดับความรุนแรงที่เกิดขึ้น</div>
         <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
     </div>`
 })
