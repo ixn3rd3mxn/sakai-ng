@@ -87,7 +87,7 @@ export class SpeedDial implements OnInit {
         if (value) {
             this.formSubmitted = false;
         } else {
-            // Reset all form values when dialog closes
+
             this._dropdownValue = null;
             this.selectButtonValue = null;
             this.traumaSelectButtonValue = null;
@@ -109,8 +109,8 @@ export class SpeedDial implements OnInit {
     
     set dropdownValue(value: any) {
         this._dropdownValue = value;
-        this.formSubmitted = false;  // Reset validation เมื่อเปลี่ยนประเภท
-        // เมื่อไม่ใช่ 'NY' ให้ล้างค่าทุกฟิลด์
+        this.formSubmitted = false;
+
         if (value?.code !== 'NY') {
             this.selectButtonValue = null;
             this.traumaSelectButtonValue = null;
@@ -154,11 +154,11 @@ export class SpeedDial implements OnInit {
     }
 
     get isFormValid(): boolean {
-        // หากเลือก NY ให้ตรวจสอบทุกฟิลด์
+
         if (this.dropdownValue?.code === 'NY') {
             return !!(this.dropdownValue && this.selectButtonValue && this.traumaSelectButtonValue && this.cbdValue && this.severityValue);
         }
-        // หากไม่ได้เลือก NY ให้ตรวจสอบแค่ dropdownValue
+
         return !!this.dropdownValue;
     }
 
@@ -220,12 +220,38 @@ export class SpeedDial implements OnInit {
         this.confirmSave(event);
     }
 
+    getConfirmationMessage(): string {
+        const parts: string[] = [];
+        
+        if (this.dropdownValue) {
+            parts.push(`• ประเภท : ${this.dropdownValue.name}`);
+        }
+        
+        if (this.dropdownValue?.code === 'NY') {
+            if (this.selectButtonValue) {
+                parts.push(`• ช่องทางการแจ้งเหตุ : ${this.selectButtonValue.name}`);
+            }
+            if (this.traumaSelectButtonValue) {
+                parts.push(`• ประเภทของการเจ็บป่วย : ${this.traumaSelectButtonValue.name}`);
+            }
+            if (this.cbdValue) {
+                parts.push(`• CBD : ${this.cbdValue.name}`);
+            }
+            if (this.severityValue) {
+                parts.push(`• ระดับความรุนแรง : ${this.severityValue.name}`);
+            }
+        }
+        
+        return parts.length > 0 
+            ? `<div style="line-height:1.8">คุณต้องการบันทึกข้อมูลต่อไปนี้หรือไม่?<br><br>${parts.join('<br>')}</div>`
+            : 'คุณต้องการบันทึกข้อมูลนี้หรือไม่?';
+    }
+
     confirmSave(event: Event) {
         this.confirmationService.confirm({
             target: event.target as EventTarget,
-            message: 'คุณต้องการบันทึกข้อมูลนี้หรือไม่?',
+            message: this.getConfirmationMessage(),
             header: 'ยืนยันการบันทึก',
-            icon: 'pi pi-info-circle',
             acceptLabel: 'ยืนยัน',
             rejectLabel: 'ยกเลิก',
             rejectButtonProps: {
