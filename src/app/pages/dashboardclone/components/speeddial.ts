@@ -29,14 +29,18 @@ import { MessageModule } from 'primeng/message';
             </div>
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ช่องทางการแจ้งเหตุ</div>
-                <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isSelectButtonInvalid" />
+                <div class="w-full">
+                    <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isSelectButtonInvalid" />
+                </div>
                 @if (isSelectButtonInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกช่องทางการแจ้งเหตุ</p-message>
                 }
             </div>
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ประเภทของการเจ็บป่วย</div>
-                <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isTraumaInvalid" />
+                <div class="w-full">
+                    <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isTraumaInvalid" />
+                </div>
                 @if (isTraumaInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภทของการเจ็บป่วย</p-message>
                 }
