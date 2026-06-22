@@ -28,8 +28,8 @@ import { MessageModule } from 'primeng/message';
                 }
             </div>
             <div class="flex flex-col gap-1">
-                <div class="font-semibold">ช่องทางการแจ้งเหตุ</div>
-                <div class="w-full">
+                <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ช่องทางการแจ้งเหตุ</div>
+                <div class="w-full disabled-field">
                     <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isSelectButtonInvalid" />
                 </div>
                 @if (isSelectButtonInvalid) {
@@ -37,8 +37,8 @@ import { MessageModule } from 'primeng/message';
                 }
             </div>
             <div class="flex flex-col gap-1">
-                <div class="font-semibold">ประเภทของการเจ็บป่วย</div>
-                <div class="w-full">
+                <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ประเภทของการเจ็บป่วย</div>
+                <div class="w-full disabled-field">
                     <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isTraumaInvalid" />
                 </div>
                 @if (isTraumaInvalid) {
@@ -46,21 +46,26 @@ import { MessageModule } from 'primeng/message';
                 }
             </div>
             <div class="flex flex-col gap-1">
-                <div class="font-semibold">CBD</div>
-                <p-select [(ngModel)]="cbdValue" [options]="cbdValues" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isCbdInvalid" />
+                <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">CBD</div>
+                <div class="w-full disabled-field">
+                    <p-select [(ngModel)]="cbdValue" [options]="cbdValues" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isCbdInvalid" />
+                </div>
                 @if (isCbdInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือก CBD</p-message>
                 }
             </div>
             <div class="flex flex-col gap-1">
-                <div class="font-semibold">ระดับความรุนแรง</div>
-                <p-select [(ngModel)]="severityValue" [options]="severityValues" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isSeverityInvalid" />
+                <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ระดับความรุนแรง</div>
+                <div class="w-full disabled-field">
+                    <p-select [(ngModel)]="severityValue" [options]="severityValues" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isSeverityInvalid" />
+                </div>
                 @if (isSeverityInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกระดับความรุนแรง</p-message>
                 }
             </div>
         </div>
         <ng-template #footer>
+            <p-button label="รีเซ็ต" severity="secondary" (click)="resetForm()" />
             <p-button label="บันทึก" (click)="onSaveClick($event)" />
         </ng-template>
     </p-dialog>`,
@@ -238,6 +243,15 @@ export class SpeedDial implements OnInit {
                 this.formSubmitted = false;
             }
         });
+    }
+
+    resetForm() {
+        this._dropdownValue = null;
+        this.selectButtonValue = null;
+        this.traumaSelectButtonValue = null;
+        this.cbdValue = null;
+        this.severityValue = null;
+        this.formSubmitted = false;
     }
 
     close() {
