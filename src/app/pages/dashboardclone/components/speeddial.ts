@@ -5,44 +5,110 @@ import { ButtonModule } from 'primeng/button';
 import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { FormsModule } from '@angular/forms';
-import { MenuItem, MessageService } from 'primeng/api';
+import { MenuItem, MessageService, ConfirmationService } from 'primeng/api';
 import { ToastModule } from 'primeng/toast';
+import { ConfirmDialogModule } from 'primeng/confirmdialog';
+import { MessageModule } from 'primeng/message';
 
 @Component({
     standalone: true,
     selector: 'app-speed-dial',
-    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule],
+    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule],
     template: `<p-toast />
+    <p-confirmdialog />
     <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem' }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
     
     <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '28vw', '1100px': '40vw', '960px': '44vw', '500px': '80vw' }" [style]="{ width: '23vw' }" [modal]="true">
         <div class="flex flex-col gap-4">
-            <div class="font-semibold">ประเภท</div>
-            <p-select [(ngModel)]="dropdownValue" [options]="dropdownValues" optionLabel="name" placeholder="เลือกประเภท" class="w-full" appendTo="body" [showClear]="true" />
-            <div class="font-semibold">ช่องทางการแจ้งเหตุ</div>
-            <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" />
-            <div class="font-semibold">ประเภทของการเจ็บป่วย</div>
-            <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" />
-            <div class="font-semibold">CBD</div>
-            <p-select [(ngModel)]="cbdValue" [options]="cbdValues" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" />
-            <div class="font-semibold">ระดับความรุนแรง</div>
-            <p-select [(ngModel)]="severityValue" [options]="severityValues" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" />
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">ประเภท</div>
+                <p-select [(ngModel)]="dropdownValue" [options]="dropdownValues" optionLabel="name" placeholder="เลือกประเภท" class="w-full" appendTo="body" [showClear]="true" [invalid]="isDropdownInvalid" />
+                @if (isDropdownInvalid) {
+                    <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภท</p-message>
+                }
+            </div>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">ช่องทางการแจ้งเหตุ</div>
+                <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isSelectButtonInvalid" />
+                @if (isSelectButtonInvalid) {
+                    <p-message severity="error" size="small" variant="simple">โปรดเลือกช่องทางการแจ้งเหตุ</p-message>
+                }
+            </div>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">ประเภทของการเจ็บป่วย</div>
+                <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isTraumaInvalid" />
+                @if (isTraumaInvalid) {
+                    <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภทของการเจ็บป่วย</p-message>
+                }
+            </div>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">CBD</div>
+                <p-select [(ngModel)]="cbdValue" [options]="cbdValues" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isCbdInvalid" />
+                @if (isCbdInvalid) {
+                    <p-message severity="error" size="small" variant="simple">โปรดเลือก CBD</p-message>
+                }
+            </div>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">ระดับความรุนแรง</div>
+                <p-select [(ngModel)]="severityValue" [options]="severityValues" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isSeverityInvalid" />
+                @if (isSeverityInvalid) {
+                    <p-message severity="error" size="small" variant="simple">โปรดเลือกระดับความรุนแรง</p-message>
+                }
+            </div>
         </div>
         <ng-template #footer>
-            <p-button label="Save" (click)="close()" />
+            <p-button label="บันทึก" (click)="onSaveClick($event)" />
         </ng-template>
     </p-dialog>`,
-    providers: [MessageService]
+    providers: [MessageService, ConfirmationService]
 })
 export class SpeedDial implements OnInit {
     private messageService = inject(MessageService);
+    private confirmationService = inject(ConfirmationService);
     items: MenuItem[] | null = null;
-    display: boolean = false;
-    dropdownValue: any = null;
+    
+    private _display: boolean = false;
+    
+    get display(): boolean {
+        return this._display;
+    }
+    
+    set display(value: boolean) {
+        this._display = value;
+        if (value) {
+            this.formSubmitted = false;
+        } else {
+            // Reset all form values when dialog closes
+            this._dropdownValue = null;
+            this.selectButtonValue = null;
+            this.traumaSelectButtonValue = null;
+            this.cbdValue = null;
+            this.severityValue = null;
+            this.formSubmitted = false;
+        }
+    }
+    
+    private _dropdownValue: any = null;
     selectButtonValue: any = null;
     traumaSelectButtonValue: any = null;
     cbdValue: any = null;
     severityValue: any = null;
+
+    get dropdownValue(): any {
+        return this._dropdownValue;
+    }
+    
+    set dropdownValue(value: any) {
+        this._dropdownValue = value;
+        this.formSubmitted = false;  // Reset validation เมื่อเปลี่ยนประเภท
+        // เมื่อไม่ใช่ 'NY' ให้ล้างค่าทุกฟิลด์
+        if (value?.code !== 'NY') {
+            this.selectButtonValue = null;
+            this.traumaSelectButtonValue = null;
+            this.cbdValue = null;
+            this.severityValue = null;
+        }
+    }
 
     dropdownValues = [
         { name: 'แจ้งเหตุ', code: 'NY' },
@@ -51,6 +117,41 @@ export class SpeedDial implements OnInit {
         { name: 'สายหลุด', code: 'IST' },
         { name: 'ก่อกวน', code: 'PRS' }
     ];
+
+    get isFieldsDisabled(): boolean {
+        return this.dropdownValue?.code !== 'NY';
+    }
+
+    formSubmitted: boolean = false;
+
+    get isDropdownInvalid(): boolean {
+        return this.formSubmitted && !this.dropdownValue;
+    }
+
+    get isSelectButtonInvalid(): boolean {
+        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.selectButtonValue;
+    }
+
+    get isTraumaInvalid(): boolean {
+        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.traumaSelectButtonValue;
+    }
+
+    get isCbdInvalid(): boolean {
+        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.cbdValue;
+    }
+
+    get isSeverityInvalid(): boolean {
+        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.severityValue;
+    }
+
+    get isFormValid(): boolean {
+        // หากเลือก NY ให้ตรวจสอบทุกฟิลด์
+        if (this.dropdownValue?.code === 'NY') {
+            return !!(this.dropdownValue && this.selectButtonValue && this.traumaSelectButtonValue && this.cbdValue && this.severityValue);
+        }
+        // หากไม่ได้เลือก NY ให้ตรวจสอบแค่ dropdownValue
+        return !!this.dropdownValue;
+    }
 
     selectButtonValues = [
         { name: '1669' },
@@ -98,6 +199,42 @@ export class SpeedDial implements OnInit {
         { name: 'ระดับที่ 4 สีขาว เจ็บป่วยไม่ฉุกเฉิน' },
         { name: 'ระดับที่ 5 สีดำ ไม่มีการตอบสนอง / ไม่พบผู้ป่วยฉุกเฉิน' }
     ];
+
+    onSaveClick(event: Event) {
+        this.formSubmitted = true;
+        
+        if (!this.isFormValid) {
+            this.messageService.add({ severity: 'error', summary: 'ข้อมูลไม่สมบูรณ์', detail: 'โปรดกรอกข้อมูลให้ครบทุกช่อง' });
+            return;
+        }
+        
+        this.confirmSave(event);
+    }
+
+    confirmSave(event: Event) {
+        this.confirmationService.confirm({
+            target: event.target as EventTarget,
+            message: 'คุณต้องการบันทึกข้อมูลนี้หรือไม่?',
+            header: 'ยืนยันการบันทึก',
+            icon: 'pi pi-info-circle',
+            acceptLabel: 'ยืนยัน',
+            rejectLabel: 'ยกเลิก',
+            rejectButtonProps: {
+                severity: 'secondary',
+                outlined: true
+            },
+
+            accept: () => {
+                this.messageService.add({ severity: 'success', summary: 'บันทึกสำเร็จ', detail: 'ข้อมูลได้ถูกบันทึกแล้ว' });
+                this.display = false;
+                this.formSubmitted = false;
+            },
+            reject: () => {
+                this.messageService.add({ severity: 'warn', summary: 'ยกเลิก', detail: 'การบันทึกถูกยกเลิก' });
+                this.formSubmitted = false;
+            }
+        });
+    }
 
     close() {
         this.display = false;
