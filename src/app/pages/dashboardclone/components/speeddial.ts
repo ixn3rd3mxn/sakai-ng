@@ -110,7 +110,6 @@ export class SpeedDial implements OnInit {
     set dropdownValue(value: any) {
         this._dropdownValue = value;
         this.formSubmitted = false;
-
         if (value?.code !== 'NY') {
             this.selectButtonValue = null;
             this.traumaSelectButtonValue = null;
@@ -264,7 +263,6 @@ export class SpeedDial implements OnInit {
             },
             reject: () => {
                 this.messageService.add({ severity: 'warn', summary: 'ยกเลิก', detail: 'การบันทึกถูกยกเลิก' });
-                this.formSubmitted = false;
             }
         });
     }
