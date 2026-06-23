@@ -304,8 +304,8 @@ export class SpeedDial implements OnInit {
                 }
             },
             {
-                label: 'Upload',
-                icon: 'pi pi-upload',
+                label: 'ล็อคหน้าจอ',
+                icon: 'pi pi-unlock',
                 routerLink: ['/fileupload']
             },
             // {
