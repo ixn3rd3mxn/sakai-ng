@@ -308,12 +308,12 @@ export class SpeedDial implements OnInit {
                 icon: 'pi pi-upload',
                 routerLink: ['/fileupload']
             },
-            {
-                label: 'Angular.dev',
-                icon: 'pi pi-external-link',
-                target: '_blank',
-                url: 'https://angular.dev'
-            }
+            // {
+            //     label: 'Angular.dev',
+            //     icon: 'pi pi-external-link',
+            //     target: '_blank',
+            //     url: 'https://angular.dev'
+            // }
         ];
     }
 }
