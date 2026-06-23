@@ -224,27 +224,25 @@ export class SpeedDial implements OnInit {
         const parts: string[] = [];
         
         if (this.dropdownValue) {
-            parts.push(`• ประเภท : ${this.dropdownValue.name}`);
+            parts.push(`<b>ประเภท:</b><br>${this.dropdownValue.name}`);
         }
         
         if (this.dropdownValue?.code === 'NY') {
             if (this.selectButtonValue) {
-                parts.push(`• ช่องทางการแจ้งเหตุ : ${this.selectButtonValue.name}`);
+                parts.push(`<b>ช่องทางการแจ้งเหตุ:</b><br>${this.selectButtonValue.name}`);
             }
             if (this.traumaSelectButtonValue) {
-                parts.push(`• ประเภทของการเจ็บป่วย : ${this.traumaSelectButtonValue.name}`);
+                parts.push(`<b>ประเภทของการเจ็บป่วย:</b><br>${this.traumaSelectButtonValue.name}`);
             }
             if (this.cbdValue) {
-                parts.push(`• CBD : ${this.cbdValue.name}`);
+                parts.push(`<b>CBD:</b><br>${this.cbdValue.name}`);
             }
             if (this.severityValue) {
-                parts.push(`• ระดับความรุนแรง : ${this.severityValue.name}`);
+                parts.push(`<b>ระดับความรุนแรง:</b><br>${this.severityValue.name}`);
             }
         }
         
-        return parts.length > 0 
-            ? `<div style="line-height:1.8">คุณต้องการบันทึกข้อมูลต่อไปนี้หรือไม่?<br><br>${parts.join('<br>')}</div>`
-            : 'คุณต้องการบันทึกข้อมูลนี้หรือไม่?';
+        return `<div style="line-height:1.8">คุณต้องการบันทึกข้อมูลต่อไปนี้หรือไม่?<br><br>${parts.join('<br><br>')}</div>`;
     }
 
     confirmSave(event: Event) {
