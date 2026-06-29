@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, Output, EventEmitter } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -9,15 +9,27 @@ import { MenuItem, MessageService, ConfirmationService } from 'primeng/api';
 import { ToastModule } from 'primeng/toast';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { MessageModule } from 'primeng/message';
+import { DatePickerModule } from 'primeng/datepicker';
 
 @Component({
     standalone: true,
     selector: 'app-speed-dial',
-    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule],
+    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule],
     template: `<p-toast />
     <p-confirmdialog />
     <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem' }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
-    
+
+    <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
+        <div class="flex gap-4">
+            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="selectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
+            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกวัน</div><p-datepicker [(ngModel)]="selectedDate" [minDate]="minDate" [maxDate]="maxDate" [readonlyInput]="true" placeholder="เลือกวัน" class="w-full" appendTo="body" /></div>
+        </div>
+        <ng-template #footer>
+            <p-button label="ยกเลิก" severity="secondary" (click)="closeDateTimeDialog()" />
+            <p-button label="ยืนยัน" (click)="confirmDateTime()" />
+        </ng-template>
+    </p-dialog>
+
     <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '28vw', '1100px': '40vw', '960px': '44vw', '500px': '80vw' }" [style]="{ width: '23vw' }" [modal]="true">
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
@@ -75,6 +87,49 @@ export class SpeedDial implements OnInit {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
     items: MenuItem[] | null = null;
+    
+    @Output() dateTimeChanged = new EventEmitter<{isCurrent: boolean, date: Date | undefined, time: any}>();
+    
+    displayDateTime: boolean = false;
+    selectedDate: Date | undefined = new Date();
+    selectedTime: any = null;
+    minDate: Date | undefined;
+    maxDate: Date | undefined;
+    
+    private currentDate: Date = new Date();
+    private currentTimePeriod: { name: string } = this.getDefaultTimePeriod();
+    timeOptions = [
+        { name: 'เช้า' },
+        { name: 'บ่าย' },
+        { name: 'ดึก' }
+    ];
+
+    getDefaultTimePeriod(): { name: string } {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const totalMinutes = hours * 60 + minutes;
+
+        if (totalMinutes >= 0 * 60 + 30 && totalMinutes < 8 * 60 + 30) {
+            return { name: 'ดึก' };
+        } else if (totalMinutes >= 8 * 60 + 30 && totalMinutes < 16 * 60 + 30) {
+            return { name: 'เช้า' };
+        } else {
+            return { name: 'บ่าย' };
+        }
+    }
+    
+    private isSameDay(date1: Date | undefined, date2: Date): boolean {
+        if (!date1) return false;
+        return date1.getFullYear() === date2.getFullYear() &&
+               date1.getMonth() === date2.getMonth() &&
+               date1.getDate() === date2.getDate();
+    }
+    
+    private checkIsCurrentDateTime(): boolean {
+        return this.isSameDay(this.selectedDate, this.currentDate) &&
+               this.selectedTime?.name === this.currentTimePeriod?.name;
+    }
     
     private _display: boolean = false;
     
@@ -280,7 +335,47 @@ export class SpeedDial implements OnInit {
         this.display = false;
     }
 
+    openDateTimeDialog() {
+        this.displayDateTime = true;
+    }
+
+    closeDateTimeDialog() {
+        this.displayDateTime = false;
+    }
+
+    confirmDateTime() {
+        if (this.selectedDate && this.selectedTime) {
+            this.messageService.add({ 
+                severity: 'success', 
+                summary: 'สลับวันเวลา', 
+                detail: `เลือกวัน: ${this.selectedDate.toLocaleDateString('th-TH')} เวลา: ${this.selectedTime.name}` 
+            });
+            this.displayDateTime = false;
+            
+            const isCurrent = this.checkIsCurrentDateTime();
+            this.dateTimeChanged.emit({
+                isCurrent: isCurrent,
+                date: this.selectedDate,
+                time: this.selectedTime
+            });
+        } else {
+            this.messageService.add({ 
+                severity: 'error', 
+                summary: 'ข้อมูลไม่สมบูรณ์', 
+                detail: 'โปรดเลือกวันที่และเวลา' 
+            });
+        }
+    }
+
+    setupDateBoundaries() {
+        this.minDate = new Date(2026, 1, 16);
+        this.maxDate = new Date(2031, 10, 31);
+    }
+
     ngOnInit() {
+        this.setupDateBoundaries();
+        this.selectedTime = this.getDefaultTimePeriod();
+        
         this.items = [
             {
                 label: 'บันทึกข้อมูล',
@@ -293,14 +388,25 @@ export class SpeedDial implements OnInit {
                 label: 'สลับวันเวลา',
                 icon: 'pi pi-calendar-clock',
                 command: () => {
-                    this.messageService.add({ severity: 'error', summary: 'Delete', detail: 'Data Deleted' });
+                    this.openDateTimeDialog();
                 }
             },
             {
                 label: 'วันเวลาปัจจุบัน',
                 icon: 'pi pi-refresh',
                 command: () => {
-                    this.messageService.add({ severity: 'success', summary: 'Update', detail: 'Data Updated' });
+                    this.selectedDate = new Date();
+                    this.selectedTime = this.getDefaultTimePeriod();
+                    this.currentDate = new Date();
+                    this.currentTimePeriod = this.getDefaultTimePeriod();
+                    
+                    this.messageService.add({ severity: 'success', summary: 'รีเซ็ตเป็นปัจจุบัน', detail: 'กำลังดูข้อมูลปัจจุบัน' });
+                    
+                    this.dateTimeChanged.emit({
+                        isCurrent: true,
+                        date: this.selectedDate,
+                        time: this.selectedTime
+                    });
                 }
             },
             {
