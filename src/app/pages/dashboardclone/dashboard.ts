@@ -12,7 +12,7 @@ import { DateTimeWarningBanner } from './components/datetime-warning-banner';
     selector: 'app-dashboardclone',
     imports: [StatsWidget, RecentSalesWidget, BestSellingWidget, RevenueStreamWidget, NotificationsWidget, ScrollTopModule, SpeedDial, DateTimeWarningBanner],
     template: `
-        <app-datetime-warning-banner [visible]="showDateTimeWarning" (visibleChange)="showDateTimeWarning = $event" />
+        <app-datetime-warning-banner [visible]="showDateTimeWarning" [selectedDate]="selectedDate" [selectedTime]="selectedTime" (visibleChange)="showDateTimeWarning = $event" />
         <div class="grid grid-cols-12 gap-1">
             <app-stats-widget class="contents" />
             <div class="col-span-12 xl:col-span-6">
@@ -36,8 +36,12 @@ import { DateTimeWarningBanner } from './components/datetime-warning-banner';
 })
 export class DashboardCloneComponent {
     showDateTimeWarning: boolean = false;
+    selectedDate: Date | undefined;
+    selectedTime: any;
 
     onDateTimeChanged(event: { isCurrent: boolean, date: Date | undefined, time: any }) {
         this.showDateTimeWarning = !event.isCurrent;
+        this.selectedDate = event.date;
+        this.selectedTime = event.time;
     }
 }
