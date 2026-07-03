@@ -21,11 +21,11 @@ import { DatePickerModule } from 'primeng/datepicker';
 
     <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
         <div class="flex gap-4">
-            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="selectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
-            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกวัน</div><p-datepicker [(ngModel)]="selectedDate" [minDate]="minDate" [maxDate]="maxDate" [readonlyInput]="true" placeholder="เลือกวัน" class="w-full" appendTo="body" /></div>
+            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="tempSelectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
+            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกวัน</div><p-datepicker [(ngModel)]="tempSelectedDate" [minDate]="minDate" [maxDate]="maxDate" [readonlyInput]="true" placeholder="เลือกวัน" class="w-full" appendTo="body" /></div>
         </div>
         <ng-template #footer>
-            <p-button label="ยกเลิก" severity="secondary" (click)="closeDateTimeDialog()" />
+            <p-button label="รีเซ็ต" severity="secondary" (click)="resetDateTime()" />
             <p-button label="ยืนยัน" (click)="confirmDateTime()" />
         </ng-template>
     </p-dialog>
@@ -93,6 +93,8 @@ export class SpeedDial implements OnInit {
     displayDateTime: boolean = false;
     selectedDate: Date | undefined = new Date();
     selectedTime: any = null;
+    tempSelectedDate: Date | undefined;
+    tempSelectedTime: any;
     minDate: Date | undefined;
     maxDate: Date | undefined;
     
@@ -336,6 +338,8 @@ export class SpeedDial implements OnInit {
     }
 
     openDateTimeDialog() {
+        this.tempSelectedDate = this.selectedDate;
+        this.tempSelectedTime = this.selectedTime;
         this.displayDateTime = true;
     }
 
@@ -343,8 +347,16 @@ export class SpeedDial implements OnInit {
         this.displayDateTime = false;
     }
 
+    resetDateTime() {
+        this.tempSelectedDate = new Date();
+        this.tempSelectedTime = this.getDefaultTimePeriod();
+    }
+
     confirmDateTime() {
-        if (this.selectedDate && this.selectedTime) {
+        if (this.tempSelectedDate && this.tempSelectedTime) {
+            this.selectedDate = this.tempSelectedDate;
+            this.selectedTime = this.tempSelectedTime;
+            
             this.messageService.add({ 
                 severity: 'success', 
                 summary: 'สลับวันเวลา', 
@@ -409,11 +421,11 @@ export class SpeedDial implements OnInit {
                     });
                 }
             },
-            {
-                label: 'ล็อคหน้าจอ',
-                icon: 'pi pi-unlock',
-                routerLink: ['/fileupload']
-            },
+            // {
+            //     label: 'ล็อคหน้าจอ',
+            //     icon: 'pi pi-unlock',
+            //     routerLink: ['/fileupload']
+            // },
             // {
             //     label: 'Angular.dev',
             //     icon: 'pi pi-external-link',

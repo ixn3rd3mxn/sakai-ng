@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { MenuItem } from 'primeng/api';
 import { RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -26,6 +26,9 @@ import { LayoutService } from '@/app/layout/service/layout.service';
             <div class="layout-config-menu">
                 <button type="button" class="layout-topbar-action" (click)="toggleDarkMode()">
                     <i [ngClass]="{ 'pi ': true, 'pi-moon': layoutService.isDarkTheme(), 'pi-sun': !layoutService.isDarkTheme() }"></i>
+                </button>
+                <button type="button" class="layout-topbar-action" (click)="toggleFullscreen()">
+                    <i [ngClass]="{ 'pi ': true, 'pi-window-maximize': !isFullscreen(), 'pi-window-minimize': isFullscreen() }"></i>
                 </button>
                 <div class="relative">
                     <button
@@ -71,10 +74,27 @@ export class AppTopbar {
 
     layoutService = inject(LayoutService);
 
+    isFullscreen = signal(false);
+
+    constructor() {
+        this.isFullscreen.set(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', () => {
+            this.isFullscreen.set(!!document.fullscreenElement);
+        });
+    }
+
     toggleDarkMode() {
         this.layoutService.layoutConfig.update((state) => ({
             ...state,
             darkTheme: !state.darkTheme
         }));
+    }
+
+    toggleFullscreen() {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            document.documentElement.requestFullscreen();
+        }
     }
 }
