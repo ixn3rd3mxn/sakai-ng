@@ -30,6 +30,17 @@ import { DatePickerModule } from 'primeng/datepicker';
         </ng-template>
     </p-dialog>
 
+    <p-dialog header="ไม่สามารถบันทึกข้อมูลได้" [(visible)]="displaySaveWarning" [breakpoints]="{ '1400px': '28vw', '1100px': '40vw', '960px': '44vw', '500px': '80vw' }" [style]="{ width: '23vw' }" [modal]="true">
+        <div class="flex flex-col gap-4">
+            <div>การบันทึกข้อมูลสามารถทำได้เฉพาะเวรและวันที่ปัจจุบันเท่านั้น</div>
+            <div>หากต้องการบันทึกข้อมูล กรุณารีเซ็ตกลับเป็นวันเวลาปัจจุบัน</div>
+        </div>
+        <ng-template #footer>
+            <p-button label="รีเซ็ตเป็นปัจจุบัน" severity="secondary" (click)="resetAndOpenSaveDialog()" />
+            <p-button label="ตกลง" (click)="displaySaveWarning = false" />
+        </ng-template>
+    </p-dialog>
+
     <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '28vw', '1100px': '40vw', '960px': '44vw', '500px': '80vw' }" [style]="{ width: '23vw' }" [modal]="true">
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
@@ -91,6 +102,7 @@ export class SpeedDial implements OnInit {
     @Output() dateTimeChanged = new EventEmitter<{isCurrent: boolean, date: Date | undefined, time: any}>();
     
     displayDateTime: boolean = false;
+    displaySaveWarning: boolean = false;
     selectedDate: Date | undefined = new Date();
     selectedTime: any = null;
     tempSelectedDate: Date | undefined;
@@ -337,6 +349,30 @@ export class SpeedDial implements OnInit {
         this.display = false;
     }
 
+    openSaveDialog() {
+        if (this.checkIsCurrentDateTime()) {
+            this.display = true;
+        } else {
+            this.displaySaveWarning = true;
+        }
+    }
+
+    resetAndOpenSaveDialog() {
+        this.selectedDate = new Date();
+        this.selectedTime = this.getDefaultTimePeriod();
+        this.currentDate = new Date();
+        this.currentTimePeriod = this.getDefaultTimePeriod();
+        
+        this.displaySaveWarning = false;
+        this.display = true;
+        
+        this.dateTimeChanged.emit({
+            isCurrent: true,
+            date: this.selectedDate,
+            time: this.selectedTime
+        });
+    }
+
     openDateTimeDialog() {
         this.tempSelectedDate = this.selectedDate;
         this.tempSelectedTime = this.selectedTime;
@@ -393,7 +429,7 @@ export class SpeedDial implements OnInit {
                 label: 'บันทึกข้อมูล',
                 icon: 'pi pi-pencil',
                 command: () => {
-                    this.display = true;
+                    this.openSaveDialog();
                 }
             },
             {
