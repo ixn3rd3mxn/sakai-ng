@@ -5,7 +5,6 @@ import { Documentation } from './app/pages/documentation/documentation';
 import { Landing } from './app/pages/landing/landing';
 import { Notfound } from './app/pages/notfound/notfound';
 import { HomeComponent } from './app/pages/home/dashboard';
-import { DashboardCloneComponent } from './app/pages/dashboardclone/dashboard';
 
 export const appRoutes: Routes = [
     {
@@ -14,8 +13,8 @@ export const appRoutes: Routes = [
         children: [
             { path: '', component: Dashboard },
             { path: 'home', component: HomeComponent },
-            { path: 'dashboardclone', component: DashboardCloneComponent },
             { path: 'uikit', loadChildren: () => import('./app/pages/uikit/uikit.routes') },
+            { path: 'report', loadChildren: () => import('./app/pages/report.routes') },
             { path: 'documentation', component: Documentation },
             { path: 'pages', loadChildren: () => import('./app/pages/pages.routes') }
         ]

@@ -30,8 +30,8 @@ export class AppMenu {
             {
                 label: 'Report',
                 items: [
-                    { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/dashboardclone'] },
-                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/'] },
+                    { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/report/dashboard'] },
+                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/report/summary'] },
                     { label: 'จัดการข้อมูล', icon: 'pi pi-fw pi-wrench', routerLink: ['/'] }
                 ]
             },
