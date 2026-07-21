@@ -24,6 +24,13 @@ interface expandedRows {
     [key: string]: boolean;
 }
 
+interface TableData {
+    name: string;
+    daily: number;
+    weekly: number;
+    monthly: number;
+}
+
 @Component({
     selector: 'app-table-demo_clone',
     standalone: true,
@@ -45,48 +52,36 @@ interface expandedRows {
         RippleModule,
         IconFieldModule
     ],
-    template: ` <div class="card">
-            <div class="font-semibold text-xl mb-4">Filtering</div>
+    template: `        <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">ประวัติการบันทึกประจำวัน</div>
             <p-table
                 #dt1
                 [value]="customers1"
+                stripedRows
                 dataKey="id"
                 [rows]="10"
                 [loading]="loading"
                 [rowHover]="true"
-                [showGridlines]="true"
                 [paginator]="true"
                 [globalFilterFields]="['name', 'country.name', 'representative.name', 'status']"
                 responsiveLayout="scroll"
             >
                 <ng-template #caption>
                     <div class="flex justify-between items-center flex-column sm:flex-row">
-                        <button pButton label="Clear" class="p-button-outlined mb-2" icon="pi pi-filter-slash" (click)="clear(dt1)"></button>
-                        <p-iconfield iconPosition="left" class="ml-auto">
-                            <p-inputicon>
-                                <i class="pi pi-search"></i>
-                            </p-inputicon>
-                            <input pInputText type="text" (input)="onGlobalFilter(dt1, $event)" placeholder="Search keyword" />
-                        </p-iconfield>
+                        <button pButton label="Clear" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(dt1)"></button>
                     </div>
                 </ng-template>
                 <ng-template #header>
                     <tr>
                         <th style="min-width: 12rem">
                             <div class="flex justify-between items-center">
-                                Name
-                                <p-columnFilter type="text" field="name" display="menu" placeholder="Search by name"></p-columnFilter>
+                                เวลา
+                                <p-columnFilter type="date" field="date" display="menu" placeholder="mm/dd/yyyy"></p-columnFilter>
                             </div>
                         </th>
                         <th style="min-width: 12rem">
                             <div class="flex justify-between items-center">
-                                Country
-                                <p-columnFilter type="text" field="country.name" display="menu" placeholder="Search by country"></p-columnFilter>
-                            </div>
-                        </th>
-                        <th style="min-width: 14rem">
-                            <div class="flex justify-between items-center">
-                                Agent
+                                ประเภท
                                 <p-columnFilter field="representative" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
                                     <ng-template #header>
                                         <div class="px-3 pt-3 pb-0">
@@ -97,7 +92,48 @@ interface expandedRows {
                                         <p-multiselect [ngModel]="value" [options]="representatives" placeholder="Any" (onChange)="filter($event.value)" optionLabel="name" styleClass="w-full">
                                             <ng-template let-option #item>
                                                 <div class="flex items-center gap-2 w-44">
-                                                    <img [alt]="option.label" src="https://primefaces.org/cdn/primeng/images/demo/avatar/{{ option.image }}" width="32" />
+                                                    <span>{{ option.name }}</span>
+                                                </div>
+                                            </ng-template>
+                                        </p-multiselect>
+                                    </ng-template>
+                                </p-columnFilter>
+                            </div>
+                        </th>
+                        <th style="min-width: 13rem">
+                            <div class="flex justify-between items-center">
+                                ช่องทางการแจ้งเหตุ
+                                <p-columnFilter field="representative" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
+                                    <ng-template #header>
+                                        <div class="px-3 pt-3 pb-0">
+                                            <span class="font-bold">Agent Picker</span>
+                                        </div>
+                                    </ng-template>
+                                    <ng-template #filter let-value let-filter="filterCallback">
+                                        <p-multiselect [ngModel]="value" [options]="representatives" placeholder="Any" (onChange)="filter($event.value)" optionLabel="name" styleClass="w-full">
+                                            <ng-template let-option #item>
+                                                <div class="flex items-center gap-2 w-44">
+                                                    <span>{{ option.name }}</span>
+                                                </div>
+                                            </ng-template>
+                                        </p-multiselect>
+                                    </ng-template>
+                                </p-columnFilter>
+                            </div>
+                        </th>
+                        <th style="min-width: 15rem">
+                            <div class="flex justify-between items-center">
+                                ประเภทของการเจ็บป่วย
+                                <p-columnFilter field="representative" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
+                                    <ng-template #header>
+                                        <div class="px-3 pt-3 pb-0">
+                                            <span class="font-bold">Agent Picker</span>
+                                        </div>
+                                    </ng-template>
+                                    <ng-template #filter let-value let-filter="filterCallback">
+                                        <p-multiselect [ngModel]="value" [options]="representatives" placeholder="Any" (onChange)="filter($event.value)" optionLabel="name" styleClass="w-full">
+                                            <ng-template let-option #item>
+                                                <div class="flex items-center gap-2 w-44">
                                                     <span>{{ option.name }}</span>
                                                 </div>
                                             </ng-template>
@@ -108,19 +144,28 @@ interface expandedRows {
                         </th>
                         <th style="min-width: 10rem">
                             <div class="flex justify-between items-center">
-                                Date
-                                <p-columnFilter type="date" field="date" display="menu" placeholder="mm/dd/yyyy"></p-columnFilter>
-                            </div>
-                        </th>
-                        <th style="min-width: 10rem">
-                            <div class="flex justify-between items-center">
-                                Balance
-                                <p-columnFilter type="numeric" field="balance" display="menu" currency="USD"></p-columnFilter>
+                                CBD 25
+                                <p-columnFilter field="representative" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
+                                    <ng-template #header>
+                                        <div class="px-3 pt-3 pb-0">
+                                            <span class="font-bold">Agent Picker</span>
+                                        </div>
+                                    </ng-template>
+                                    <ng-template #filter let-value let-filter="filterCallback">
+                                        <p-multiselect [ngModel]="value" [options]="representatives" placeholder="Any" (onChange)="filter($event.value)" optionLabel="name" styleClass="w-full">
+                                            <ng-template let-option #item>
+                                                <div class="flex items-center gap-2 w-44">
+                                                    <span>{{ option.name }}</span>
+                                                </div>
+                                            </ng-template>
+                                        </p-multiselect>
+                                    </ng-template>
+                                </p-columnFilter>
                             </div>
                         </th>
                         <th style="min-width: 12rem">
                             <div class="flex justify-between items-center">
-                                Status
+                                ระดับความรุนแรง
                                 <p-columnFilter field="status" matchMode="equals" display="menu">
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-select [ngModel]="value" [options]="statuses" (onChange)="filter($event.value)" placeholder="Any" [style]="{ 'min-width': '12rem' }">
@@ -132,58 +177,34 @@ interface expandedRows {
                                 </p-columnFilter>
                             </div>
                         </th>
-                        <th style="min-width: 12rem">
-                            <div class="flex justify-between items-center">
-                                Activity
-                                <p-columnFilter field="activity" matchMode="between" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
-                                    <ng-template #filter let-filter="filterCallback">
-                                        <p-slider [ngModel]="activityValues" [range]="true" (onSlideEnd)="filter($event.values)" styleClass="m-3" [style]="{ 'min-width': '12rem' }"></p-slider>
-                                        <div class="flex items-center justify-between px-2">
-                                            <span>{{ activityValues[0] }}</span>
-                                            <span>{{ activityValues[1] }}</span>
-                                        </div>
-                                    </ng-template>
-                                </p-columnFilter>
-                            </div>
-                        </th>
-                        <th style="min-width: 8rem">
-                            <div class="flex justify-between items-center">
-                                Verified
-                                <p-columnFilter type="boolean" field="verified" display="menu"></p-columnFilter>
-                            </div>
-                        </th>
                     </tr>
                 </ng-template>
                 <ng-template #body let-customer>
                     <tr>
                         <td>
-                            {{ customer.name }}
+                            {{ customer.date | date: 'MM/dd/yyyy' }}
                         </td>
                         <td>
                             <div class="flex items-center gap-2">
-                                <img src="https://primefaces.org/cdn/primeng/images/demo/flag/flag_placeholder.png" [class]="'flag flag-' + customer.country.code" width="30" />
-                                <span>{{ customer.country.name }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="flex items-center gap-2">
-                                <img [alt]="customer.representative.name" src="https://primefaces.org/cdn/primeng/images/demo/avatar/{{ customer.representative.image }}" width="32" style="vertical-align: middle" />
                                 <span class="image-text">{{ customer.representative.name }}</span>
                             </div>
                         </td>
                         <td>
-                            {{ customer.date | date: 'MM/dd/yyyy' }}
+                            <div class="flex items-center gap-2">
+                                <span class="image-text">{{ customer.representative.name }}</span>
+                            </div>
                         </td>
                         <td>
-                            {{ customer.balance | currency: 'USD' : 'symbol' }}
+                            <div class="flex items-center gap-2">
+                                <span class="image-text">{{ customer.representative.name }}</span>
+                            </div>
                         </td>
                         <td>
-                            <p-tag [value]="customer.status.toLowerCase()" [severity]="getSeverity(customer.status.toLowerCase())" styleClass="dark:bg-surface-900!" />
+                            <div class="flex items-center gap-2">
+                                <span class="image-text">{{ customer.representative.name }}</span>
+                            </div>
                         </td>
                         <td>
-                            <p-progressbar [value]="customer.activity" [showValue]="false" [style]="{ height: '0.5rem' }" />
-                        </td>
-                        <td class="text-center">
                             <p-tag [value]="customer.status.toLowerCase()" [severity]="getSeverity(customer.status.toLowerCase())" styleClass="dark:bg-surface-900!" />
                         </td>
                     </tr>
@@ -200,181 +221,112 @@ interface expandedRows {
                 </ng-template>
             </p-table>
         </div>
-
-        <div class="card">
-            <div class="font-semibold text-xl mb-4">Frozen Columns</div>
-            <p-togglebutton [(ngModel)]="balanceFrozen" [onIcon]="'pi pi-lock'" offIcon="pi pi-lock-open" [onLabel]="'Balance'" offLabel="Balance" />
-
-            <p-table [value]="customers2" [scrollable]="true" scrollHeight="400px" styleClass="mt-4">
+    
+    <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">ประเภท</div>
+            <p-table [value]="categoryTypes" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
                 <ng-template #header>
                     <tr>
-                        <th style="min-width:200px" pFrozenColumn class="font-bold">Name</th>
-                        <th style="min-width:100px">Id</th>
-                        <th style="min-width:200px">Country</th>
-                        <th style="min-width:200px">Date</th>
-                        <th style="min-width:200px">Company</th>
-                        <th style="min-width:200px">Status</th>
-                        <th style="min-width:200px">Activity</th>
-                        <th style="min-width:200px">Representative</th>
-                        <th style="min-width:200px" alignFrozen="right" pFrozenColumn [frozen]="balanceFrozen" [ngClass]="{ 'font-bold': balanceFrozen }">Balance</th>
+                        <th style="min-width:356px">ชื่อ</th>
+                        <th style="min-width:100px">ต่อวัน</th>
+                        <th style="min-width:100px">ต่อสัปดาห์</th>
+                        <th style="min-width:100px">ต่อเดือน</th>
                     </tr>
                 </ng-template>
-                <ng-template #body let-customer>
+                <ng-template #body let-item>
                     <tr>
-                        <td pFrozenColumn class="font-bold">{{ customer.name }}</td>
-                        <td style="min-width:100px">{{ customer.id }}</td>
-                        <td>{{ customer.country.name }}</td>
-                        <td>{{ customer.date }}</td>
-                        <td>{{ customer.company }}</td>
-                        <td>{{ customer.status }}</td>
-                        <td>{{ customer.activity }}</td>
-                        <td>{{ customer.representative.name }}</td>
-                        <td alignFrozen="right" pFrozenColumn [frozen]="balanceFrozen" [ngClass]="{ 'font-bold': balanceFrozen }">
-                            {{ formatCurrency(customer.balance) }}
-                        </td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.daily }}</td>
+                        <td>{{ item.weekly }}</td>
+                        <td>{{ item.monthly }}</td>
                     </tr>
                 </ng-template>
             </p-table>
         </div>
 
-        <div class="card">
-            <div class="font-semibold text-xl mb-4">Row Expansion</div>
-            <p-table [value]="products" dataKey="id" [tableStyle]="{ 'min-width': '60rem' }" [expandedRowKeys]="expandedRows">
-                <ng-template #caption>
-                    <button pButton icon="pi pi-fw {{ isExpanded ? 'pi-minus' : 'pi-plus' }}" label="{{ isExpanded ? 'Collapse All' : 'Expand All' }}" (click)="expandAll()"></button>
-                    <div class="flex table-header"></div>
-                </ng-template>
+    <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">ช่องทางการแจ้งเหตุ</div>
+            <p-table [value]="notificationChannels" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
                 <ng-template #header>
                     <tr>
-                        <th style="width: 5rem"></th>
-                        <th pSortableColumn="name">Name <p-sortIcon field="name" /></th>
-                        <th>Image</th>
-                        <th pSortableColumn="price">Price <p-sortIcon field="price" /></th>
-                        <th pSortableColumn="category">Category <p-sortIcon field="category" /></th>
-                        <th pSortableColumn="rating">Reviews <p-sortIcon field="rating" /></th>
-                        <th pSortableColumn="inventoryStatus">Status <p-sortIcon field="inventoryStatus" /></th>
+                        <th style="min-width:356px">ชื่อ</th>
+                        <th style="min-width:100px">ต่อวัน</th>
+                        <th style="min-width:100px">ต่อสัปดาห์</th>
+                        <th style="min-width:100px">ต่อเดือน</th>
                     </tr>
                 </ng-template>
-                <ng-template #body let-product let-expanded="expanded">
+                <ng-template #body let-item>
                     <tr>
-                        <td>
-                            <p-button type="button" pRipple [pRowToggler]="product" [text]="true" [rounded]="true" [plain]="true" [icon]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
-                        </td>
-                        <td>{{ product.name }}</td>
-                        <td>
-                            <img [src]="'https://primefaces.org/cdn/primeng/images/demo/product/' + product.image" [alt]="product.name" width="50" class="shadow-lg" />
-                        </td>
-                        <td>{{ product.price | currency: 'USD' }}</td>
-                        <td>{{ product.category }}</td>
-                        <td>
-                            <p-rating [ngModel]="product.rating" [readonly]="true" />
-                        </td>
-                        <td>
-                            <p-tag [value]="product.inventoryStatus" [severity]="getSeverity(product.inventoryStatus)" />
-                        </td>
-                    </tr>
-                </ng-template>
-                <ng-template #expandedrow let-product>
-                    <tr>
-                        <td colspan="7">
-                            <div class="p-4">
-                                <h5>Orders for {{ product.name }}</h5>
-                                <p-table [value]="product.orders" dataKey="id">
-                                    <ng-template #header>
-                                        <tr>
-                                            <th pSortableColumn="id">Id <p-sortIcon field="price" /></th>
-                                            <th pSortableColumn="customer">
-                                                Customer
-                                                <p-sortIcon field="customer" />
-                                            </th>
-                                            <th pSortableColumn="date">Date <p-sortIcon field="date" /></th>
-                                            <th pSortableColumn="amount">
-                                                Amount
-                                                <p-sortIcon field="amount" />
-                                            </th>
-                                            <th pSortableColumn="status">
-                                                Status
-                                                <p-sortIcon field="status" />
-                                            </th>
-                                            <th style="width: 4rem"></th>
-                                        </tr>
-                                    </ng-template>
-                                    <ng-template #body let-order>
-                                        <tr>
-                                            <td>{{ order.id }}</td>
-                                            <td>{{ order.customer }}</td>
-                                            <td>{{ order.date }}</td>
-                                            <td>
-                                                {{ order.amount | currency: 'USD' }}
-                                            </td>
-                                            <td>
-                                                <p-tag [value]="order.status" [severity]="getSeverity(order.status)" />
-                                            </td>
-                                            <td>
-                                                <p-button type="button" icon="pi pi-search" />
-                                            </td>
-                                        </tr>
-                                    </ng-template>
-                                    <ng-template #emptymessage>
-                                        <tr>
-                                            <td colspan="6">There are no order for this product yet.</td>
-                                        </tr>
-                                    </ng-template>
-                                </p-table>
-                            </div>
-                        </td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.daily }}</td>
+                        <td>{{ item.weekly }}</td>
+                        <td>{{ item.monthly }}</td>
                     </tr>
                 </ng-template>
             </p-table>
         </div>
 
-        <div class="card">
-            <div class="font-semibold text-xl mb-4">Grouping</div>
-            <p-table [value]="customers3" sortField="representative.name" sortMode="single" [scrollable]="true" scrollHeight="400px" rowGroupMode="subheader" groupRowsBy="representative.name" [tableStyle]="{ 'min-width': '60rem' }">
+    <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">ประเภทของการเจ็บป่วย</div>
+            <p-table [value]="injuryTypes" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
                 <ng-template #header>
                     <tr>
-                        <th>Name</th>
-                        <th>Country</th>
-                        <th>Company</th>
-                        <th>Status</th>
-                        <th>Date</th>
+                        <th style="min-width:356px">ชื่อ</th>
+                        <th style="min-width:100px">ต่อวัน</th>
+                        <th style="min-width:100px">ต่อสัปดาห์</th>
+                        <th style="min-width:100px">ต่อเดือน</th>
                     </tr>
                 </ng-template>
-                <ng-template #groupheader let-customer>
-                    <tr pRowGroupHeader>
-                        <td colspan="5">
-                            <div class="flex items-center gap-2">
-                                <img [alt]="customer.representative.name" src="https://primefaces.org/cdn/primeng/images/demo/avatar/{{ customer.representative.image }}" width="32" style="vertical-align: middle" />
-                                <span class="font-bold">{{ customer.representative.name }}</span>
-                            </div>
-                        </td>
-                    </tr>
-                </ng-template>
-                <ng-template #groupfooter let-customer>
+                <ng-template #body let-item>
                     <tr>
-                        <td colspan="5" class="text-right font-bold pr-12">Total Customers: {{ calculateCustomerTotal(customer.representative.name) }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.daily }}</td>
+                        <td>{{ item.weekly }}</td>
+                        <td>{{ item.monthly }}</td>
                     </tr>
                 </ng-template>
-                <ng-template #body let-customer let-rowIndex="rowIndex">
+            </p-table>
+        </div>
+
+    <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">CBD 25</div>
+            <p-table [value]="cbd25" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
+                <ng-template #header>
                     <tr>
-                        <td>
-                            {{ customer.name }}
-                        </td>
-                        <td>
-                            <div class="flex items-center gap-2">
-                                <img src="https://primefaces.org/cdn/primeng/images/demo/flag/flag_placeholder.png" [class]="'flag flag-' + customer.country.code" style="width: 20px" />
-                                <span>{{ customer.country.name }}</span>
-                            </div>
-                        </td>
-                        <td>
-                            {{ customer.company }}
-                        </td>
-                        <td>
-                            <p-tag [value]="customer.status" [severity]="getSeverity(customer.status)" />
-                        </td>
-                        <td>
-                            {{ customer.date }}
-                        </td>
+                        <th style="min-width:356px">ชื่อ</th>
+                        <th style="min-width:100px">ต่อวัน</th>
+                        <th style="min-width:100px">ต่อสัปดาห์</th>
+                        <th style="min-width:100px">ต่อเดือน</th>
+                    </tr>
+                </ng-template>
+                <ng-template #body let-item>
+                    <tr>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.daily }}</td>
+                        <td>{{ item.weekly }}</td>
+                        <td>{{ item.monthly }}</td>
+                    </tr>
+                </ng-template>
+            </p-table>
+        </div>
+
+    <div class="card" style="margin-bottom: 0.25rem">
+            <div class="font-semibold text-xl mb-4">ระดับความรุนแรง</div>
+            <p-table [value]="severityLevels" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+                <ng-template #header>
+                    <tr>
+                        <th style="min-width:356px">ชื่อ</th>
+                        <th style="min-width:100px">ต่อวัน</th>
+                        <th style="min-width:100px">ต่อสัปดาห์</th>
+                        <th style="min-width:100px">ต่อเดือน</th>
+                    </tr>
+                </ng-template>
+                <ng-template #body let-item>
+                    <tr>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.daily }}</td>
+                        <td>{{ item.weekly }}</td>
+                        <td>{{ item.monthly }}</td>
                     </tr>
                 </ng-template>
             </p-table>
@@ -396,6 +348,63 @@ export class TableDemoClone implements OnInit {
     customers2: Customer[] = [];
 
     customers3: Customer[] = [];
+
+    // Mock data for each table
+    categoryTypes: TableData[] = [
+        { name: 'ผลรวมทั้งหมด', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'แจ้งเหตุ', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'แจ้งซ้ำเหตุเดิม', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ปรึกษา', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'สายหลุด', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ก่อกวน', daily: 111, weekly: 222, monthly: 333 }
+    ];
+
+    notificationChannels: TableData[] = [
+        { name: '1669', daily: 111, weekly: 222, monthly: 333 },
+        { name: '2nd', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'วิทยุ', daily: 111, weekly: 222, monthly: 333 }
+    ];
+
+    injuryTypes: TableData[] = [
+        { name: 'Trauma', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'Non-Trauma', daily: 111, weekly: 222, monthly: 333 }
+    ];
+
+    cbd25: TableData[] = [
+        { name: 'CBD1 ปวดท้อง หลัง เชิงกราน', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD2 อาการภูมิแพ้ อนาไฟแลกซิส', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD3 สัตว์กัด', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD4 เลือดออก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD5 หายใจลำบาก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD6 หัวใจหยุดเต้น', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD7 เจ็บแน่นหน้าอก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD8 อุดกั้นทางเดินหายใจ / สำลัก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD9 เบาหวาน', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD10 ภยันตรายจากสภาพแวดล้อม', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD11 ไม่มีข้อมูล', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD12 ปวดศีรษะ ลำคอ', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD13 คลุ้มคลั่ง จิตประสาท', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD14 สารพิษ ยาเกินขนาด', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD15 คลอด นรีเวช', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD16 ชัก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD17 อ่อนเพลีย', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD18 แขนขาอ่อนแรง พูดลำบาก ปากเบี้ยว', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD19 หมดสติ วูบ เป็นลม', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD20 เด็ก ทารก', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD21 ถูกทำร้าย / บาดเจ็บ', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD22 ไฟไหม้ / อุบัติเหตุจากการลวก / ไฟช็อต', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD23 ตกน้ำ / จมน้ำ / บาดเจ็บเหตุดำน้ำ / บาดเจ็บทางน้ำ', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD24 พลัดตก หกล้ม', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'CBD25 อุบัติเหตุจราจร', daily: 111, weekly: 222, monthly: 333 }
+    ];
+
+    severityLevels: TableData[] = [
+        { name: 'ระดับที่ 1 สีแดง ฉุกเฉินวิกฤติ', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ระดับที่ 2 สีเหลือง ฉุกเฉินเร่งด่วน', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ระดับที่ 3 สีเขียว ฉุกเฉินไม่เร่งด่วน', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ระดับที่ 4 สีขาว เจ็บป่วยไม่ฉุกเฉิน', daily: 111, weekly: 222, monthly: 333 },
+        { name: 'ระดับที่ 5 สีดำ ไม่มีการตอบสนอง / ไม่พบผู้ป่วยฉุกเฉิน', daily: 111, weekly: 222, monthly: 333 }
+    ];
 
     selectedCustomers1: Customer[] = [];
 
