@@ -345,10 +345,6 @@ interface TableData {
 export class TableDemoClone implements OnInit {
     customers1: Customer[] = [];
 
-    customers2: Customer[] = [];
-
-    customers3: Customer[] = [];
-
     // Mock data for each table
     categoryTypes: TableData[] = [
         { name: 'ผลรวมทั้งหมด', daily: 111, weekly: 222, monthly: 333 },
@@ -414,17 +410,9 @@ export class TableDemoClone implements OnInit {
 
     statuses: any[] = [];
 
-    products: Product[] = [];
-
     rowGroupMetadata: any;
 
-    expandedRows: expandedRows = {};
-
     activityValues: number[] = [0, 100];
-
-    isExpanded: boolean = false;
-
-    balanceFrozen: boolean = false;
 
     loading: boolean = true;
 
@@ -432,7 +420,6 @@ export class TableDemoClone implements OnInit {
 
     constructor(
         private customerService: CustomerService,
-        private productService: ProductService
     ) {}
 
     ngOnInit() {
@@ -443,9 +430,6 @@ export class TableDemoClone implements OnInit {
             // @ts-ignore
             this.customers1.forEach((customer) => (customer.date = new Date(customer.date)));
         });
-        this.customerService.getCustomersMedium().then((customers) => (this.customers2 = customers));
-        this.customerService.getCustomersLarge().then((customers) => (this.customers3 = customers));
-        this.productService.getProductsWithOrdersSmall().then((data) => (this.products = data));
 
         this.representatives = [
             { name: 'Amy Elsner', image: 'amyelsner.png' },
@@ -457,7 +441,7 @@ export class TableDemoClone implements OnInit {
             { name: 'Ivan Magalhaes', image: 'ivanmagalhaes.png' },
             { name: 'Onyama Limba', image: 'onyamalimba.png' },
             { name: 'Stephen Shaw', image: 'stephenshaw.png' },
-            { name: 'XuXue Feng', image: 'xuxuefeng.png' }
+            { name: 'Xuxue Feng', image: 'xuxuefeng.png' }
         ];
 
         this.statuses = [
@@ -466,7 +450,6 @@ export class TableDemoClone implements OnInit {
             { label: 'New', value: 'new' },
             { label: 'Negotiation', value: 'negotiation' },
             { label: 'Renewal', value: 'renewal' },
-            { label: 'Proposal', value: 'proposal' }
         ];
     }
 
@@ -476,52 +459,6 @@ export class TableDemoClone implements OnInit {
 
     updateRowGroupMetaData() {
         this.rowGroupMetadata = {};
-
-        if (this.customers3) {
-            for (let i = 0; i < this.customers3.length; i++) {
-                const rowData = this.customers3[i];
-                const representativeName = rowData?.representative?.name || '';
-
-                if (i === 0) {
-                    this.rowGroupMetadata[representativeName] = { index: 0, size: 1 };
-                } else {
-                    const previousRowData = this.customers3[i - 1];
-                    const previousRowGroup = previousRowData?.representative?.name;
-                    if (representativeName === previousRowGroup) {
-                        this.rowGroupMetadata[representativeName].size++;
-                    } else {
-                        this.rowGroupMetadata[representativeName] = { index: i, size: 1 };
-                    }
-                }
-            }
-        }
-    }
-
-    expandAll() {
-        if(ObjectUtils.isEmpty(this.expandedRows)) {
-            this.expandedRows = this.products.reduce(
-                (acc, p) => {
-                    if (p.id) {
-                        acc[p.id] = true;
-                    }
-                    return acc;
-                },
-                {} as { [key: string]: boolean }
-            );
-            this.isExpanded = true;
-        } else {
-            this.collapseAll()
-        }
-
-    }
-
-    collapseAll() {
-        this.expandedRows = {};
-        this.isExpanded = false;
-    }
-
-    formatCurrency(value: number) {
-        return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
     }
 
     onGlobalFilter(table: Table, event: Event) {
@@ -536,42 +473,16 @@ export class TableDemoClone implements OnInit {
     getSeverity(status: string) {
         switch (status) {
             case 'qualified':
-            case 'instock':
-            case 'INSTOCK':
-            case 'DELIVERED':
-            case 'delivered':
                 return 'success';
 
             case 'negotiation':
-            case 'lowstock':
-            case 'LOWSTOCK':
-            case 'PENDING':
-            case 'pending':
                 return 'warn';
 
             case 'unqualified':
-            case 'outofstock':
-            case 'OUTOFSTOCK':
-            case 'CANCELLED':
-            case 'cancelled':
                 return 'danger';
 
             default:
                 return 'info';
         }
-    }
-
-    calculateCustomerTotal(name: string) {
-        let total = 0;
-
-        if (this.customers2) {
-            for (let customer of this.customers2) {
-                if (customer.representative?.name === name) {
-                    total++;
-                }
-            }
-        }
-
-        return total;
     }
 }
