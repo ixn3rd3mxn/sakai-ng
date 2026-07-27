@@ -45,7 +45,7 @@ import { DatePickerModule } from 'primeng/datepicker';
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ประเภท</div>
-                <p-select [(ngModel)]="dropdownValue" [options]="dropdownValues" optionLabel="name" placeholder="เลือกประเภท" class="w-full" appendTo="body" [showClear]="true" [invalid]="isDropdownInvalid" />
+                <p-select [(ngModel)]="dropdownValue" [options]="dropdownValues" optionLabel="name" placeholder="เลือกประเภท" appendTo="body" [showClear]="true" [invalid]="isDropdownInvalid" />
                 @if (isDropdownInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภท</p-message>
                 }
