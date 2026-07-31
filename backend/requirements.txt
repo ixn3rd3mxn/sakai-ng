@@ -1,0 +1,7 @@
+fastapi==0.136.1
+# pip install "fastapi[standard]"
+
+pymongo==4.17.0
+sse-starlette==3.4.2
+
+pydantic==2.13.4

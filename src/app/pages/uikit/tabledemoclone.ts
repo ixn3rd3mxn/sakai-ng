@@ -16,9 +16,8 @@ import { RippleModule } from 'primeng/ripple';
 import { InputIconModule } from 'primeng/inputicon';
 import { IconFieldModule } from 'primeng/iconfield';
 import { TagModule } from 'primeng/tag';
-import { Customer, CustomerService, Representative } from '@/app/pages/service/customer.service';
-import { Product, ProductService } from '@/app/pages/service/product.service';
-import { ObjectUtils } from "primeng/utils";
+import { CustomerService } from '@/app/pages/service/customer.service';
+import { ProductService } from '@/app/pages/service/product.service';
 
 // Interface for incident data
 interface Incident {
