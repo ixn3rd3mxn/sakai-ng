@@ -1,9 +1,9 @@
 import { Routes } from '@angular/router';
-import { DashboardCloneComponent } from './dashboardclone/dashboard';
-import { TableDemoClone } from './uikit/tabledemoclone';
+import { EmergencyDispatchDashboard } from './dashboardclone/dispatch-dashboard';
+import { IncidentHistoryComponent } from './uikit/incident-history';
 
 export default [
-    { path: 'dashboard', data: { breadcrumb: 'Dashboard' }, component: DashboardCloneComponent },
-    { path: 'summary', data: { breadcrumb: 'Summary' }, component: TableDemoClone },
+    { path: 'dashboard', data: { breadcrumb: 'Dashboard' }, component: EmergencyDispatchDashboard },
+    { path: 'summary', data: { breadcrumb: 'Summary' }, component: IncidentHistoryComponent },
     { path: '**', redirectTo: '/notfound' }
 ] as Routes;

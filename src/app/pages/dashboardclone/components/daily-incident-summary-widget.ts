@@ -4,7 +4,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
 
 @Component({
     standalone: true,
-    selector: 'app-revenue-stream-widget',
+    selector: 'app-daily-incident-summary',
     imports: [ChartModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
@@ -13,7 +13,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
         </div>
     </div>`
 })
-export class RevenueStreamWidget {
+export class DailyIncidentSummaryWidget {
     layoutService = inject(LayoutService);
 
     chartData = signal<any>(null);

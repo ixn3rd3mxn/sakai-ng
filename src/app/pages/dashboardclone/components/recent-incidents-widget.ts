@@ -8,7 +8,7 @@ import { Product, ProductService } from '@/app/pages/service/product.service';
 
 @Component({
     standalone: true,
-    selector: 'app-recent-sales-widget',
+    selector: 'app-recent-incidents',
     imports: [CommonModule, TableModule, ButtonModule, RippleModule, TagModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">บันทึกล่าสุด</div>
@@ -33,7 +33,7 @@ import { Product, ProductService } from '@/app/pages/service/product.service';
     </div>`,
     providers: [ProductService]
 })
-export class RecentSalesWidget {
+export class RecentIncidentsWidget {
     products = signal<Product[]>([]);
 
     productService = inject(ProductService);

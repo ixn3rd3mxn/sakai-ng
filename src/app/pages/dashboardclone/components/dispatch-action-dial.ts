@@ -13,7 +13,7 @@ import { DatePickerModule } from 'primeng/datepicker';
 
 @Component({
     standalone: true,
-    selector: 'app-speed-dial',
+    selector: 'app-dispatch-action-dial',
     imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule],
     template: `<p-toast />
     <p-confirmdialog />
@@ -94,7 +94,7 @@ import { DatePickerModule } from 'primeng/datepicker';
     </p-dialog>`,
     providers: [MessageService, ConfirmationService]
 })
-export class SpeedDial implements OnInit {
+export class DispatchActionDial implements OnInit {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
     items: MenuItem[] | null = null;

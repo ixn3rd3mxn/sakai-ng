@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 
 @Component({
-    selector: 'app-datetime-warning-banner',
+    selector: 'app-dispatch-datetime-warning',
     standalone: true,
     imports: [CommonModule, ButtonModule],
     template: `
@@ -53,7 +53,7 @@ import { ButtonModule } from 'primeng/button';
         }
     `
 })
-export class DateTimeWarningBanner {
+export class DispatchDateTimeWarning {
     @Input() visible: boolean = false;
     @Input() selectedDate: Date | undefined;
     @Input() selectedTime: any;

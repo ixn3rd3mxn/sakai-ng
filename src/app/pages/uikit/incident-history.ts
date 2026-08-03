@@ -19,18 +19,18 @@ import { TagModule } from 'primeng/tag';
 import { CustomerService } from '@/app/pages/service/customer.service';
 import { ProductService } from '@/app/pages/service/product.service';
 
-// Interface for incident data
-interface Incident {
+// Interface for emergency incident data
+interface EmergencyIncident {
     time: string;   // เวลาเต็ม (เช่น "22:25")
     hour: string;   // ชั่วโมงเพียงอย่างเดียว (เช่น "22")
-    type: string;
+    callType: string;
     reportingChannel: string;
     caseType: string;
     cbd: string;
     severity: string;
 }
 
-interface TableData {
+interface IncidentStatistics {
     name: string;
     shiftMorning: number;   // ต่อเวรเช้า
     shiftAfternoon: number; // ต่อเวรบ่าย
@@ -41,7 +41,7 @@ interface TableData {
 }
 
 @Component({
-    selector: 'app-table-demo_clone',
+    selector: 'app-incident-history',
     standalone: true,
     imports: [
         TableModule,
@@ -64,20 +64,20 @@ interface TableData {
     template: `        <div class="card" style="margin-bottom: 0.25rem">
             <div class="font-semibold text-xl mb-4">ประวัติการบันทึกประจำวัน</div>
             <p-table
-                #dt1
-                [value]="incidents"
+                #incidentTable
+                [value]="emergencyIncidents"
                 stripedRows
                 dataKey="time"
                 [rows]="10"
                 [loading]="loading"
                 [rowHover]="true"
                 [paginator]="true"
-                [globalFilterFields]="['time', 'type', 'reportingChannel', 'caseType', 'cbd', 'severity']"
+                [globalFilterFields]="['time', 'callType', 'reportingChannel', 'caseType', 'cbd', 'severity']"
                 responsiveLayout="scroll"
             >
                 <ng-template #caption>
                     <div class="flex justify-between items-center flex-column sm:flex-row">
-                        <button pButton label="Clear" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(dt1)"></button>
+                        <button pButton label="Clear" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(incidentTable)"></button>
                     </div>
                 </ng-template>
                 <ng-template #header>
@@ -108,11 +108,11 @@ interface TableData {
                         <th style="min-width: 12rem">
                             <div class="flex justify-between items-center">
                                 ประเภท
-                                <p-columnFilter field="type" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
+                                <p-columnFilter field="callType" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
-                                            [options]="typeOptions"
+                                            [options]="callTypeOptions"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
                                             styleClass="w-full">
@@ -215,7 +215,7 @@ interface TableData {
                 <ng-template #body let-incident>
                     <tr>
                         <td>{{ incident.time }}</td>  <!-- แสดงเวลาเต็ม (เช่น 22:25) -->
-                        <td>{{ incident.type }}</td>
+                        <td>{{ incident.callType }}</td>
                         <td>{{ incident.reportingChannel }}</td>
                         <td>{{ incident.caseType }}</td>
                         <td>{{ incident.cbd }}</td>
@@ -234,7 +234,7 @@ interface TableData {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ประเภท</div>
-        <p-table [value]="categoryTypes" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="callTypeStatistics" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
@@ -262,7 +262,7 @@ interface TableData {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ช่องทางการแจ้งเหตุ</div>
-        <p-table [value]="notificationChannels" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="reportingChannelStatistics" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
@@ -290,7 +290,7 @@ interface TableData {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ประเภทของการเจ็บป่วย</div>
-        <p-table [value]="injuryTypes" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="caseTypeStatistics" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
@@ -318,7 +318,7 @@ interface TableData {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ระดับความรุนแรง</div>
-        <p-table [value]="severityLevels" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="severityLevelStatistics" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
@@ -346,7 +346,7 @@ interface TableData {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">CBD 25</div>
-        <p-table [value]="cbd25" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
+        <p-table [value]="cbdCategoryStatistics" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
@@ -383,18 +383,18 @@ interface TableData {
     `,
     providers: [ConfirmationService, MessageService, CustomerService, ProductService]
 })
-export class TableDemoClone implements OnInit {
-    incidents: Incident[] = [];
+export class IncidentHistoryComponent implements OnInit {
+    emergencyIncidents: EmergencyIncident[] = [];
     loading: boolean = false;
 
-    typeOptions: string[] = [];          // ประเภท
+    callTypeOptions: string[] = [];          // ประเภท
     reportingChannelOptions: string[] = []; // ช่องทางแจ้ง
     caseTypeOptions: string[] = [];     // ประเภทการเจ็บป่วย
     cbdOptions: string[] = [];          // CBD
     severityOptions: string[] = [];     // ระดับความรุนแรง
 
     // Mock data for each table
-    categoryTypes: TableData[] = [
+    callTypeStatistics: IncidentStatistics[] = [
         { name: 'ผลรวมทั้งหมด', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'แจ้งเหตุ', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'แจ้งซ้ำเหตุเดิม', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
@@ -403,18 +403,18 @@ export class TableDemoClone implements OnInit {
         { name: 'ก่อกวน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    notificationChannels: TableData[] = [
+    reportingChannelStatistics: IncidentStatistics[] = [
         { name: '1669', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: '2nd', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'วิทยุ', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    injuryTypes: TableData[] = [
+    caseTypeStatistics: IncidentStatistics[] = [
         { name: 'Trauma', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'Non-Trauma', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    cbd25: TableData[] = [
+    cbdCategoryStatistics: IncidentStatistics[] = [
         { name: 'CBD1 ปวดท้อง หลัง เชิงกราน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'CBD2 อาการภูมิแพ้ อนาไฟแลกซิส', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'CBD3 สัตว์กัด', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
@@ -442,7 +442,7 @@ export class TableDemoClone implements OnInit {
         { name: 'CBD25 อุบัติเหตุจราจร', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    severityLevels: TableData[] = [
+    severityLevelStatistics: IncidentStatistics[] = [
         { name: 'แดง ฉุกเฉินวิกฤติ', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'เหลือง ฉุกเฉินเร่งด่วน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
         { name: 'เขียว ฉุกเฉินไม่เร่งด่วน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 },
@@ -450,7 +450,7 @@ export class TableDemoClone implements OnInit {
         { name: 'ดำ ไม่มีการตอบสนอง / ไม่พบผู้ป่วยฉุกเฉิน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    @ViewChild('dt1') dt1: Table | undefined;
+    @ViewChild('dt1') incidentTable: Table | undefined;
     @ViewChild('filter') filter: ElementRef | undefined;
 
     hourOptions: { label: string; value: string }[] = [];
@@ -463,25 +463,25 @@ export class TableDemoClone implements OnInit {
             value: i.toString().padStart(2, '0')  // ค่าเป็น "22" (ไม่มี :)
         }));
 
-        this.incidents = [
-            { time: '08:15', hour: '08', type: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD05', severity: 'แดง' },
-            { time: '09:22', hour: '09', type: 'ปรึกษา', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD12', severity: 'เหลือง' },
-            { time: '10:41', hour: '10', type: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD03', severity: 'แดง' },
-            { time: '11:03', hour: '11', type: 'สายหลุด', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD18', severity: 'เขียว' },
-            { time: '13:55', hour: '13', type: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD25', severity: 'ขาว' },
-            { time: '14:30', hour: '14', type: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD07', severity: 'แดง' },
-            { time: '15:45', hour: '15', type: 'ปรึกษา', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD14', severity: 'เหลือง' },
-            { time: '16:20', hour: '16', type: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD09', severity: 'แดง' },
-            { time: '17:10', hour: '17', type: 'สายหลุด', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD20', severity: 'เขียว' },
-            { time: '18:05', hour: '18', type: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD02', severity: 'ขาว' },
-            { time: '19:15', hour: '19', type: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD11', severity: 'แดง' },
-            { time: '20:30', hour: '20', type: 'ปรึกษา', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD15', severity: 'เหลือง' },
-            { time: '21:40', hour: '21', type: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD08', severity: 'แดง' },
-            { time: '22:25', hour: '22', type: 'สายหลุด', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD19', severity: 'เขียว' },
-            { time: '23:10', hour: '23', type: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD22', severity: 'ดำ' }
+        this.emergencyIncidents = [
+            { time: '08:15', hour: '08', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD05', severity: 'แดง' },
+            { time: '09:22', hour: '09', callType: 'ปรึกษา', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD12', severity: 'เหลือง' },
+            { time: '10:41', hour: '10', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD03', severity: 'แดง' },
+            { time: '11:03', hour: '11', callType: 'สายหลุด', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD18', severity: 'เขียว' },
+            { time: '13:55', hour: '13', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD25', severity: 'ขาว' },
+            { time: '14:30', hour: '14', callType: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD07', severity: 'แดง' },
+            { time: '15:45', hour: '15', callType: 'ปรึกษา', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD14', severity: 'เหลือง' },
+            { time: '16:20', hour: '16', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD09', severity: 'แดง' },
+            { time: '17:10', hour: '17', callType: 'สายหลุด', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD20', severity: 'เขียว' },
+            { time: '18:05', hour: '18', callType: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD02', severity: 'ขาว' },
+            { time: '19:15', hour: '19', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD11', severity: 'แดง' },
+            { time: '20:30', hour: '20', callType: 'ปรึกษา', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD15', severity: 'เหลือง' },
+            { time: '21:40', hour: '21', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD08', severity: 'แดง' },
+            { time: '22:25', hour: '22', callType: 'สายหลุด', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD19', severity: 'เขียว' },
+            { time: '23:10', hour: '23', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD22', severity: 'ดำ' }
         ];
 
-        this.cbdOptions = this.cbd25
+        this.cbdOptions = this.cbdCategoryStatistics
             .map(item => {
                 const code = item.name.split(' ')[0]; // "CBD1", "CBD2", ...
                 const num = parseInt(code.replace('CBD', ''), 10);
@@ -494,11 +494,11 @@ export class TableDemoClone implements OnInit {
             });
         // ✅ ใช้ Master Data (ถ้ามี) หรือ สร้างจากค่าคงที่
         // ตัวอย่าง: ถ้าระบบมี Master Data สำหรับประเภท
-        this.typeOptions = ['ก่อกวน', 'ปรึกษา', 'สายหลุด', 'แจ้งซ้ำเหตุเดิม', 'แจ้งเหตุ'].sort();
+        this.callTypeOptions = ['ก่อกวน', 'ปรึกษา', 'สายหลุด', 'แจ้งซ้ำเหตุเดิม', 'แจ้งเหตุ'].sort();
         this.reportingChannelOptions = ['1669', '2nd', 'วิทยุ'].sort();
         this.caseTypeOptions = ['Non-Trauma', 'Trauma'].sort();
-        // ✅ ใช้ข้อมูลจาก `severityLevels` (Master Data)
-        this.severityOptions = this.severityLevels
+        // ✅ ใช้ข้อมูลจาก `severityLevelStatistics` (Master Data)
+        this.severityOptions = this.severityLevelStatistics
             .filter(item => item.name !== 'ผลรวมทั้งหมด') // (Optional: ถ้าต้องการ filter ออก)
             .map(item => item.name.split(' ')[0]) // ใช้คำแรก (เช่น "แดง")
             .sort();
@@ -508,8 +508,8 @@ export class TableDemoClone implements OnInit {
         this.loading = false;
     }
 
-    clear(table: Table) {
-        table.clear();
+    clear(incidentTable: Table) {
+        incidentTable.clear();
         if (this.filter) {
             this.filter.nativeElement.value = '';
         }
