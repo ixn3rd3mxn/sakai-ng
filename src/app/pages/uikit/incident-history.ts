@@ -1,26 +1,14 @@
-import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
-import { ConfirmationService, MessageService } from 'primeng/api';
-import { InputTextModule } from 'primeng/inputtext';
+import { Component, OnInit } from '@angular/core';
 import { MultiSelectModule } from 'primeng/multiselect';
-import { SelectModule } from 'primeng/select';
-import { SliderModule } from 'primeng/slider';
 import { Table, TableModule } from 'primeng/table';
-import { ProgressBarModule } from 'primeng/progressbar';
-import { ToggleButtonModule } from 'primeng/togglebutton';
-import { ToastModule } from 'primeng/toast';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
-import { RatingModule } from 'primeng/rating';
-import { RippleModule } from 'primeng/ripple';
-import { InputIconModule } from 'primeng/inputicon';
-import { IconFieldModule } from 'primeng/iconfield';
 import { TagModule } from 'primeng/tag';
-import { CustomerService } from '@/app/pages/service/customer.service';
-import { ProductService } from '@/app/pages/service/product.service';
 
 // Interface for emergency incident data
 interface EmergencyIncident {
+    id: string;
     time: string;   // เวลาเต็ม (เช่น "22:25")
     hour: string;   // ชั่วโมงเพียงอย่างเดียว (เช่น "22")
     callType: string;
@@ -46,20 +34,10 @@ interface IncidentStatistics {
     imports: [
         TableModule,
         MultiSelectModule,
-        SelectModule,
-        InputIconModule,
         TagModule,
-        InputTextModule,
-        SliderModule,
-        ProgressBarModule,
-        ToggleButtonModule,
-        ToastModule,
         CommonModule,
         FormsModule,
-        ButtonModule,
-        RatingModule,
-        RippleModule,
-        IconFieldModule
+        ButtonModule
     ],
     template: `        <div class="card" style="margin-bottom: 0.25rem">
             <div class="font-semibold text-xl mb-4">ประวัติการบันทึกประจำวัน</div>
@@ -67,12 +45,11 @@ interface IncidentStatistics {
                 #incidentTable
                 [value]="emergencyIncidents"
                 stripedRows
-                dataKey="time"
+                dataKey="id"
                 [rows]="10"
                 [loading]="loading"
                 [rowHover]="true"
                 [paginator]="true"
-                [globalFilterFields]="['time', 'callType', 'reportingChannel', 'caseType', 'cbd', 'severity']"
                 responsiveLayout="scroll"
             >
                 <ng-template #caption>
@@ -118,7 +95,7 @@ interface IncidentStatistics {
                                             styleClass="w-full">
                                             <ng-template let-option #item>
                                                 <div class="flex items-center gap-2">
-                                                    <span>{{ option }}</span>  <!-- option เป็น String -->
+                                                    <span>{{ option }}</span>
                                                 </div>
                                             </ng-template>
                                         </p-multiselect>
@@ -157,7 +134,7 @@ interface IncidentStatistics {
                                             [options]="caseTypeOptions"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
-                                            styleClass="w-full">  <!-- ลบ optionLabel="name" ออก -->
+                                            styleClass="w-full">
                                             <ng-template let-option #item>
                                                 <div class="flex items-center gap-2">
                                                     <span>{{ option }}</span>
@@ -178,7 +155,7 @@ interface IncidentStatistics {
                                             [options]="cbdOptions"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
-                                            styleClass="w-full">  <!-- ลบ optionLabel="name" ออก -->
+                                            styleClass="w-full">
                                             <ng-template let-option #item>
                                                 <div class="flex items-center gap-2">
                                                     <span>{{ option }}</span>
@@ -199,7 +176,7 @@ interface IncidentStatistics {
                                             [options]="severityOptions"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
-                                            styleClass="w-full">  <!-- ลบ optionLabel="name" ออก -->
+                                            styleClass="w-full">
                                             <ng-template let-option #item>
                                                 <div class="flex items-center gap-2">
                                                     <span>{{ option }}</span>
@@ -214,7 +191,7 @@ interface IncidentStatistics {
                 </ng-template>
                 <ng-template #body let-incident>
                     <tr>
-                        <td>{{ incident.time }}</td>  <!-- แสดงเวลาเต็ม (เช่น 22:25) -->
+                        <td>{{ incident.time }}</td>
                         <td>{{ incident.callType }}</td>
                         <td>{{ incident.reportingChannel }}</td>
                         <td>{{ incident.caseType }}</td>
@@ -238,9 +215,9 @@ interface IncidentStatistics {
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรดึก</th>  <!-- เพิ่มคอลัมภ์ -->
+                    <th style="min-width:100px">ต่อเวรเช้า</th>
+                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
                     <th style="min-width:100px">ต่อเดือน</th>
@@ -249,9 +226,9 @@ interface IncidentStatistics {
             <ng-template #body let-item>
                 <tr>
                     <td>{{ item.name }}</td>
-                    <td>{{ item.shiftMorning }}</td>  <!-- แสดงค่า -->
-                    <td>{{ item.shiftAfternoon }}</td> <!-- แสดงค่า -->
-                    <td>{{ item.shiftNight }}</td>     <!-- แสดงค่า -->
+                    <td>{{ item.shiftMorning }}</td>
+                    <td>{{ item.shiftAfternoon }}</td>
+                    <td>{{ item.shiftNight }}</td>
                     <td>{{ item.daily }}</td>
                     <td>{{ item.weekly }}</td>
                     <td>{{ item.monthly }}</td>
@@ -266,9 +243,9 @@ interface IncidentStatistics {
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรดึก</th>  <!-- เพิ่มคอลัมภ์ -->
+                    <th style="min-width:100px">ต่อเวรเช้า</th>
+                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
                     <th style="min-width:100px">ต่อเดือน</th>
@@ -277,9 +254,9 @@ interface IncidentStatistics {
             <ng-template #body let-item>
                 <tr>
                     <td>{{ item.name }}</td>
-                    <td>{{ item.shiftMorning }}</td>  <!-- แสดงค่า -->
-                    <td>{{ item.shiftAfternoon }}</td> <!-- แสดงค่า -->
-                    <td>{{ item.shiftNight }}</td>     <!-- แสดงค่า -->
+                    <td>{{ item.shiftMorning }}</td>
+                    <td>{{ item.shiftAfternoon }}</td>
+                    <td>{{ item.shiftNight }}</td>
                     <td>{{ item.daily }}</td>
                     <td>{{ item.weekly }}</td>
                     <td>{{ item.monthly }}</td>
@@ -294,9 +271,9 @@ interface IncidentStatistics {
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรดึก</th>  <!-- เพิ่มคอลัมภ์ -->
+                    <th style="min-width:100px">ต่อเวรเช้า</th>
+                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
                     <th style="min-width:100px">ต่อเดือน</th>
@@ -305,9 +282,9 @@ interface IncidentStatistics {
             <ng-template #body let-item>
                 <tr>
                     <td>{{ item.name }}</td>
-                    <td>{{ item.shiftMorning }}</td>  <!-- แสดงค่า -->
-                    <td>{{ item.shiftAfternoon }}</td> <!-- แสดงค่า -->
-                    <td>{{ item.shiftNight }}</td>     <!-- แสดงค่า -->
+                    <td>{{ item.shiftMorning }}</td>
+                    <td>{{ item.shiftAfternoon }}</td>
+                    <td>{{ item.shiftNight }}</td>
                     <td>{{ item.daily }}</td>
                     <td>{{ item.weekly }}</td>
                     <td>{{ item.monthly }}</td>
@@ -322,9 +299,9 @@ interface IncidentStatistics {
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรดึก</th>  <!-- เพิ่มคอลัมภ์ -->
+                    <th style="min-width:100px">ต่อเวรเช้า</th>
+                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
                     <th style="min-width:100px">ต่อเดือน</th>
@@ -333,9 +310,9 @@ interface IncidentStatistics {
             <ng-template #body let-item>
                 <tr>
                     <td>{{ item.name }}</td>
-                    <td>{{ item.shiftMorning }}</td>  <!-- แสดงค่า -->
-                    <td>{{ item.shiftAfternoon }}</td> <!-- แสดงค่า -->
-                    <td>{{ item.shiftNight }}</td>     <!-- แสดงค่า -->
+                    <td>{{ item.shiftMorning }}</td>
+                    <td>{{ item.shiftAfternoon }}</td>
+                    <td>{{ item.shiftNight }}</td>
                     <td>{{ item.daily }}</td>
                     <td>{{ item.weekly }}</td>
                     <td>{{ item.monthly }}</td>
@@ -350,9 +327,9 @@ interface IncidentStatistics {
             <ng-template #header>
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>  <!-- เพิ่มคอลัมภ์ -->
-                    <th style="min-width:100px">ต่อเวรดึก</th>  <!-- เพิ่มคอลัมภ์ -->
+                    <th style="min-width:100px">ต่อเวรเช้า</th>
+                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
                     <th style="min-width:100px">ต่อเดือน</th>
@@ -361,9 +338,9 @@ interface IncidentStatistics {
             <ng-template #body let-item>
                 <tr>
                     <td>{{ item.name }}</td>
-                    <td>{{ item.shiftMorning }}</td>  <!-- แสดงค่า -->
-                    <td>{{ item.shiftAfternoon }}</td> <!-- แสดงค่า -->
-                    <td>{{ item.shiftNight }}</td>     <!-- แสดงค่า -->
+                    <td>{{ item.shiftMorning }}</td>
+                    <td>{{ item.shiftAfternoon }}</td>
+                    <td>{{ item.shiftNight }}</td>
                     <td>{{ item.daily }}</td>
                     <td>{{ item.weekly }}</td>
                     <td>{{ item.monthly }}</td>
@@ -380,8 +357,7 @@ interface IncidentStatistics {
         .p-datatable-scrollable .p-frozen-column {
             font-weight: bold;
         }
-    `,
-    providers: [ConfirmationService, MessageService, CustomerService, ProductService]
+    `
 })
 export class IncidentHistoryComponent implements OnInit {
     emergencyIncidents: EmergencyIncident[] = [];
@@ -450,9 +426,6 @@ export class IncidentHistoryComponent implements OnInit {
         { name: 'ดำ ไม่มีการตอบสนอง / ไม่พบผู้ป่วยฉุกเฉิน', shiftMorning: 11, shiftAfternoon: 22, shiftNight: 33, daily: 111, weekly: 222, monthly: 333 }
     ];
 
-    @ViewChild('dt1') incidentTable: Table | undefined;
-    @ViewChild('filter') filter: ElementRef | undefined;
-
     hourOptions: { label: string; value: string }[] = [];
 
     ngOnInit() {
@@ -464,21 +437,21 @@ export class IncidentHistoryComponent implements OnInit {
         }));
 
         this.emergencyIncidents = [
-            { time: '08:15', hour: '08', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD05', severity: 'แดง' },
-            { time: '09:22', hour: '09', callType: 'ปรึกษา', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD12', severity: 'เหลือง' },
-            { time: '10:41', hour: '10', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD03', severity: 'แดง' },
-            { time: '11:03', hour: '11', callType: 'สายหลุด', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD18', severity: 'เขียว' },
-            { time: '13:55', hour: '13', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD25', severity: 'ขาว' },
-            { time: '14:30', hour: '14', callType: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD07', severity: 'แดง' },
-            { time: '15:45', hour: '15', callType: 'ปรึกษา', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD14', severity: 'เหลือง' },
-            { time: '16:20', hour: '16', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD09', severity: 'แดง' },
-            { time: '17:10', hour: '17', callType: 'สายหลุด', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD20', severity: 'เขียว' },
-            { time: '18:05', hour: '18', callType: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD02', severity: 'ขาว' },
-            { time: '19:15', hour: '19', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD11', severity: 'แดง' },
-            { time: '20:30', hour: '20', callType: 'ปรึกษา', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD15', severity: 'เหลือง' },
-            { time: '21:40', hour: '21', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD08', severity: 'แดง' },
-            { time: '22:25', hour: '22', callType: 'สายหลุด', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD19', severity: 'เขียว' },
-            { time: '23:10', hour: '23', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD22', severity: 'ดำ' }
+            { id: 'INC-01', time: '08:15', hour: '08', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD05', severity: 'แดง' },
+            { id: 'INC-02', time: '09:22', hour: '09', callType: 'ปรึกษา', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD12', severity: 'เหลือง' },
+            { id: 'INC-03', time: '10:41', hour: '10', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD03', severity: 'แดง' },
+            { id: 'INC-04', time: '11:03', hour: '11', callType: 'สายหลุด', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD18', severity: 'เขียว' },
+            { id: 'INC-05', time: '13:55', hour: '13', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD25', severity: 'ขาว' },
+            { id: 'INC-06', time: '14:30', hour: '14', callType: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD07', severity: 'แดง' },
+            { id: 'INC-07', time: '15:45', hour: '15', callType: 'ปรึกษา', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD14', severity: 'เหลือง' },
+            { id: 'INC-08', time: '16:20', hour: '16', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD09', severity: 'แดง' },
+            { id: 'INC-09', time: '17:10', hour: '17', callType: 'สายหลุด', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD20', severity: 'เขียว' },
+            { id: 'INC-10', time: '18:05', hour: '18', callType: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD02', severity: 'ขาว' },
+            { id: 'INC-11', time: '19:15', hour: '19', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD11', severity: 'แดง' },
+            { id: 'INC-12', time: '20:30', hour: '20', callType: 'ปรึกษา', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD15', severity: 'เหลือง' },
+            { id: 'INC-13', time: '21:40', hour: '21', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD08', severity: 'แดง' },
+            { id: 'INC-14', time: '22:25', hour: '22', callType: 'สายหลุด', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD19', severity: 'เขียว' },
+            { id: 'INC-15', time: '23:10', hour: '23', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD22', severity: 'ดำ' }
         ];
 
         this.cbdOptions = this.cbdCategoryStatistics
@@ -492,27 +465,19 @@ export class IncidentHistoryComponent implements OnInit {
                 const numB = parseInt(b.replace('CBD', ''), 10);
                 return numA - numB;
             });
-        // ✅ ใช้ Master Data (ถ้ามี) หรือ สร้างจากค่าคงที่
-        // ตัวอย่าง: ถ้าระบบมี Master Data สำหรับประเภท
+        // TODO: แทนที่ด้วยข้อมูลจาก Master Data เมื่อมี backend integration
         this.callTypeOptions = ['ก่อกวน', 'ปรึกษา', 'สายหลุด', 'แจ้งซ้ำเหตุเดิม', 'แจ้งเหตุ'].sort();
         this.reportingChannelOptions = ['1669', '2nd', 'วิทยุ'].sort();
         this.caseTypeOptions = ['Non-Trauma', 'Trauma'].sort();
-        // ✅ ใช้ข้อมูลจาก `severityLevelStatistics` (Master Data)
         this.severityOptions = this.severityLevelStatistics
-            .filter(item => item.name !== 'ผลรวมทั้งหมด') // (Optional: ถ้าต้องการ filter ออก)
             .map(item => item.name.split(' ')[0]) // ใช้คำแรก (เช่น "แดง")
             .sort();
-
-
 
         this.loading = false;
     }
 
     clear(incidentTable: Table) {
         incidentTable.clear();
-        if (this.filter) {
-            this.filter.nativeElement.value = '';
-        }
     }
 
     getSeverity(severity: string) {
