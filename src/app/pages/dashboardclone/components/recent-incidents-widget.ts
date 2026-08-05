@@ -4,10 +4,9 @@ import { TagModule } from 'primeng/tag';
 
 interface RecentIncident {
     time: string;
-    type: string;
+    callType: string;
     cbd: string;
-    severityLabel: string;
-    severityTag: 'danger' | 'warn' | 'success' | 'secondary' | 'contrast';
+    severity: string;
 }
 
 @Component({
@@ -28,9 +27,9 @@ interface RecentIncident {
             <ng-template #body let-incident>
                 <tr>
                     <td>{{ incident.time }}</td>
-                    <td style="min-width: 7.76rem;">{{ incident.type }}</td>
+                    <td style="min-width: 7.76rem;">{{ incident.callType }}</td>
                     <td>{{ incident.cbd }}</td>
-                    <td><p-tag [severity]="incident.severityTag" [value]="incident.severityLabel" /></td>
+                    <td><p-tag [severity]="getSeverity(incident.severity)" [value]="incident.severity" /></td>
                 </tr>
             </ng-template>
         </p-table>
@@ -38,10 +37,21 @@ interface RecentIncident {
 })
 export class RecentIncidentsWidget {
     incidents = signal<RecentIncident[]>([
-        { time: '23:59:59', type: 'แจ้งซ้ำเหตุเดิม', cbd: 'CBD23 ตกน้ำ / จมน้ำ', severityLabel: 'เหลือง', severityTag: 'warn' },
-        { time: '23:41:12', type: 'แจ้งเหตุ', cbd: 'CBD6 หัวใจหยุดเต้น', severityLabel: 'แดง', severityTag: 'danger' },
-        { time: '23:18:47', type: 'ปรึกษา', cbd: 'CBD9 เบาหวาน', severityLabel: 'เขียว', severityTag: 'success' },
-        { time: '22:55:03', type: 'แจ้งเหตุ', cbd: 'CBD25 อุบัติเหตุจราจร', severityLabel: 'แดง', severityTag: 'danger' },
-        { time: '22:30:29', type: 'สายหลุด', cbd: 'CBD11 ไม่มีข้อมูล', severityLabel: 'ขาว', severityTag: 'secondary' }
+        { time: '23:59:59', callType: 'แจ้งซ้ำเหตุเดิม', cbd: 'CBD23', severity: 'เหลือง' },
+        { time: '23:41:12', callType: 'แจ้งเหตุ', cbd: 'CBD6', severity: 'แดง' },
+        { time: '23:18:47', callType: 'ปรึกษา', cbd: 'CBD9', severity: 'เขียว' },
+        { time: '22:55:03', callType: 'แจ้งเหตุ', cbd: 'CBD25', severity: 'ดำ' },
+        { time: '22:30:29', callType: 'สายหลุด', cbd: 'CBD11', severity: 'ขาว' }
     ]);
+
+    getSeverity(severity: string) {
+        switch (severity) {
+            case 'แดง': return 'danger';
+            case 'เหลือง': return 'warn';
+            case 'เขียว': return 'success';
+            case 'ขาว': return 'secondary';
+            case 'ดำ': return 'contrast';
+            default: return 'info';
+        }
+    }
 }

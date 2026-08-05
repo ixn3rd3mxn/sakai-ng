@@ -437,29 +437,25 @@ export class IncidentHistoryComponent implements OnInit {
         }));
 
         this.emergencyIncidents = [
-            { id: 'INC-01', time: '08:15', hour: '08', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD05', severity: 'แดง' },
+            { id: 'INC-01', time: '08:15', hour: '08', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD5', severity: 'แดง' },
             { id: 'INC-02', time: '09:22', hour: '09', callType: 'ปรึกษา', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD12', severity: 'เหลือง' },
-            { id: 'INC-03', time: '10:41', hour: '10', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD03', severity: 'แดง' },
+            { id: 'INC-03', time: '10:41', hour: '10', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: 'วิทยุ', caseType: 'Trauma', cbd: 'CBD3', severity: 'แดง' },
             { id: 'INC-04', time: '11:03', hour: '11', callType: 'สายหลุด', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD18', severity: 'เขียว' },
             { id: 'INC-05', time: '13:55', hour: '13', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD25', severity: 'ขาว' },
-            { id: 'INC-06', time: '14:30', hour: '14', callType: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD07', severity: 'แดง' },
+            { id: 'INC-06', time: '14:30', hour: '14', callType: 'แจ้งเหตุ', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD7', severity: 'แดง' },
             { id: 'INC-07', time: '15:45', hour: '15', callType: 'ปรึกษา', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD14', severity: 'เหลือง' },
-            { id: 'INC-08', time: '16:20', hour: '16', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD09', severity: 'แดง' },
+            { id: 'INC-08', time: '16:20', hour: '16', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD9', severity: 'แดง' },
             { id: 'INC-09', time: '17:10', hour: '17', callType: 'สายหลุด', reportingChannel: '2nd', caseType: 'Non-Trauma', cbd: 'CBD20', severity: 'เขียว' },
-            { id: 'INC-10', time: '18:05', hour: '18', callType: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD02', severity: 'ขาว' },
+            { id: 'INC-10', time: '18:05', hour: '18', callType: 'ก่อกวน', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD2', severity: 'ขาว' },
             { id: 'INC-11', time: '19:15', hour: '19', callType: 'แจ้งเหตุ', reportingChannel: '1669', caseType: 'Trauma', cbd: 'CBD11', severity: 'แดง' },
             { id: 'INC-12', time: '20:30', hour: '20', callType: 'ปรึกษา', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD15', severity: 'เหลือง' },
-            { id: 'INC-13', time: '21:40', hour: '21', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD08', severity: 'แดง' },
+            { id: 'INC-13', time: '21:40', hour: '21', callType: 'แจ้งซ้ำเหตุเดิม', reportingChannel: '2nd', caseType: 'Trauma', cbd: 'CBD8', severity: 'แดง' },
             { id: 'INC-14', time: '22:25', hour: '22', callType: 'สายหลุด', reportingChannel: 'วิทยุ', caseType: 'Non-Trauma', cbd: 'CBD19', severity: 'เขียว' },
             { id: 'INC-15', time: '23:10', hour: '23', callType: 'ก่อกวน', reportingChannel: '1669', caseType: 'Non-Trauma', cbd: 'CBD22', severity: 'ดำ' }
         ];
 
         this.cbdOptions = this.cbdCategoryStatistics
-            .map(item => {
-                const code = item.name.split(' ')[0]; // "CBD1", "CBD2", ...
-                const num = parseInt(code.replace('CBD', ''), 10);
-                return `CBD${num.toString().padStart(2, '0')}`; // CBD01, CBD02, ...
-            })
+            .map(item => item.name.split(' ')[0]) // "CBD1", "CBD2", ...
             .sort((a, b) => {
                 const numA = parseInt(a.replace('CBD', ''), 10);
                 const numB = parseInt(b.replace('CBD', ''), 10);

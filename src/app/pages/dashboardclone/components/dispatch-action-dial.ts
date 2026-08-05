@@ -46,33 +46,33 @@ import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.type
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ประเภท</div>
-                <p-select [(ngModel)]="dropdownValue" [options]="dropdownValues" optionLabel="name" placeholder="เลือกประเภท" appendTo="body" [showClear]="true" [invalid]="isDropdownInvalid" />
-                @if (isDropdownInvalid) {
+                <p-select [(ngModel)]="callType" [options]="callTypeOptions" optionLabel="name" placeholder="เลือกประเภท" appendTo="body" [showClear]="true" [invalid]="isCallTypeInvalid" />
+                @if (isCallTypeInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภท</p-message>
                 }
             </div>
             <div class="flex flex-col gap-1">
                 <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ช่องทางการแจ้งเหตุ</div>
                 <div class="w-full disabled-field">
-                    <p-selectbutton [(ngModel)]="selectButtonValue" [options]="selectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isSelectButtonInvalid" />
+                    <p-selectbutton [(ngModel)]="reportingChannel" [options]="reportingChannelOptions" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isReportingChannelInvalid" />
                 </div>
-                @if (isSelectButtonInvalid) {
+                @if (isReportingChannelInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกช่องทางการแจ้งเหตุ</p-message>
                 }
             </div>
             <div class="flex flex-col gap-1">
                 <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ประเภทของการเจ็บป่วย</div>
                 <div class="w-full disabled-field">
-                    <p-selectbutton [(ngModel)]="traumaSelectButtonValue" [options]="traumaSelectButtonValues" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isTraumaInvalid" />
+                    <p-selectbutton [(ngModel)]="caseType" [options]="caseTypeOptions" optionLabel="name" [disabled]="isFieldsDisabled" [invalid]="isCaseTypeInvalid" />
                 </div>
-                @if (isTraumaInvalid) {
+                @if (isCaseTypeInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกประเภทของการเจ็บป่วย</p-message>
                 }
             </div>
             <div class="flex flex-col gap-1">
                 <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">CBD</div>
                 <div class="w-full disabled-field">
-                    <p-select [(ngModel)]="cbdValue" [options]="cbdValues" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isCbdInvalid" />
+                    <p-select [(ngModel)]="cbd" [options]="cbdOptions" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isCbdInvalid" />
                 </div>
                 @if (isCbdInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือก CBD</p-message>
@@ -81,7 +81,7 @@ import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.type
             <div class="flex flex-col gap-1">
                 <div class="font-semibold" [class.text-surface-500]="isFieldsDisabled">ระดับความรุนแรง</div>
                 <div class="w-full disabled-field">
-                    <p-select [(ngModel)]="severityValue" [options]="severityValues" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isSeverityInvalid" />
+                    <p-select [(ngModel)]="severity" [options]="severityOptions" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [disabled]="isFieldsDisabled" [invalid]="isSeverityInvalid" />
                 </div>
                 @if (isSeverityInvalid) {
                     <p-message severity="error" size="small" variant="simple">โปรดเลือกระดับความรุนแรง</p-message>
@@ -156,37 +156,37 @@ export class DispatchActionDial implements OnInit {
             this.formSubmitted = false;
         } else {
 
-            this._dropdownValue = null;
-            this.selectButtonValue = null;
-            this.traumaSelectButtonValue = null;
-            this.cbdValue = null;
-            this.severityValue = null;
+            this._callType = null;
+            this.reportingChannel = null;
+            this.caseType = null;
+            this.cbd = null;
+            this.severity = null;
             this.formSubmitted = false;
         }
     }
-    
-    private _dropdownValue: SelectOption | null = null;
-    selectButtonValue: SelectOption | null = null;
-    traumaSelectButtonValue: SelectOption | null = null;
-    cbdValue: SelectOption | null = null;
-    severityValue: SelectOption | null = null;
 
-    get dropdownValue(): SelectOption | null {
-        return this._dropdownValue;
+    private _callType: SelectOption | null = null;
+    reportingChannel: SelectOption | null = null;
+    caseType: SelectOption | null = null;
+    cbd: SelectOption | null = null;
+    severity: SelectOption | null = null;
+
+    get callType(): SelectOption | null {
+        return this._callType;
     }
 
-    set dropdownValue(value: SelectOption | null) {
-        this._dropdownValue = value;
+    set callType(value: SelectOption | null) {
+        this._callType = value;
         this.formSubmitted = false;
         if (value?.code !== 'NY') {
-            this.selectButtonValue = null;
-            this.traumaSelectButtonValue = null;
-            this.cbdValue = null;
-            this.severityValue = null;
+            this.reportingChannel = null;
+            this.caseType = null;
+            this.cbd = null;
+            this.severity = null;
         }
     }
 
-    dropdownValues: SelectOption[] = [
+    callTypeOptions: SelectOption[] = [
         { name: 'แจ้งเหตุ', code: 'NY' },
         { name: 'แจ้งเพิ่มเติม เหตุเดียวกัน', code: 'RM' },
         { name: 'ปรึกษา', code: 'LDN' },
@@ -195,52 +195,52 @@ export class DispatchActionDial implements OnInit {
     ];
 
     get isFieldsDisabled(): boolean {
-        return this.dropdownValue?.code !== 'NY';
+        return this.callType?.code !== 'NY';
     }
 
     formSubmitted: boolean = false;
 
-    get isDropdownInvalid(): boolean {
-        return this.formSubmitted && !this.dropdownValue;
+    get isCallTypeInvalid(): boolean {
+        return this.formSubmitted && !this.callType;
     }
 
-    get isSelectButtonInvalid(): boolean {
-        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.selectButtonValue;
+    get isReportingChannelInvalid(): boolean {
+        return this.formSubmitted && this.callType?.code === 'NY' && !this.reportingChannel;
     }
 
-    get isTraumaInvalid(): boolean {
-        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.traumaSelectButtonValue;
+    get isCaseTypeInvalid(): boolean {
+        return this.formSubmitted && this.callType?.code === 'NY' && !this.caseType;
     }
 
     get isCbdInvalid(): boolean {
-        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.cbdValue;
+        return this.formSubmitted && this.callType?.code === 'NY' && !this.cbd;
     }
 
     get isSeverityInvalid(): boolean {
-        return this.formSubmitted && this.dropdownValue?.code === 'NY' && !this.severityValue;
+        return this.formSubmitted && this.callType?.code === 'NY' && !this.severity;
     }
 
     get isFormValid(): boolean {
 
-        if (this.dropdownValue?.code === 'NY') {
-            return !!(this.dropdownValue && this.selectButtonValue && this.traumaSelectButtonValue && this.cbdValue && this.severityValue);
+        if (this.callType?.code === 'NY') {
+            return !!(this.callType && this.reportingChannel && this.caseType && this.cbd && this.severity);
         }
 
-        return !!this.dropdownValue;
+        return !!this.callType;
     }
 
-    selectButtonValues: SelectOption[] = [
+    reportingChannelOptions: SelectOption[] = [
         { name: '1669' },
         { name: '2nd' },
         { name: 'วิทยุ' }
     ];
 
-    traumaSelectButtonValues: SelectOption[] = [
+    caseTypeOptions: SelectOption[] = [
         { name: 'trauma' },
         { name: 'non-trauma' }
     ];
 
-    cbdValues: SelectOption[] = [
+    cbdOptions: SelectOption[] = [
         { name: 'CBD1 ปวดท้อง หลัง เชิงกราน' },
         { name: 'CBD2 อาการภูมิแพ้ อนาไฟแลกซิส' },
         { name: 'CBD3 สัตว์กัด' },
@@ -268,7 +268,7 @@ export class DispatchActionDial implements OnInit {
         { name: 'CBD25 อุบัติเหตุจราจร' }
     ];
 
-    severityValues: SelectOption[] = [
+    severityOptions: SelectOption[] = [
         { name: 'ระดับที่ 1 สีแดง ฉุกเฉินวิกฤติ' },
         { name: 'ระดับที่ 2 สีเหลือง ฉุกเฉินเร่งด่วน' },
         { name: 'ระดับที่ 3 สีเขียว ฉุกเฉินไม่เร่งด่วน' },
@@ -289,23 +289,23 @@ export class DispatchActionDial implements OnInit {
 
     getConfirmationMessage(): string {
         const parts: string[] = [];
-        
-        if (this.dropdownValue) {
-            parts.push(`<b>ประเภท:</b><br>${this.dropdownValue.name}`);
+
+        if (this.callType) {
+            parts.push(`<b>ประเภท:</b><br>${this.callType.name}`);
         }
-        
-        if (this.dropdownValue?.code === 'NY') {
-            if (this.selectButtonValue) {
-                parts.push(`<b>ช่องทางการแจ้งเหตุ:</b><br>${this.selectButtonValue.name}`);
+
+        if (this.callType?.code === 'NY') {
+            if (this.reportingChannel) {
+                parts.push(`<b>ช่องทางการแจ้งเหตุ:</b><br>${this.reportingChannel.name}`);
             }
-            if (this.traumaSelectButtonValue) {
-                parts.push(`<b>ประเภทของการเจ็บป่วย:</b><br>${this.traumaSelectButtonValue.name}`);
+            if (this.caseType) {
+                parts.push(`<b>ประเภทของการเจ็บป่วย:</b><br>${this.caseType.name}`);
             }
-            if (this.cbdValue) {
-                parts.push(`<b>CBD:</b><br>${this.cbdValue.name}`);
+            if (this.cbd) {
+                parts.push(`<b>CBD:</b><br>${this.cbd.name}`);
             }
-            if (this.severityValue) {
-                parts.push(`<b>ระดับความรุนแรง:</b><br>${this.severityValue.name}`);
+            if (this.severity) {
+                parts.push(`<b>ระดับความรุนแรง:</b><br>${this.severity.name}`);
             }
         }
         
@@ -336,11 +336,11 @@ export class DispatchActionDial implements OnInit {
     }
 
     resetForm() {
-        this._dropdownValue = null;
-        this.selectButtonValue = null;
-        this.traumaSelectButtonValue = null;
-        this.cbdValue = null;
-        this.severityValue = null;
+        this._callType = null;
+        this.reportingChannel = null;
+        this.caseType = null;
+        this.cbd = null;
+        this.severity = null;
         this.formSubmitted = false;
     }
 
