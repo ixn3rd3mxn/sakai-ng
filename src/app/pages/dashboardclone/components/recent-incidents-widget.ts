@@ -1,18 +1,22 @@
-import { Component, inject, signal } from '@angular/core';
-import { RippleModule } from 'primeng/ripple';
+import { Component, signal } from '@angular/core';
 import { TableModule } from 'primeng/table';
-import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { CommonModule } from '@angular/common';
-import { Product, ProductService } from '@/app/pages/service/product.service';
+
+interface RecentIncident {
+    time: string;
+    type: string;
+    cbd: string;
+    severityLabel: string;
+    severityTag: 'danger' | 'warn' | 'success' | 'secondary' | 'contrast';
+}
 
 @Component({
     standalone: true,
     selector: 'app-recent-incidents',
-    imports: [CommonModule, TableModule, ButtonModule, RippleModule, TagModule],
+    imports: [TableModule, TagModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">บันทึกล่าสุด</div>
-        <p-table [value]="products()" [paginator]="true" [rows]="5" responsiveLayout="scroll">
+        <p-table [value]="incidents()" [paginator]="true" [rows]="5" responsiveLayout="scroll">
             <ng-template #header>
                 <tr>
                     <th>เวลา</th>
@@ -21,24 +25,23 @@ import { Product, ProductService } from '@/app/pages/service/product.service';
                     <th>ระดับ</th>
                 </tr>
             </ng-template>
-            <ng-template #body let-product>
+            <ng-template #body let-incident>
                 <tr>
-                    <td>23:59:59</td>
-                    <td style="min-width: 7.76rem;">แจ้งซ้ำเหตุเดิม</td>
-                    <td>CBD23</td>
-                    <td><p-tag severity="warn" value="เหลือง" /></td>
+                    <td>{{ incident.time }}</td>
+                    <td style="min-width: 7.76rem;">{{ incident.type }}</td>
+                    <td>{{ incident.cbd }}</td>
+                    <td><p-tag [severity]="incident.severityTag" [value]="incident.severityLabel" /></td>
                 </tr>
             </ng-template>
         </p-table>
-    </div>`,
-    providers: [ProductService]
+    </div>`
 })
 export class RecentIncidentsWidget {
-    products = signal<Product[]>([]);
-
-    productService = inject(ProductService);
-
-    ngOnInit() {
-        this.productService.getProductsSmall().then((data) => (this.products.set(data)));
-    }
+    incidents = signal<RecentIncident[]>([
+        { time: '23:59:59', type: 'แจ้งซ้ำเหตุเดิม', cbd: 'CBD23 ตกน้ำ / จมน้ำ', severityLabel: 'เหลือง', severityTag: 'warn' },
+        { time: '23:41:12', type: 'แจ้งเหตุ', cbd: 'CBD6 หัวใจหยุดเต้น', severityLabel: 'แดง', severityTag: 'danger' },
+        { time: '23:18:47', type: 'ปรึกษา', cbd: 'CBD9 เบาหวาน', severityLabel: 'เขียว', severityTag: 'success' },
+        { time: '22:55:03', type: 'แจ้งเหตุ', cbd: 'CBD25 อุบัติเหตุจราจร', severityLabel: 'แดง', severityTag: 'danger' },
+        { time: '22:30:29', type: 'สายหลุด', cbd: 'CBD11 ไม่มีข้อมูล', severityLabel: 'ขาว', severityTag: 'secondary' }
+    ]);
 }

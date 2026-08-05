@@ -10,6 +10,7 @@ import { ToastModule } from 'primeng/toast';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { MessageModule } from 'primeng/message';
 import { DatePickerModule } from 'primeng/datepicker';
+import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.types';
 
 @Component({
     standalone: true,
@@ -98,27 +99,25 @@ export class DispatchActionDial implements OnInit {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
     items: MenuItem[] | null = null;
-    
-    @Output() dateTimeChanged = new EventEmitter<{isCurrent: boolean, date: Date | undefined, time: any}>();
-    
+
+    @Output() dateTimeChanged = new EventEmitter<DateTimeChangedEvent>();
+
     displayDateTime: boolean = false;
     displaySaveWarning: boolean = false;
     selectedDate: Date | undefined = new Date();
-    selectedTime: any = null;
+    selectedTime: TimePeriod | null = null;
     tempSelectedDate: Date | undefined;
-    tempSelectedTime: any;
+    tempSelectedTime: TimePeriod | undefined;
     minDate: Date | undefined;
     maxDate: Date | undefined;
-    
-    private currentDate: Date = new Date();
-    private currentTimePeriod: { name: string } = this.getDefaultTimePeriod();
-    timeOptions = [
+
+    timeOptions: TimePeriod[] = [
         { name: 'เช้า' },
         { name: 'บ่าย' },
         { name: 'ดึก' }
     ];
 
-    getDefaultTimePeriod(): { name: string } {
+    getDefaultTimePeriod(): TimePeriod {
         const now = new Date();
         const hours = now.getHours();
         const minutes = now.getMinutes();
@@ -141,8 +140,8 @@ export class DispatchActionDial implements OnInit {
     }
     
     private checkIsCurrentDateTime(): boolean {
-        return this.isSameDay(this.selectedDate, this.currentDate) &&
-               this.selectedTime?.name === this.currentTimePeriod?.name;
+        return this.isSameDay(this.selectedDate, new Date()) &&
+               this.selectedTime?.name === this.getDefaultTimePeriod().name;
     }
     
     private _display: boolean = false;
@@ -166,17 +165,17 @@ export class DispatchActionDial implements OnInit {
         }
     }
     
-    private _dropdownValue: any = null;
-    selectButtonValue: any = null;
-    traumaSelectButtonValue: any = null;
-    cbdValue: any = null;
-    severityValue: any = null;
+    private _dropdownValue: SelectOption | null = null;
+    selectButtonValue: SelectOption | null = null;
+    traumaSelectButtonValue: SelectOption | null = null;
+    cbdValue: SelectOption | null = null;
+    severityValue: SelectOption | null = null;
 
-    get dropdownValue(): any {
+    get dropdownValue(): SelectOption | null {
         return this._dropdownValue;
     }
-    
-    set dropdownValue(value: any) {
+
+    set dropdownValue(value: SelectOption | null) {
         this._dropdownValue = value;
         this.formSubmitted = false;
         if (value?.code !== 'NY') {
@@ -187,7 +186,7 @@ export class DispatchActionDial implements OnInit {
         }
     }
 
-    dropdownValues = [
+    dropdownValues: SelectOption[] = [
         { name: 'แจ้งเหตุ', code: 'NY' },
         { name: 'แจ้งเพิ่มเติม เหตุเดียวกัน', code: 'RM' },
         { name: 'ปรึกษา', code: 'LDN' },
@@ -230,18 +229,18 @@ export class DispatchActionDial implements OnInit {
         return !!this.dropdownValue;
     }
 
-    selectButtonValues = [
+    selectButtonValues: SelectOption[] = [
         { name: '1669' },
         { name: '2nd' },
         { name: 'วิทยุ' }
     ];
 
-    traumaSelectButtonValues = [
+    traumaSelectButtonValues: SelectOption[] = [
         { name: 'trauma' },
         { name: 'non-trauma' }
     ];
 
-    cbdValues = [
+    cbdValues: SelectOption[] = [
         { name: 'CBD1 ปวดท้อง หลัง เชิงกราน' },
         { name: 'CBD2 อาการภูมิแพ้ อนาไฟแลกซิส' },
         { name: 'CBD3 สัตว์กัด' },
@@ -269,7 +268,7 @@ export class DispatchActionDial implements OnInit {
         { name: 'CBD25 อุบัติเหตุจราจร' }
     ];
 
-    severityValues = [
+    severityValues: SelectOption[] = [
         { name: 'ระดับที่ 1 สีแดง ฉุกเฉินวิกฤติ' },
         { name: 'ระดับที่ 2 สีเหลือง ฉุกเฉินเร่งด่วน' },
         { name: 'ระดับที่ 3 สีเขียว ฉุกเฉินไม่เร่งด่วน' },
@@ -345,10 +344,6 @@ export class DispatchActionDial implements OnInit {
         this.formSubmitted = false;
     }
 
-    close() {
-        this.display = false;
-    }
-
     openSaveDialog() {
         if (this.checkIsCurrentDateTime()) {
             this.display = true;
@@ -360,9 +355,7 @@ export class DispatchActionDial implements OnInit {
     resetAndOpenSaveDialog() {
         this.selectedDate = new Date();
         this.selectedTime = this.getDefaultTimePeriod();
-        this.currentDate = new Date();
-        this.currentTimePeriod = this.getDefaultTimePeriod();
-        
+
         this.displaySaveWarning = false;
         this.display = true;
         
@@ -375,12 +368,8 @@ export class DispatchActionDial implements OnInit {
 
     openDateTimeDialog() {
         this.tempSelectedDate = this.selectedDate;
-        this.tempSelectedTime = this.selectedTime;
+        this.tempSelectedTime = this.selectedTime ?? undefined;
         this.displayDateTime = true;
-    }
-
-    closeDateTimeDialog() {
-        this.displayDateTime = false;
     }
 
     resetDateTime() {
@@ -445,9 +434,7 @@ export class DispatchActionDial implements OnInit {
                 command: () => {
                     this.selectedDate = new Date();
                     this.selectedTime = this.getDefaultTimePeriod();
-                    this.currentDate = new Date();
-                    this.currentTimePeriod = this.getDefaultTimePeriod();
-                    
+
                     this.messageService.add({ severity: 'success', summary: 'รีเซ็ตเป็นปัจจุบัน', detail: 'กำลังดูข้อมูลปัจจุบัน' });
                     
                     this.dateTimeChanged.emit({
@@ -456,18 +443,7 @@ export class DispatchActionDial implements OnInit {
                         time: this.selectedTime
                     });
                 }
-            },
-            // {
-            //     label: 'ล็อคหน้าจอ',
-            //     icon: 'pi pi-unlock',
-            //     routerLink: ['/fileupload']
-            // },
-            // {
-            //     label: 'Angular.dev',
-            //     icon: 'pi pi-external-link',
-            //     target: '_blank',
-            //     url: 'https://angular.dev'
-            // }
+            }
         ];
     }
 }

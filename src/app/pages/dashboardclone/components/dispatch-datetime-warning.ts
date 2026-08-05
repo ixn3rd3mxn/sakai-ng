@@ -1,11 +1,11 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
+import { TimePeriod } from '../dispatch.types';
 
 @Component({
     selector: 'app-dispatch-datetime-warning',
     standalone: true,
-    imports: [CommonModule, ButtonModule],
+    imports: [ButtonModule],
     template: `
         @if (visible) {
             <div class="pb-1 bg-surface-100 dark:bg-surface-950">
@@ -17,7 +17,7 @@ import { ButtonModule } from 'primeng/button';
                     <div
                         class="absolute left-0 top-0 bottom-0 w-[243px] max-[730px]:hidden"
                         style="
-                            background: url('https://fqjltiegiezfetthbags.supabase.co/storage/v1/render/image/public/block.images/blocks/banner/banner-shapes.png') no-repeat left center;
+                            background: url('/images/banner-shapes.png') no-repeat left center;
                             background-size: contain;
                             mask-image: linear-gradient(to right, black, transparent);
                             -webkit-mask-image: linear-gradient(to right, black, transparent);
@@ -28,7 +28,7 @@ import { ButtonModule } from 'primeng/button';
                     <div
                         class="absolute right-0 top-0 bottom-0 w-[243px] max-[730px]:hidden"
                         style="
-                            background: url('https://fqjltiegiezfetthbags.supabase.co/storage/v1/render/image/public/block.images/blocks/banner/banner-shapes.png') no-repeat right center;
+                            background: url('/images/banner-shapes.png') no-repeat right center;
                             background-size: contain;
                             transform: scaleX(-1);
                             mask-image: linear-gradient(to left, black, transparent);
@@ -56,9 +56,8 @@ import { ButtonModule } from 'primeng/button';
 export class DispatchDateTimeWarning {
     @Input() visible: boolean = false;
     @Input() selectedDate: Date | undefined;
-    @Input() selectedTime: any;
+    @Input() selectedTime: TimePeriod | null | undefined;
     @Output() visibleChange = new EventEmitter<boolean>();
-    @Output() dismissed = new EventEmitter<void>();
 
     formatDate(date: Date | undefined): string {
         if (!date) return '-';
@@ -75,11 +74,5 @@ export class DispatchDateTimeWarning {
             month: 'short',
             day: 'numeric'
         });
-    }
-
-    onDismiss() {
-        this.visible = false;
-        this.visibleChange.emit(this.visible);
-        this.dismissed.emit();
     }
 }

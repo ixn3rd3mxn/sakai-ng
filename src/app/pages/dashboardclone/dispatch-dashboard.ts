@@ -7,6 +7,7 @@ import { FrequentCbdCasesWidget } from './components/frequent-cbd-cases-widget';
 import { DailyIncidentSummaryWidget } from './components/daily-incident-summary-widget';
 import { DispatchActionDial } from './components/dispatch-action-dial';
 import { DispatchDateTimeWarning } from './components/dispatch-datetime-warning';
+import { DateTimeChangedEvent, TimePeriod } from './dispatch.types';
 
 @Component({
     selector: 'app-dispatch-dashboard',
@@ -37,9 +38,9 @@ import { DispatchDateTimeWarning } from './components/dispatch-datetime-warning'
 export class EmergencyDispatchDashboard {
     showDateTimeWarning: boolean = false;
     selectedDate: Date | undefined;
-    selectedTime: any;
+    selectedTime: TimePeriod | null = null;
 
-    onDateTimeChanged(event: { isCurrent: boolean, date: Date | undefined, time: any }) {
+    onDateTimeChanged(event: DateTimeChangedEvent) {
         this.showDateTimeWarning = !event.isCurrent;
         this.selectedDate = event.date;
         this.selectedTime = event.time;
