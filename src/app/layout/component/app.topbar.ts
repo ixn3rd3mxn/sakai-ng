@@ -27,7 +27,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
                 <button type="button" class="layout-topbar-action" (click)="toggleDarkMode()">
                     <i [ngClass]="{ 'pi ': true, 'pi-moon': layoutService.isDarkTheme(), 'pi-sun': !layoutService.isDarkTheme() }"></i>
                 </button>
-                <button type="button" class="layout-topbar-action" (click)="toggleFullscreen()">
+                <button type="button" class="layout-topbar-action hidden! xl:inline-flex!" (click)="toggleFullscreen()">
                     <i [ngClass]="{ 'pi ': true, 'pi-window-maximize': !isFullscreen(), 'pi-window-minimize': isFullscreen() }"></i>
                 </button>
                 <div class="relative">

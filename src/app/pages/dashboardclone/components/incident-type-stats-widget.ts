@@ -1,4 +1,11 @@
-import { Component } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
+import { IncidentTypeStats } from '../dispatch.types';
+
+interface StatCard {
+    label: string;
+    count: number;
+    diff: number;
+}
 
 @Component({
     standalone: true,
@@ -9,72 +16,61 @@ import { Component } from '@angular/core';
                 <div class="flex justify-between mb-4">
                     <div>
                         <span class="block text-muted-color font-medium mb-4">ผลรวมทั้งหมด</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">999</div>
+                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ totalCount() }}</div>
                     </div>
                 </div>
-                <span class="text-green-500 font-medium">+24</span>
+                <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
                 <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
             </div>
         </div>
-        <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
-                <div class="flex justify-between mb-4">
-                    <div>
-                        <span class="block text-muted-color font-medium mb-4">แจ้งเหตุ</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">888</div>
+        @for (card of cards(); track card.label) {
+            <div class="col-span-6 lg:col-span-4 xl:col-span-2">
+                <div class="card mb-0">
+                    <div class="flex justify-between mb-4">
+                        <div>
+                            <span class="block text-muted-color font-medium mb-4">{{ card.label }}</span>
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.count }}</div>
+                        </div>
                     </div>
+                    <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
+                    <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
                 </div>
-                <span class="text-red-500 font-medium">-24</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
             </div>
-        </div>
-        <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
-                <div class="flex justify-between mb-4">
-                    <div>
-                        <span class="block text-muted-color font-medium mb-4">แจ้งซ้ำเหตุเดิม</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">777</div>
-                    </div>
-                </div>
-                <span class="text-gray-500 font-medium">0</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
-            </div>
-        </div>
-        <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
-                <div class="flex justify-between mb-4">
-                    <div>
-                        <span class="block text-muted-color font-medium mb-4">ปรึกษา</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">666</div>
-                    </div>
-                </div>
-                <span class="text-gray-500 font-medium">0</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
-            </div>
-        </div>
-        <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
-                <div class="flex justify-between mb-4">
-                    <div>
-                        <span class="block text-muted-color font-medium mb-4">สายหลุด</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">555</div>
-                    </div>
-                </div>
-                <span class="text-green-500 font-medium">+24</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
-            </div>
-        </div>
-        <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
-                <div class="flex justify-between mb-4">
-                    <div>
-                        <span class="block text-muted-color font-medium mb-4">ก่อกวน</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">444</div>
-                    </div>
-                </div>
-                <span class="text-red-500 font-medium">-24</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
-            </div>
-        </div>`
+        }`
 })
-export class IncidentTypeStatsWidget {}
+export class IncidentTypeStatsWidget {
+    stats = input<IncidentTypeStats | null>(null);
+
+    private byName = computed(() => {
+        const map = new Map<string, { count: number; diff: number }>();
+        for (const item of this.stats()?.items ?? []) {
+            map.set(item.call_name, { count: item.count, diff: item.diff });
+        }
+        return map;
+    });
+
+    totalCount = computed(() => this.stats()?.total.count ?? 0);
+    totalDiff = computed(() => this.stats()?.total.diff ?? 0);
+
+    cards = computed<StatCard[]>(() => {
+        const map = this.byName();
+        const pick = (label: string) => map.get(label) ?? { count: 0, diff: 0 };
+        return [
+            { label: 'แจ้งเหตุ', ...pick('แจ้งเหตุ') },
+            { label: 'แจ้งซ้ำเหตุเดิม', ...pick('แจ้งซ้ำเหตุเดิม') },
+            { label: 'ปรึกษา', ...pick('ปรึกษา') },
+            { label: 'สายหลุด', ...pick('สายหลุด') },
+            { label: 'ก่อกวน', ...pick('ก่อกวน') }
+        ];
+    });
+
+    diffClass(diff: number): string {
+        if (diff > 0) return 'text-green-500 font-medium';
+        if (diff < 0) return 'text-red-500 font-medium';
+        return 'text-gray-500 font-medium';
+    }
+
+    diffText(diff: number): string {
+        return diff > 0 ? `+${diff}` : `${diff}`;
+    }
+}

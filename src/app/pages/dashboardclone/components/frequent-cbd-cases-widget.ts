@@ -1,6 +1,7 @@
-import { afterNextRender, Component, DestroyRef, effect, inject, signal } from '@angular/core';
+import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
 import { LayoutService } from '@/app/layout/service/layout.service';
+import { CbdItem } from '../dispatch.types';
 
 @Component({
     standalone: true,
@@ -14,6 +15,8 @@ import { LayoutService } from '@/app/layout/service/layout.service';
 export class FrequentCbdCasesWidget {
     layoutService = inject(LayoutService);
     private destroyRef = inject(DestroyRef);
+
+    items = input<CbdItem[]>([]);
 
     chartData = signal<any>(null);
 
@@ -29,6 +32,7 @@ export class FrequentCbdCasesWidget {
         let isFirstRun = true;
         effect(() => {
             this.layoutService.layoutConfig().darkTheme;
+            this.items();
             if (isFirstRun) {
                 isFirstRun = false;
                 return;
@@ -49,18 +53,15 @@ export class FrequentCbdCasesWidget {
         const borderColor = documentStyle.getPropertyValue('--surface-border');
         const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
+        const items = this.items();
+        const palette = [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-300'), documentStyle.getPropertyValue('--p-primary-200')];
+
         this.chartData.set({
-            labels: ['CBD1', 'CBD2', 'CBD3', 'CBD4', 'CBD5', 'CBD6', 'CBD7', 'CBD8', 'CBD9', 'CBD10'],
+            labels: items.map((item) => item.cbd_name),
             datasets: [
                 {
-                    backgroundColor: [
-                        documentStyle.getPropertyValue('--p-primary-600'),
-                        documentStyle.getPropertyValue('--p-primary-500'),
-                        documentStyle.getPropertyValue('--p-primary-400'),
-                        documentStyle.getPropertyValue('--p-primary-300'),
-                        documentStyle.getPropertyValue('--p-primary-200')
-                    ],
-                    data: [38, 34, 30, 26, 22, 18, 15, 11, 8, 5],
+                    backgroundColor: items.map((_, index) => palette[index % palette.length]),
+                    data: items.map((item) => item.count),
                     borderRadius: {
                         topLeft: 8,
                         topRight: 8,
@@ -94,7 +95,8 @@ export class FrequentCbdCasesWidget {
                 },
                 y: {
                     ticks: {
-                        color: textMutedColor
+                        color: textMutedColor,
+                        precision: 0
                     },
                     grid: {
                         color: borderColor,

@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, Output, EventEmitter } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnDestroy, ViewChild, inject, OnInit } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -10,7 +10,10 @@ import { ToastModule } from 'primeng/toast';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { MessageModule } from 'primeng/message';
 import { DatePickerModule } from 'primeng/datepicker';
-import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.types';
+import { CallTypeCode, IncidentCreateRequest, SHIFT_CODE_TO_LABEL, SHIFT_LABEL_TO_CODE, SelectOption, TimePeriod } from '../dispatch.types';
+import { DispatchApiService } from '../services/dispatch-api.service';
+import { DispatchDataService } from '../services/dispatch-data.service';
+import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from '../services/date-utils';
 
 @Component({
     standalone: true,
@@ -23,7 +26,22 @@ import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.type
     <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
         <div class="flex gap-4">
             <div class="flex flex-col gap-1"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="tempSelectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
-            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกวัน</div><p-datepicker [(ngModel)]="tempSelectedDate" [minDate]="minDate" [maxDate]="maxDate" [readonlyInput]="true" placeholder="เลือกวัน" class="w-full" appendTo="body" /></div>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold">เลือกวัน</div>
+                <p-datepicker
+                    #datePicker
+                    [(ngModel)]="tempSelectedDate"
+                    [minDate]="minDate"
+                    [maxDate]="maxDate"
+                    [readonlyInput]="true"
+                    dateFormat="dd/mm/yy"
+                    placeholder="เลือกวัน"
+                    class="w-full"
+                    appendTo="body"
+                    (onShow)="onDatePanelShow($event)"
+                    (onClose)="onDatePanelClose()"
+                />
+            </div>
         </div>
         <ng-template #footer>
             <p-button label="รีเซ็ต" severity="secondary" (click)="resetDateTime()" />
@@ -95,21 +113,39 @@ import { DateTimeChangedEvent, SelectOption, TimePeriod } from '../dispatch.type
     </p-dialog>`,
     providers: [MessageService, ConfirmationService]
 })
-export class DispatchActionDial implements OnInit {
+export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
-    items: MenuItem[] | null = null;
+    private api = inject(DispatchApiService);
+    private dataService = inject(DispatchDataService);
 
-    @Output() dateTimeChanged = new EventEmitter<DateTimeChangedEvent>();
+    @ViewChild('datePicker', { read: ElementRef }) private datePickerEl?: ElementRef<HTMLElement>;
+
+    private readonly beOffset = BUDDHIST_ERA_OFFSET;
+
+    items: MenuItem[] | null = null;
 
     displayDateTime: boolean = false;
     displaySaveWarning: boolean = false;
-    selectedDate: Date | undefined = new Date();
-    selectedTime: TimePeriod | null = null;
     tempSelectedDate: Date | undefined;
     tempSelectedTime: TimePeriod | undefined;
     minDate: Date | undefined;
     maxDate: Date | undefined;
+
+    // The datepicker component has no Buddhist-calendar support (it formats
+    // years straight off Date.getFullYear()), so the visible input text is
+    // overwritten here every check, and the popup's year texts - which have
+    // no template hook - are patched live via MutationObserver while open.
+    // The bound Date value driving selection/min/max/backend stays Gregorian throughout.
+    private yearPanelObserver: MutationObserver | null = null;
+    // Remembers the exact BE text last written to each patched node, so a
+    // rescan triggered by an unrelated mutation (e.g. switching from date-view
+    // to month-view, which leaves the header's year button untouched) can tell
+    // "already patched, unchanged" apart from "genuinely new CE text" instead
+    // of blindly re-shifting an already-BE value (2569 -> 3112).
+    private readonly patchedYearNodes = new WeakMap<Text, string>();
+    private static readonly YEAR_TEXT_SELECTOR = '.p-datepicker-select-year, .p-datepicker-year-view .p-datepicker-year';
+    private static readonly DECADE_RANGE_SELECTOR = '.p-datepicker-decade';
 
     timeOptions: TimePeriod[] = [
         { name: 'เช้า' },
@@ -117,39 +153,12 @@ export class DispatchActionDial implements OnInit {
         { name: 'ดึก' }
     ];
 
-    getDefaultTimePeriod(): TimePeriod {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const totalMinutes = hours * 60 + minutes;
-
-        if (totalMinutes >= 0 * 60 + 30 && totalMinutes < 8 * 60 + 30) {
-            return { name: 'ดึก' };
-        } else if (totalMinutes >= 8 * 60 + 30 && totalMinutes < 16 * 60 + 30) {
-            return { name: 'เช้า' };
-        } else {
-            return { name: 'บ่าย' };
-        }
-    }
-    
-    private isSameDay(date1: Date | undefined, date2: Date): boolean {
-        if (!date1) return false;
-        return date1.getFullYear() === date2.getFullYear() &&
-               date1.getMonth() === date2.getMonth() &&
-               date1.getDate() === date2.getDate();
-    }
-    
-    private checkIsCurrentDateTime(): boolean {
-        return this.isSameDay(this.selectedDate, new Date()) &&
-               this.selectedTime?.name === this.getDefaultTimePeriod().name;
-    }
-    
     private _display: boolean = false;
-    
+
     get display(): boolean {
         return this._display;
     }
-    
+
     set display(value: boolean) {
         this._display = value;
         if (value) {
@@ -278,12 +287,12 @@ export class DispatchActionDial implements OnInit {
 
     onSaveClick(event: Event) {
         this.formSubmitted = true;
-        
+
         if (!this.isFormValid) {
             this.messageService.add({ severity: 'error', summary: 'ข้อมูลไม่สมบูรณ์', detail: 'โปรดกรอกข้อมูลให้ครบทุกช่อง' });
             return;
         }
-        
+
         this.confirmSave(event);
     }
 
@@ -308,8 +317,25 @@ export class DispatchActionDial implements OnInit {
                 parts.push(`<b>ระดับความรุนแรง:</b><br>${this.severity.name}`);
             }
         }
-        
+
         return `<div style="line-height:1.8">คุณต้องการบันทึกข้อมูลต่อไปนี้หรือไม่?<br><br>${parts.join('<br><br>')}</div>`;
+    }
+
+    private buildIncidentPayload(): IncidentCreateRequest | null {
+        const code = this.callType?.code as CallTypeCode | undefined;
+        if (!code) return null;
+
+        if (code !== 'NY') {
+            return { call_type_code: code };
+        }
+
+        return {
+            call_type_code: code,
+            reporting_channel_name: this.reportingChannel?.name,
+            case_type_name: this.caseType?.name,
+            cbd_name: this.cbd?.name,
+            severity_name: this.severity?.name
+        };
     }
 
     confirmSave(event: Event) {
@@ -325,9 +351,22 @@ export class DispatchActionDial implements OnInit {
             },
 
             accept: () => {
-                this.messageService.add({ severity: 'success', summary: 'บันทึกสำเร็จ', detail: 'ข้อมูลได้ถูกบันทึกแล้ว' });
-                this.display = false;
-                this.formSubmitted = false;
+                const payload = this.buildIncidentPayload();
+                if (!payload) {
+                    this.messageService.add({ severity: 'error', summary: 'ข้อมูลไม่สมบูรณ์', detail: 'โปรดเลือกประเภท' });
+                    return;
+                }
+
+                this.dataService.createIncident(payload).subscribe({
+                    next: () => {
+                        this.messageService.add({ severity: 'success', summary: 'บันทึกสำเร็จ', detail: 'ข้อมูลได้ถูกบันทึกแล้ว' });
+                        this.display = false;
+                        this.formSubmitted = false;
+                    },
+                    error: () => {
+                        this.messageService.add({ severity: 'error', summary: 'บันทึกไม่สำเร็จ', detail: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง' });
+                    }
+                });
             },
             reject: () => {
                 this.messageService.add({ severity: 'warn', summary: 'ยกเลิก', detail: 'การบันทึกถูกยกเลิก' });
@@ -345,7 +384,7 @@ export class DispatchActionDial implements OnInit {
     }
 
     openSaveDialog() {
-        if (this.checkIsCurrentDateTime()) {
+        if (this.dataService.isCurrent()) {
             this.display = true;
         } else {
             this.displaySaveWarning = true;
@@ -353,66 +392,125 @@ export class DispatchActionDial implements OnInit {
     }
 
     resetAndOpenSaveDialog() {
-        this.selectedDate = new Date();
-        this.selectedTime = this.getDefaultTimePeriod();
+        this.dataService.selectCurrent();
 
         this.displaySaveWarning = false;
         this.display = true;
-        
-        this.dateTimeChanged.emit({
-            isCurrent: true,
-            date: this.selectedDate,
-            time: this.selectedTime
-        });
     }
 
     openDateTimeDialog() {
-        this.tempSelectedDate = this.selectedDate;
-        this.tempSelectedTime = this.selectedTime ?? undefined;
+        this.tempSelectedDate = this.dataService.selectedDate();
+        this.tempSelectedTime = { name: SHIFT_CODE_TO_LABEL[this.dataService.selectedShift()] };
         this.displayDateTime = true;
     }
 
     resetDateTime() {
-        this.tempSelectedDate = new Date();
-        this.tempSelectedTime = this.getDefaultTimePeriod();
+        // The "current" date/shift is resolved server-side, same source of
+        // truth as everything else - never computed here.
+        this.api.getContext().subscribe((ctx) => {
+            this.tempSelectedDate = parseIsoDate(ctx.operational_day);
+            this.tempSelectedTime = { name: SHIFT_CODE_TO_LABEL[ctx.shift] };
+        });
     }
 
     confirmDateTime() {
         if (this.tempSelectedDate && this.tempSelectedTime) {
-            this.selectedDate = this.tempSelectedDate;
-            this.selectedTime = this.tempSelectedTime;
-            
-            this.messageService.add({ 
-                severity: 'success', 
-                summary: 'สลับวันเวลา', 
-                detail: `เลือกวัน: ${this.selectedDate.toLocaleDateString('th-TH')} เวลา: ${this.selectedTime.name}` 
+            const shiftCode = SHIFT_LABEL_TO_CODE[this.tempSelectedTime.name];
+            this.dataService.select(this.tempSelectedDate, shiftCode);
+
+            this.messageService.add({
+                severity: 'success',
+                summary: 'สลับวันเวลา',
+                detail: `เลือกวัน: ${this.tempSelectedDate.toLocaleDateString('th-TH')} เวลา: ${this.tempSelectedTime.name}`
             });
             this.displayDateTime = false;
-            
-            const isCurrent = this.checkIsCurrentDateTime();
-            this.dateTimeChanged.emit({
-                isCurrent: isCurrent,
-                date: this.selectedDate,
-                time: this.selectedTime
-            });
         } else {
-            this.messageService.add({ 
-                severity: 'error', 
-                summary: 'ข้อมูลไม่สมบูรณ์', 
-                detail: 'โปรดเลือกวันที่และเวลา' 
+            this.messageService.add({
+                severity: 'error',
+                summary: 'ข้อมูลไม่สมบูรณ์',
+                detail: 'โปรดเลือกวันที่และเวลา'
             });
         }
     }
 
+    ngAfterViewChecked(): void {
+        this.ensureInputValuePatched();
+    }
+
+    ngOnDestroy(): void {
+        this.yearPanelObserver?.disconnect();
+    }
+
+    // Zoneless change detection means there's no reliable "after PrimeNG wrote
+    // the CE text" moment to hook via lifecycle callbacks - PrimeNG can rewrite
+    // input.value (e.g. on focus) between our checks with nothing to re-trigger
+    // ours. Overriding the value property on this one <input> intercepts every
+    // write at the source instead, so it's correct regardless of CD timing.
+    private ensureInputValuePatched(): void {
+        const input = this.datePickerEl?.nativeElement.querySelector('input');
+        if (!input || (input as any).__beValuePatched) return;
+        (input as any).__beValuePatched = true;
+
+        const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!;
+        Object.defineProperty(input, 'value', {
+            configurable: true,
+            enumerable: true,
+            get(): string {
+                return native.get!.call(input);
+            },
+            set(raw: string): void {
+                native.set!.call(input, shiftDisplayedYearToBuddhist(raw));
+            }
+        });
+
+        input.value = native.get!.call(input);
+    }
+
+    onDatePanelShow(panel: HTMLElement): void {
+        this.yearPanelObserver = new MutationObserver(() => this.patchPanelYears(panel));
+        this.patchPanelYears(panel);
+    }
+
+    onDatePanelClose(): void {
+        this.yearPanelObserver?.disconnect();
+        this.yearPanelObserver = null;
+    }
+
+    private patchPanelYears(panel: HTMLElement): void {
+        this.yearPanelObserver?.disconnect();
+
+        panel.querySelectorAll<HTMLElement>(DispatchActionDial.YEAR_TEXT_SELECTOR).forEach((node) => {
+            const textNode = Array.from(node.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined;
+            const raw = textNode?.textContent?.trim();
+            if (!textNode || !raw || !/^\d{4}$/.test(raw) || this.patchedYearNodes.get(textNode) === raw) return;
+
+            const shifted = String(Number(raw) + this.beOffset);
+            textNode.textContent = shifted;
+            this.patchedYearNodes.set(textNode, shifted);
+        });
+
+        // Decade header, e.g. "2020 - 2029" - shift both years in place.
+        panel.querySelectorAll<HTMLElement>(DispatchActionDial.DECADE_RANGE_SELECTOR).forEach((node) => {
+            const textNode = Array.from(node.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined;
+            const raw = textNode?.textContent;
+            if (!textNode || !raw || !/^\s*\d{4}\s*-\s*\d{4}\s*$/.test(raw) || this.patchedYearNodes.get(textNode) === raw) return;
+
+            const shifted = raw.replace(/\d{4}/g, (year) => String(Number(year) + this.beOffset));
+            textNode.textContent = shifted;
+            this.patchedYearNodes.set(textNode, shifted);
+        });
+
+        this.yearPanelObserver?.observe(panel, { childList: true, characterData: true, subtree: true });
+    }
+
     setupDateBoundaries() {
-        this.minDate = new Date(2026, 1, 16);
-        this.maxDate = new Date(2031, 10, 31);
+        this.minDate = new Date(2026, 7, 1);
+        this.maxDate = new Date(2027, 12, 31);
     }
 
     ngOnInit() {
         this.setupDateBoundaries();
-        this.selectedTime = this.getDefaultTimePeriod();
-        
+
         this.items = [
             {
                 label: 'บันทึกข้อมูล',
@@ -432,16 +530,9 @@ export class DispatchActionDial implements OnInit {
                 label: 'วันเวลาปัจจุบัน',
                 icon: 'pi pi-refresh',
                 command: () => {
-                    this.selectedDate = new Date();
-                    this.selectedTime = this.getDefaultTimePeriod();
+                    this.dataService.selectCurrent();
 
                     this.messageService.add({ severity: 'success', summary: 'รีเซ็ตเป็นปัจจุบัน', detail: 'กำลังดูข้อมูลปัจจุบัน' });
-                    
-                    this.dateTimeChanged.emit({
-                        isCurrent: true,
-                        date: this.selectedDate,
-                        time: this.selectedTime
-                    });
                 }
             }
         ];

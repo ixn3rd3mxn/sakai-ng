@@ -1,6 +1,7 @@
-import { afterNextRender, Component, DestroyRef, effect, inject, signal } from '@angular/core';
+import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
 import { LayoutService } from '@/app/layout/service/layout.service';
+import { DailySummary } from '../dispatch.types';
 
 @Component({
     standalone: true,
@@ -17,6 +18,8 @@ export class DailyIncidentSummaryWidget {
     layoutService = inject(LayoutService);
     private destroyRef = inject(DestroyRef);
 
+    summary = input<DailySummary | null>(null);
+
     chartData = signal<any>(null);
 
     chartOptions = signal<any>(null);
@@ -31,6 +34,7 @@ export class DailyIncidentSummaryWidget {
         let isFirstRun = true;
         effect(() => {
             this.layoutService.layoutConfig().darkTheme;
+            this.summary();
             if (isFirstRun) {
                 isFirstRun = false;
                 return;
@@ -50,11 +54,14 @@ export class DailyIncidentSummaryWidget {
         const documentStyle = getComputedStyle(document.documentElement);
         const textColor = documentStyle.getPropertyValue('--text-color');
 
+        const summary = this.summary();
+        const data = [summary?.morning ?? 0, summary?.afternoon ?? 0, summary?.night ?? 0];
+
         this.chartData.set({
             labels: ['เช้า', 'บ่าย', 'ดึก'],
             datasets: [
                 {
-                    data: [150, 120, 90],
+                    data,
                     backgroundColor: [
 
                         documentStyle.getPropertyValue('--p-primary-600'),

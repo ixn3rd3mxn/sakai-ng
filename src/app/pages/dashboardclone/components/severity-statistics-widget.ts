@@ -1,6 +1,9 @@
-import { afterNextRender, Component, DestroyRef, effect, inject, signal } from '@angular/core';
+import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
 import { LayoutService } from '@/app/layout/service/layout.service';
+import { SeverityItem } from '../dispatch.types';
+
+const FALLBACK_LABELS = ['แดง', 'เหลือง', 'เขียว', 'ขาว', 'ดำ'];
 
 @Component({
     standalone: true,
@@ -14,6 +17,8 @@ import { LayoutService } from '@/app/layout/service/layout.service';
 export class SeverityStatisticsWidget {
     layoutService = inject(LayoutService);
     private destroyRef = inject(DestroyRef);
+
+    items = input<SeverityItem[]>([]);
 
     chartData = signal<any>(null);
 
@@ -29,6 +34,7 @@ export class SeverityStatisticsWidget {
         let isFirstRun = true;
         effect(() => {
             this.layoutService.layoutConfig().darkTheme;
+            this.items();
             if (isFirstRun) {
                 isFirstRun = false;
                 return;
@@ -49,8 +55,12 @@ export class SeverityStatisticsWidget {
         const borderColor = documentStyle.getPropertyValue('--surface-border');
         const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
+        const items = this.items();
+        const labels = items.length ? items.map((item) => item.severity_name) : FALLBACK_LABELS;
+        const data = items.length ? items.map((item) => item.count) : FALLBACK_LABELS.map(() => 0);
+
         this.chartData.set({
-            labels: ['แดง', 'เหลือง', 'เขียว', 'ขาว', 'ดำ'],
+            labels,
             datasets: [
                 {
                     backgroundColor: [
@@ -60,7 +70,7 @@ export class SeverityStatisticsWidget {
                         documentStyle.getPropertyValue('--p-primary-300'),
                         documentStyle.getPropertyValue('--p-primary-200')
                     ],
-                    data: [40, 35, 30, 27, 17],
+                    data,
                     borderRadius: {
                         topLeft: 0,
                         topRight: 8,
@@ -87,7 +97,8 @@ export class SeverityStatisticsWidget {
             scales: {
                 x: {
                     ticks: {
-                        color: textMutedColor
+                        color: textMutedColor,
+                        precision: 0
                     },
                     grid: {
                         color: borderColor,
