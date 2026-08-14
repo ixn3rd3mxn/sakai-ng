@@ -203,7 +203,7 @@ interface IncidentStatistics {
                 </ng-template>
                 <ng-template #emptymessage>
                     <tr>
-                        <td colspan="6">ไม่พบข้อมูล</td>
+                        <td colspan="6">ยังไม่มีการบันทึกข้อมูล</td>
                     </tr>
                 </ng-template>
             </p-table>

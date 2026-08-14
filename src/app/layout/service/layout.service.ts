@@ -1,4 +1,40 @@
-import { Injectable, effect, signal, computed } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import { Injectable, effect, signal, computed, inject, PLATFORM_ID } from '@angular/core';
+
+function getPreferredDarkTheme(platformId: object): boolean {
+    if (!isPlatformBrowser(platformId)) {
+        return false;
+    }
+
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+}
+
+const LAYOUT_CONFIG_STORAGE_KEY = 'layoutConfig';
+
+function getStoredLayoutConfig(platformId: object): Partial<LayoutConfig> | null {
+    if (!isPlatformBrowser(platformId)) {
+        return null;
+    }
+
+    try {
+        const raw = localStorage.getItem(LAYOUT_CONFIG_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+}
+
+function getInitialLayoutConfig(platformId: object): LayoutConfig {
+    const stored = getStoredLayoutConfig(platformId);
+
+    return {
+        preset: stored?.preset ?? 'Aura',
+        primary: stored?.primary ?? 'blue',
+        surface: stored?.surface ?? null,
+        darkTheme: stored?.darkTheme ?? getPreferredDarkTheme(platformId),
+        menuMode: stored?.menuMode ?? 'static'
+    };
+}
 
 export interface LayoutConfig {
     preset: string;
@@ -21,13 +57,9 @@ interface LayoutState {
     providedIn: 'root'
 })
 export class LayoutService {
-    layoutConfig = signal<LayoutConfig>({
-        preset: 'Aura',
-        primary: 'blue',
-        surface: null,
-        darkTheme: false,
-        menuMode: 'static'
-    });
+    private platformId = inject(PLATFORM_ID);
+
+    layoutConfig = signal<LayoutConfig>(getInitialLayoutConfig(this.platformId));
 
     layoutState = signal<LayoutState>({
         staticMenuDesktopInactive: false,
@@ -60,10 +92,19 @@ export class LayoutService {
 
             if (!this.initialized || !config) {
                 this.initialized = true;
+                this.toggleDarkMode(config);
                 return;
             }
 
             this.handleDarkModeTransition(config);
+        });
+
+        effect(() => {
+            const config = this.layoutConfig();
+
+            if (isPlatformBrowser(this.platformId)) {
+                localStorage.setItem(LAYOUT_CONFIG_STORAGE_KEY, JSON.stringify(config));
+            }
         });
     }
 

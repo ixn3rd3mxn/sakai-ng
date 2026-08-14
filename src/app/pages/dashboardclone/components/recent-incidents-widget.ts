@@ -26,6 +26,11 @@ import { RecentIncidentItem } from '../dispatch.types';
                     <td><p-tag [severity]="getSeverity(incident.severity)" [value]="incident.severity" /></td>
                 </tr>
             </ng-template>
+            <ng-template #emptymessage>
+                <tr>
+                    <td colspan="4">ยังไม่มีการบันทึกข้อมูล</td>
+                </tr>
+            </ng-template>
         </p-table>
     </div>`
 })

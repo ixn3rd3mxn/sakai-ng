@@ -11,16 +11,22 @@ interface StatCard {
     standalone: true,
     selector: 'app-incident-type-stats',
     imports: [],
+    styles: `
+        .summary-card {
+            background: var(--primary-color);
+            color: var(--primary-contrast-color);
+        }
+    `,
     template: `<div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card mb-0">
+            <div class="card summary-card mb-0">
                 <div class="flex justify-between mb-4">
                     <div>
-                        <span class="block text-muted-color font-medium mb-4">ผลรวมทั้งหมด</span>
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ totalCount() }}</div>
+                        <span class="block opacity-80 font-medium mb-4">ผลรวมทั้งหมด</span>
+                        <div class="font-medium text-7xl">{{ totalCount() }}</div>
                     </div>
                 </div>
                 <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
-                <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
+                <span class="opacity-80"> เทียบกับเมื่อวาน</span>
             </div>
         </div>
         @for (card of cards(); track card.label) {
