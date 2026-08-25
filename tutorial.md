@@ -19,3 +19,5 @@ npm update XXX
 npm update
 
 conda activate myenv && conda update --all --dry-run && pip list --outdated && ng update && npm outdated
+
+set PYTHONNOUSERSITE=1

@@ -89,6 +89,27 @@ def operational_day_window(operational_day: date) -> Window:
     return Window(start=start, end=end)
 
 
+def calendar_week_window(day: date) -> Window:
+    """Monday-start calendar week containing `day`, built from
+    operational-day boundaries (08:30 cutover) rather than midnight, so it
+    stays consistent with how every other window in this module treats a
+    "day"."""
+    week_start = day - timedelta(days=day.weekday())
+    week_end = week_start + timedelta(days=7)
+    return Window(start=operational_day_window(week_start).start, end=operational_day_window(week_end).start)
+
+
+def calendar_month_window(day: date) -> Window:
+    """Calendar month containing `day`, same operational-day-boundary
+    construction as `calendar_week_window`."""
+    month_start = day.replace(day=1)
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+    return Window(start=operational_day_window(month_start).start, end=operational_day_window(next_month).start)
+
+
 @dataclass(frozen=True)
 class OperationalContext:
     operational_day: date
@@ -115,6 +136,32 @@ class OperationalContext:
             "is_current": self.is_current,
             "server_now": self.server_now.isoformat(),
         }
+
+
+@dataclass(frozen=True)
+class DayContext:
+    """Day-only sibling of `OperationalContext`, for pages (like the incident
+    history/summary page) that report across a whole operational day rather
+    than a single shift."""
+
+    operational_day: date
+    is_current: bool
+    server_now: datetime
+
+
+def resolve_day_context(requested_day: Optional[date]) -> DayContext:
+    """Resolve which operational day is being viewed and whether it's the
+    current one - the single source of truth callers must use instead of
+    comparing dates themselves, mirroring `resolve_context` below."""
+    now = datetime.now()
+    current_day = get_operational_day(now)
+    op_day = requested_day if requested_day is not None else current_day
+
+    return DayContext(
+        operational_day=op_day,
+        is_current=op_day == current_day,
+        server_now=now,
+    )
 
 
 def resolve_context(

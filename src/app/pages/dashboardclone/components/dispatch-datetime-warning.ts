@@ -35,12 +35,12 @@ import { TimePeriod } from '../dispatch.types';
                     @if (historical) {
                         <!-- แสดง text1 ในหน้าจอใหญ่ (lg ขึ้นไป) -->
                         <span class="hidden lg:inline leading-normal whitespace-nowrap font-semibold text-xl">
-                            กำลังดูแดชบอร์ดวันที่ {{ formatDate(selectedDate) }}{{ selectedTime?.name || '-' }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน
+                            กำลังดูแดชบอร์ดวันที่ {{ formatDate(selectedDate) }} {{ selectedTime?.name || '-' }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน
                         </span>
 
                         <!-- แสดง text2 ในหน้าจอเล็ก (น้อยกว่า lg) -->
                         <span class="lg:hidden leading-normal whitespace-nowrap font-semibold text-xl">
-                            กำลังดูข้อมูลย้อนหลัง: {{ formatShortDate(selectedDate) }}{{ selectedTime?.name || '-' }}
+                            กำลังดูข้อมูลย้อนหลัง: {{ formatShortDate(selectedDate) }} {{ selectedTime?.name || '-' }}
                         </span>
                     } @else {
                         <span class="leading-normal whitespace-nowrap font-semibold text-xl">

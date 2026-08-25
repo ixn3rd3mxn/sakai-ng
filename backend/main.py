@@ -16,7 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from libs import aggregations, events, lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import IncidentCreateIn
-from libs.shift import Shift, resolve_context
+from libs.shift import Shift, resolve_context, resolve_day_context
 
 
 @asynccontextmanager
@@ -148,6 +148,59 @@ async def stream_summary(
                         yield {"event": "dashboard", "data": json.dumps(payload, default=str)}
 
                     last_ctx_key = ctx_key
+
+                first = False
+        finally:
+            events.unsubscribe(wake_queue)
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/api/incident-history")
+def get_incident_history(date: Optional[date_cls] = Query(None)):
+    ctx = resolve_day_context(date)
+    return aggregations.build_incident_history(ctx.operational_day, ctx.is_current, ctx.server_now)
+
+
+@app.get("/api/incident-history/stream")
+async def stream_incident_history(request: Request, date: Optional[date_cls] = Query(None)):
+    """Same wake-up/dedup mechanics as `stream_summary` above, but scoped to
+    a whole operational day (no shift) - the frontend only opens this
+    connection while viewing today, so `last_is_current` here is normally
+    always true; the historical-day poll interval is kept anyway so a
+    connection left open across a day rollover still behaves sanely."""
+    async def event_generator():
+        last_signature: Optional[str] = None
+        last_day: Optional[date_cls] = None
+        last_is_current = True
+        wake_queue = events.subscribe()
+        try:
+            first = True
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                woken_by_write = False
+                if not first:
+                    poll_interval = 2 if last_is_current else 20
+                    try:
+                        await asyncio.wait_for(wake_queue.get(), timeout=poll_interval)
+                        woken_by_write = True
+                    except asyncio.TimeoutError:
+                        pass
+
+                ctx = resolve_day_context(date)
+                last_is_current = ctx.is_current
+
+                if first or woken_by_write or ctx.operational_day != last_day:
+                    payload = aggregations.build_incident_history(ctx.operational_day, ctx.is_current, ctx.server_now)
+                    signature = _payload_signature(payload)
+
+                    if signature != last_signature:
+                        last_signature = signature
+                        yield {"event": "incident-history", "data": json.dumps(payload, default=str)}
+
+                    last_day = ctx.operational_day
 
                 first = False
         finally:

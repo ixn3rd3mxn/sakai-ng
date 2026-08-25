@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 import { EmergencyDispatchDashboard } from './dashboardclone/dispatch-dashboard';
-import { IncidentHistoryComponent } from './uikit/incident-history';
+import { IncidentHistoryComponent } from './incident-history/incident-history';
 
 export default [
     { path: 'dashboard', data: { breadcrumb: 'Dashboard' }, component: EmergencyDispatchDashboard },

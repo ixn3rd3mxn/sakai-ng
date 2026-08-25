@@ -23,7 +23,13 @@ import { RecentIncidentItem } from '../dispatch.types';
                     <td>{{ incident.time }}</td>
                     <td>{{ incident.call_type }}</td>
                     <td>{{ abbreviateCbd(incident.cbd) }}</td>
-                    <td><p-tag [severity]="getSeverity(incident.severity)" [value]="incident.severity" /></td>
+                    <td>
+                        @if (incident.severity === '-') {
+                            -
+                        } @else {
+                            <p-tag [severity]="getSeverity(incident.severity)" [value]="incident.severity" />
+                        }
+                    </td>
                 </tr>
             </ng-template>
             <ng-template #emptymessage>

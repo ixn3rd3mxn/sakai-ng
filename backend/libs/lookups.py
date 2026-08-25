@@ -107,6 +107,15 @@ def cbd_label(cbd_id: Optional[int]) -> str:
     return f"{item['name']} {item['des']}".strip()
 
 
+def cbd_name(cbd_id: Optional[int]) -> str:
+    """Short code only (e.g. "CBD5"), unlike `cbd_label` which appends the
+    description - used where the UI shows/filters on the code alone."""
+    if cbd_id is None:
+        return "-"
+    item = _cbd_categories.get(cbd_id)
+    return item["name"] if item else "-"
+
+
 def severity_name(severity_id: Optional[int]) -> str:
     if severity_id is None:
         return "-"

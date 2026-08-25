@@ -3,15 +3,15 @@ import { Component, computed, inject, PLATFORM_ID, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { $t, updatePreset, updateSurfacePalette } from '@primeuix/themes';
-import Aura from '@primeuix/themes/aura';
 import Lara from '@primeuix/themes/lara';
 import Nora from '@primeuix/themes/nora';
 import { PrimeNG } from 'primeng/config';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { LayoutService } from '@/app/layout/service/layout.service';
+import { AppPreset } from '@/app/theme-preset';
 
 const presets = {
-    Aura,
+    Aura: AppPreset,
     Lara,
     Nora
 } as const;
