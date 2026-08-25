@@ -45,3 +45,8 @@ Thumbs.db
 .venv
 
 *__pycache__
+
+# Environment files (may contain secrets)
+.env
+!.env.local
+!.env.example
