@@ -89,6 +89,16 @@ def get_summary(date: Optional[date_cls] = Query(None), shift: Optional[str] = Q
     return aggregations.build_summary(ctx)
 
 
+def _sse_data(payload: dict) -> str:
+    """Same encoding the plain GET endpoints get from Starlette's
+    JSONResponse: no inter-token spaces, and Thai text as raw UTF-8 not
+    escaped one character at a time. `json.dumps` defaults to the opposite
+    of both, which made every SSE frame ~24% larger than the same payload
+    fetched over GET - and SSE is the one response the edge does not
+    compress, so those bytes were paid in full on the wire."""
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
 def _payload_signature(payload: dict) -> str:
     # `server_now` ticks on every resolution and carries no information the
     # client needs to react to - hashing it in would mean the signature
@@ -149,7 +159,7 @@ async def stream_summary(
 
                     if signature != last_signature:
                         last_signature = signature
-                        yield {"event": "dashboard", "data": json.dumps(payload, default=str)}
+                        yield {"event": "dashboard", "data": _sse_data(payload)}
 
                     last_ctx_key = ctx_key
 
@@ -202,7 +212,7 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
 
                     if signature != last_signature:
                         last_signature = signature
-                        yield {"event": "incident-history", "data": json.dumps(payload, default=str)}
+                        yield {"event": "incident-history", "data": _sse_data(payload)}
 
                     last_day = ctx.operational_day
 

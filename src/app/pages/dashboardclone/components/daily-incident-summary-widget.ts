@@ -26,31 +26,55 @@ export class DailyIncidentSummaryWidget {
 
     private chartTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
+    private pendingOptions = false;
+
     constructor() {
         afterNextRender(() => {
-            this.scheduleInitChart();
+            this.scheduleInitChart(true);
         });
 
-        let isFirstRun = true;
+        // A theme change recolours both the datasets and the axis/legend
+        // options; a data change only ever touches the datasets. They are
+        // tracked separately because PrimeNG reinitialises the chart from
+        // *both* its `data` and its `options` setter, so reassigning an
+        // options object that had not actually changed was costing a second
+        // full destroy()/new Chart() on every push from the stream.
+        let isFirstThemeRun = true;
         effect(() => {
             this.layoutService.layoutConfig().darkTheme;
-            this.summary();
-            if (isFirstRun) {
-                isFirstRun = false;
+            if (isFirstThemeRun) {
+                isFirstThemeRun = false;
                 return;
             }
-            this.scheduleInitChart();
+            this.scheduleInitChart(true);
+        });
+
+        let isFirstDataRun = true;
+        effect(() => {
+            this.summary();
+            if (isFirstDataRun) {
+                isFirstDataRun = false;
+                return;
+            }
+            this.scheduleInitChart(false);
         });
 
         this.destroyRef.onDestroy(() => clearTimeout(this.chartTimeoutId));
     }
 
-    private scheduleInitChart() {
+    private scheduleInitChart(withOptions: boolean) {
+        // A theme change coalescing with a data change inside the debounce
+        // window still has to rebuild the options.
+        this.pendingOptions = this.pendingOptions || withOptions;
         clearTimeout(this.chartTimeoutId);
-        this.chartTimeoutId = setTimeout(() => this.initChart(), 150);
+        this.chartTimeoutId = setTimeout(() => {
+            const withOpts = this.pendingOptions;
+            this.pendingOptions = false;
+            this.initChart(withOpts);
+        }, 150);
     }
 
-    initChart() {
+    initChart(withOptions = true) {
         const documentStyle = getComputedStyle(document.documentElement);
         const textColor = documentStyle.getPropertyValue('--text-color');
 
@@ -77,6 +101,10 @@ export class DailyIncidentSummaryWidget {
                 }
             ]
         });
+
+        if (!withOptions) {
+            return;
+        }
 
         this.chartOptions.set({
             plugins: {
