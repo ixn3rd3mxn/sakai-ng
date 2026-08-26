@@ -18,9 +18,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 Shift = Literal["morning", "afternoon", "night"]
 Team = Literal["morning", "afternoon_night"]
+
+# The dispatch center operates on Bangkok wall-clock time regardless of what
+# timezone the server host happens to run in (e.g. FastAPI Cloud runs UTC).
+BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
+
+
+def now_local() -> datetime:
+    """Current Bangkok wall-clock time, naive (matches how timestamps are
+    stored on `incidents` documents so range queries stay consistent)."""
+    return datetime.now(BANGKOK_TZ).replace(tzinfo=None)
 
 MORNING_START = time(8, 30, 0)
 AFTERNOON_START = time(16, 30, 0)
@@ -153,7 +164,7 @@ def resolve_day_context(requested_day: Optional[date]) -> DayContext:
     """Resolve which operational day is being viewed and whether it's the
     current one - the single source of truth callers must use instead of
     comparing dates themselves, mirroring `resolve_context` below."""
-    now = datetime.now()
+    now = now_local()
     current_day = get_operational_day(now)
     op_day = requested_day if requested_day is not None else current_day
 
@@ -173,7 +184,7 @@ def resolve_context(
     This is the one place that decides what "current" means - every endpoint
     and the SSE stream must call this instead of comparing dates themselves.
     """
-    now = datetime.now()
+    now = now_local()
     current_day = get_operational_day(now)
     current_shift = get_shift(now)
 

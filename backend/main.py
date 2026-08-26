@@ -6,7 +6,6 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date as date_cls
-from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -17,7 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from libs import aggregations, events, lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import IncidentCreateIn
-from libs.shift import Shift, resolve_context, resolve_day_context
+from libs.shift import Shift, now_local, resolve_context, resolve_day_context
 
 
 @asynccontextmanager
@@ -237,7 +236,7 @@ def create_incident(body: IncidentCreateIn):
         if None in (channel_id, case_id, cbd_id, severity_id):
             raise HTTPException(status_code=400, detail="could not resolve one or more reference fields")
 
-    now = datetime.now()
+    now = now_local()
     incident_id = f"INC-{now:%Y%m%d}-{uuid.uuid4().hex[:8].upper()}"
 
     db.incidents.insert_one(
