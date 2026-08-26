@@ -11,6 +11,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 
 from libs import aggregations, events, lookups
@@ -50,7 +51,11 @@ def _resolve(date: Optional[date_cls], shift: Optional[str]):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    try:
+        db.command("ping")
+    except PyMongoError as exc:
+        raise HTTPException(status_code=503, detail=f"database unreachable: {exc}") from exc
+    return {"status": "ok", "database": "connected"}
 
 
 @app.get("/api/context")
