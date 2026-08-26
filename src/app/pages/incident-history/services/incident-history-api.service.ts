@@ -1,9 +1,10 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = environment.apiBaseUrl;
 
 @Injectable({ providedIn: 'root' })
 export class IncidentHistoryApiService {
