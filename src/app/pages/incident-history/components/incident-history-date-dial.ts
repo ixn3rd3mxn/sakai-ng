@@ -19,7 +19,7 @@ import { BUDDHIST_ERA_OFFSET, shiftDisplayedYearToBuddhist } from '../../dashboa
     template: `<p-toast />
     <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10 }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
 
-    <p-dialog header="สลับวัน" [(visible)]="displayDatePicker" [style]="{ width: '18vw' }" [modal]="true">
+    <p-dialog header="สลับวัน" [(visible)]="displayDatePicker" [breakpoints]="{ '960px': '75vw' }" [style]="{ width: '30vw' }" [modal]="true">
         <div class="flex flex-col gap-1">
             <div class="font-semibold">เลือกวัน</div>
             <p-datepicker
