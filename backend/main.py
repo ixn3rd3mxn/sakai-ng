@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import run_in_threadpool
 
 from libs import aggregations, events, lookups
 from libs.configs import CORS_ORIGINS, db
@@ -154,7 +155,12 @@ async def stream_summary(
                 last_is_current = ctx.is_current
 
                 if first or woken_by_write or ctx_key != last_ctx_key:
-                    payload = aggregations.build_summary(ctx)
+                    # pymongo is synchronous, so calling it straight from this
+                    # `async def` generator blocked the whole event loop for the
+                    # duration of the query - every other connection, and the
+                    # response to the POST that triggered this rebuild, waited
+                    # behind it. The threadpool keeps the loop free.
+                    payload = await run_in_threadpool(aggregations.build_summary, ctx)
                     signature = _payload_signature(payload)
 
                     if signature != last_signature:
@@ -207,7 +213,9 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
                 last_is_current = ctx.is_current
 
                 if first or woken_by_write or ctx.operational_day != last_day:
-                    payload = aggregations.build_incident_history(ctx.operational_day, ctx.is_current, ctx.server_now)
+                    payload = await run_in_threadpool(
+                        aggregations.build_incident_history, ctx.operational_day, ctx.is_current, ctx.server_now
+                    )
                     signature = _payload_signature(payload)
 
                     if signature != last_signature:
