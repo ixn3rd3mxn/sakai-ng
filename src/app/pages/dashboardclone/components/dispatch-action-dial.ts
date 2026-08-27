@@ -21,7 +21,12 @@ import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from 
     imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule],
     template: `<p-toast />
     <p-confirmdialog />
-    <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem' }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
+    <!-- zIndex matches incident-history-date-dial. Without it the dial sits at
+    z-index:auto and only wins over the cards by being last in the DOM, which
+    any positioned element with a z-index (the layout chrome uses 997-999, and
+    dispatch-datetime-warning uses z-10) would silently beat wherever they
+    overlap. -->
+    <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10 }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
 
     <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
         <div class="flex gap-4">

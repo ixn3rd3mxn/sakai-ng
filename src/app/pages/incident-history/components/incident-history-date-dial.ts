@@ -19,7 +19,13 @@ import { BUDDHIST_ERA_OFFSET, shiftDisplayedYearToBuddhist } from '../../dashboa
     template: `<p-toast />
     <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10 }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
 
-    <p-dialog header="สลับวัน" [(visible)]="displayDatePicker" [breakpoints]="{ '960px': '75vw' }" [style]="{ width: '30vw' }" [modal]="true">
+    <!-- Sized in rem, not vw: this dialog holds one date input and two
+         buttons, none of which scale with the viewport. The vw breakpoints
+         were inherited from dispatch-action-dial's two-column
+         "สลับวันเวลา" dialog and made the width swing between 253px and
+         346px depending on where the viewport fell. maxWidth is the only
+         viewport-relative part, so it still fits a narrow phone. -->
+    <p-dialog header="สลับวัน" [(visible)]="displayDatePicker" [style]="{ width: '20rem', maxWidth: '92vw' }" [modal]="true">
         <div class="flex flex-col gap-1">
             <div class="font-semibold">เลือกวัน</div>
             <p-datepicker
