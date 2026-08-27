@@ -43,7 +43,6 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                 stripedRows
                 dataKey="incident_id"
                 [rows]="10"
-                [loading]="dataService.loading()"
                 [rowHover]="true"
                 [paginator]="true"
                 responsiveLayout="scroll"
