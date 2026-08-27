@@ -1,4 +1,5 @@
 import { Component, computed, input } from '@angular/core';
+import { SkeletonModule } from 'primeng/skeleton';
 import { IncidentTypeStats } from '../dispatch.types';
 
 interface StatCard {
@@ -10,7 +11,7 @@ interface StatCard {
 @Component({
     standalone: true,
     selector: 'app-incident-type-stats',
-    imports: [],
+    imports: [SkeletonModule],
     styles: `
         .summary-card {
             background: var(--primary-color);
@@ -22,11 +23,19 @@ interface StatCard {
                 <div class="flex justify-between mb-4">
                     <div>
                         <span class="block opacity-80 font-medium mb-4">ผลรวมทั้งหมด</span>
-                        <div class="font-medium text-7xl">{{ totalCount() }}</div>
+                        @if (loading()) {
+                            <p-skeleton width="7rem" height="4.5rem" />
+                        } @else {
+                            <div class="font-medium text-7xl">{{ totalCount() }}</div>
+                        }
                     </div>
                 </div>
-                <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
-                <span class="opacity-80"> เทียบกับเมื่อวาน</span>
+                @if (loading()) {
+                    <p-skeleton width="11rem" height="1.25rem" />
+                } @else {
+                    <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
+                    <span class="opacity-80"> เทียบกับเมื่อวาน</span>
+                }
             </div>
         </div>
         @for (card of cards(); track card.label) {
@@ -35,17 +44,29 @@ interface StatCard {
                     <div class="flex justify-between mb-4">
                         <div>
                             <span class="block text-muted-color font-medium mb-4">{{ card.label }}</span>
-                            <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.count }}</div>
+                            @if (loading()) {
+                                <p-skeleton width="7rem" height="4.5rem" />
+                            } @else {
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.count }}</div>
+                            }
                         </div>
                     </div>
-                    <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
-                    <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
+                    @if (loading()) {
+                        <p-skeleton width="11rem" height="1.25rem" />
+                    } @else {
+                        <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
+                        <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
+                    }
                 </div>
             </div>
         }`
 })
 export class IncidentTypeStatsWidget {
     stats = input<IncidentTypeStats | null>(null);
+
+    // Without this the cards render `?? 0`, which is indistinguishable
+    // from a shift that genuinely had no incidents.
+    loading = input<boolean>(false);
 
     private byName = computed(() => {
         const map = new Map<string, { count: number; diff: number }>();

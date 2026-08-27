@@ -1,15 +1,21 @@
-import { Component, input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
+import { SkeletonModule } from 'primeng/skeleton';
 import { RecentIncidentItem } from '../dispatch.types';
+
+// Placeholder rows so the table lays out at its normal height while
+// loading; the loading branch renders skeleton cells and reads none
+// of these fields.
+const SKELETON_ROWS = Array.from({ length: 5 }, () => ({}) as RecentIncidentItem);
 
 @Component({
     standalone: true,
     selector: 'app-recent-incidents',
-    imports: [TableModule, TagModule],
+    imports: [TableModule, TagModule, SkeletonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">บันทึกล่าสุด</div>
-        <p-table [value]="incidents()" [paginator]="true" [rows]="5" responsiveLayout="scroll">
+        <p-table [value]="tableRows()" [paginator]="!loading()" [rows]="5" responsiveLayout="scroll">
             <ng-template #header>
                 <tr>
                     <th style="min-width: 7rem;">เวลา</th>
@@ -19,6 +25,14 @@ import { RecentIncidentItem } from '../dispatch.types';
                 </tr>
             </ng-template>
             <ng-template #body let-incident>
+                @if (loading()) {
+                    <tr>
+                        <td><p-skeleton /></td>
+                        <td><p-skeleton /></td>
+                        <td><p-skeleton /></td>
+                        <td><p-skeleton width="4rem" /></td>
+                    </tr>
+                } @else {
                 <tr>
                     <td>{{ incident.time }}</td>
                     <td>{{ incident.call_type }}</td>
@@ -31,6 +45,7 @@ import { RecentIncidentItem } from '../dispatch.types';
                         }
                     </td>
                 </tr>
+                }
             </ng-template>
             <ng-template #emptymessage>
                 <tr>
@@ -42,6 +57,13 @@ import { RecentIncidentItem } from '../dispatch.types';
 })
 export class RecentIncidentsWidget {
     incidents = input<RecentIncidentItem[]>([]);
+
+    // While loading the table is fed placeholder rows instead of `[]`,
+    // because an empty value renders the "ยังไม่มีการบันทึกข้อมูล" message -
+    // a statement of fact that is not yet known to be true.
+    loading = input<boolean>(false);
+
+    protected readonly tableRows = computed<RecentIncidentItem[]>(() => (this.loading() ? SKELETON_ROWS : this.incidents()));
 
     abbreviateCbd(cbd: string) {
         return cbd?.split(' ')[0] ?? cbd;

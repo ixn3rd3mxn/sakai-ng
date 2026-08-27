@@ -26,6 +26,15 @@ export class DispatchDataService implements OnDestroy {
     private readonly _summary = signal<DashboardSummary | null>(null);
     readonly summary = this._summary.asReadonly();
 
+    // True until the stream has delivered a snapshot for the current
+    // selection. Without it the widgets render `?? 0` / `?? []` defaults,
+    // which on this page is not an empty state but a wrong one: every
+    // counter reads 0 and the recent-incidents table states that nothing has
+    // been recorded. Switching shift re-arms it, so a stale shift's numbers
+    // are never shown under a new shift's heading either.
+    private readonly _loading = signal<boolean>(true);
+    readonly loading = this._loading.asReadonly();
+
     readonly context = computed(() => this._summary()?.context ?? null);
     readonly isCurrent = computed(() => this.context()?.is_current ?? true);
     readonly selectedShift = computed<ShiftCode>(() => this.context()?.shift ?? 'morning');
@@ -35,14 +44,19 @@ export class DispatchDataService implements OnDestroy {
     });
 
     constructor() {
-        this.subscription = this.selection$.pipe(switchMap((selection) => this.api.streamSummary(selection.date ?? undefined, selection.shift ?? undefined))).subscribe((summary) => this._summary.set(summary));
+        this.subscription = this.selection$.pipe(switchMap((selection) => this.api.streamSummary(selection.date ?? undefined, selection.shift ?? undefined))).subscribe((summary) => {
+            this._summary.set(summary);
+            this._loading.set(false);
+        });
     }
 
     select(date: Date, shift: ShiftCode): void {
+        this._loading.set(true);
         this.selection$.next({ date: formatDateParam(date), shift });
     }
 
     selectCurrent(): void {
+        this._loading.set(true);
         this.selection$.next({ date: null, shift: null });
     }
 

@@ -1,14 +1,18 @@
 import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
-import { BehaviorSubject, EMPTY, Subscription, switchMap, tap } from 'rxjs';
+import { BehaviorSubject, Subscription, switchMap, takeWhile } from 'rxjs';
 import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
 import { IncidentHistoryApiService } from './incident-history-api.service';
 import { formatDateParam, parseIsoDate } from '../../dashboardclone/services/date-utils';
 
 // Owns the single date selection for the incident history page and the live
-// snapshot that selection resolves to. Every selection does one plain GET
-// first (fast paint, and the source of truth for whether the picked day is
-// actually "current"); only when the server confirms `is_current` does this
-// open the SSE stream, so a historical day never gets a live connection.
+// snapshot that selection resolves to. Every selection opens the stream
+// directly: its first frame is byte-for-byte the payload the plain GET used
+// to return - same aggregation, same shape - so fetching both meant running
+// the heaviest query in the app (a 30-branch $facet plus a full-month scan)
+// twice per page load for one screen of data. `is_current` arrives in that
+// first frame too, which is all the GET was really being kept for, so a
+// historical day still never holds a live connection - it just closes the
+// stream after the first frame instead of never opening one.
 @Injectable()
 export class IncidentHistoryDataService implements OnDestroy {
     private readonly api = inject(IncidentHistoryApiService);
@@ -47,17 +51,19 @@ export class IncidentHistoryDataService implements OnDestroy {
         this.subscription = this.selectedDateParam$
             .pipe(
                 switchMap((dateParam) =>
-                    this.api.getHistory(dateParam ?? undefined).pipe(
-                        tap((snapshot) => {
-                            this._history.set(snapshot);
-                            this._loading.set(false);
-                        }),
-                        switchMap((snapshot) => (snapshot.context.is_current ? this.api.streamHistory(dateParam ?? undefined) : EMPTY))
+                    this.api.streamHistory(dateParam ?? undefined).pipe(
+                        // A finished day cannot change, so the connection is
+                        // dropped as soon as the server says the day is not
+                        // current. The `true` keeps that final frame rather
+                        // than discarding the data it carries.
+                        takeWhile((snapshot) => snapshot.context.is_current, true)
                     )
                 )
             )
-            .subscribe((snapshot) => this._history.set(snapshot));
-    }
+            .subscribe((snapshot) => {
+                this._history.set(snapshot);
+                this._loading.set(false);
+            });    }
 
     select(date: Date): void {
         this._loading.set(true);

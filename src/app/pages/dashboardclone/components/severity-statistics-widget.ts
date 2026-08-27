@@ -1,5 +1,6 @@
 import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
+import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { SeverityItem } from '../dispatch.types';
 
@@ -8,10 +9,14 @@ const FALLBACK_LABELS = ['แดง', 'เหลือง', 'เขียว', '
 @Component({
     standalone: true,
     selector: 'app-severity-statistics',
-    imports: [ChartModule],
+    imports: [ChartModule, SkeletonModule],
     template: `<div class="card mb-8!">
         <div class="font-semibold text-xl mb-4">สถิติระดับความรุนแรงที่เกิดขึ้น</div>
-        <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+        @if (chartReady()) {
+                <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+            } @else {
+                <p-skeleton width="100%" height="25rem" />
+            }
     </div>`
 })
 export class SeverityStatisticsWidget {
@@ -19,6 +24,15 @@ export class SeverityStatisticsWidget {
     private destroyRef = inject(DestroyRef);
 
     items = input<SeverityItem[]>([]);
+
+    // Set by the dashboard while the stream has not yet delivered a
+    // snapshot for the current selection.
+    loading = input<boolean>(false);
+
+    // The chart is only shown once `initChart` has actually run against
+    // delivered data - the first build happens before anything has
+    // arrived and would otherwise paint a chart full of zeros.
+    protected readonly chartReady = signal(false);
 
     chartData = signal<any>(null);
 
@@ -31,6 +45,17 @@ export class SeverityStatisticsWidget {
     constructor() {
         afterNextRender(() => {
             this.scheduleInitChart(true);
+        });
+
+        // Hide the chart the moment a new selection starts loading. Without
+        // this the canvas keeps showing the previous shift's figures until
+        // the rebuild lands, which is the same "confident but wrong" state
+        // the skeletons exist to prevent - just harder to notice, because it
+        // is real data under the wrong heading.
+        effect(() => {
+            if (this.loading()) {
+                this.chartReady.set(false);
+            }
         });
 
         // A theme change recolours both the datasets and the axis/legend
@@ -82,6 +107,8 @@ export class SeverityStatisticsWidget {
         const items = this.items();
         const labels = items.length ? items.map((item) => item.severity_name) : FALLBACK_LABELS;
         const data = items.length ? items.map((item) => item.count) : FALLBACK_LABELS.map(() => 0);
+
+        this.chartReady.set(!this.loading());
 
         this.chartData.set({
             labels,

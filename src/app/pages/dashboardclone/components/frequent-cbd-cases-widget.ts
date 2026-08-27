@@ -1,15 +1,20 @@
 import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
+import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { CbdItem } from '../dispatch.types';
 
 @Component({
     standalone: true,
     selector: 'app-frequent-cbd-cases',
-    imports: [ChartModule],
+    imports: [ChartModule, SkeletonModule],
     template: `<div class="card mb-8!">
         <div class="font-semibold text-xl mb-4">เคส CBD ที่เกิดเหตุบ่อยที่สุด</div>
-        <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+        @if (chartReady()) {
+                <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+            } @else {
+                <p-skeleton width="100%" height="25rem" />
+            }
     </div>`
 })
 export class FrequentCbdCasesWidget {
@@ -17,6 +22,15 @@ export class FrequentCbdCasesWidget {
     private destroyRef = inject(DestroyRef);
 
     items = input<CbdItem[]>([]);
+
+    // Set by the dashboard while the stream has not yet delivered a
+    // snapshot for the current selection.
+    loading = input<boolean>(false);
+
+    // The chart is only shown once `initChart` has actually run against
+    // delivered data - the first build happens before anything has
+    // arrived and would otherwise paint a chart full of zeros.
+    protected readonly chartReady = signal(false);
 
     chartData = signal<any>(null);
 
@@ -29,6 +43,17 @@ export class FrequentCbdCasesWidget {
     constructor() {
         afterNextRender(() => {
             this.scheduleInitChart(true);
+        });
+
+        // Hide the chart the moment a new selection starts loading. Without
+        // this the canvas keeps showing the previous shift's figures until
+        // the rebuild lands, which is the same "confident but wrong" state
+        // the skeletons exist to prevent - just harder to notice, because it
+        // is real data under the wrong heading.
+        effect(() => {
+            if (this.loading()) {
+                this.chartReady.set(false);
+            }
         });
 
         // A theme change recolours both the datasets and the axis/legend
@@ -79,6 +104,8 @@ export class FrequentCbdCasesWidget {
 
         const items = this.items();
         const palette = [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-300'), documentStyle.getPropertyValue('--p-primary-200')];
+
+        this.chartReady.set(!this.loading());
 
         this.chartData.set({
             labels: items.map((item) => item.cbd_name),

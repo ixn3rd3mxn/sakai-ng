@@ -17,14 +17,14 @@ import { DispatchDataService } from './services/dispatch-data.service';
     template: `
         <app-dispatch-datetime-warning [historical]="!dataService.isCurrent()" [selectedDate]="dataService.selectedDate()" [selectedTime]="selectedTimePeriod()" />
         <div class="grid grid-cols-12 gap-1">
-            <app-incident-type-stats [stats]="summary()?.incident_type_stats ?? null" class="contents" />
+            <app-incident-type-stats [stats]="summary()?.incident_type_stats ?? null" [loading]="dataService.loading()" class="contents" />
             <div class="col-span-12 xl:col-span-6">
-                <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" />
-                <app-severity-statistics [items]="summary()?.severity_stats ?? []" />
+                <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
+                <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
             </div>
             <div class="col-span-12 xl:col-span-6">
-                <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" />
-                <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" />
+                <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
+                <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
             </div>
         </div>
         <p-scrolltop />

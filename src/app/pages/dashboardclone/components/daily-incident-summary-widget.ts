@@ -1,16 +1,21 @@
 import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ChartModule } from 'primeng/chart';
+import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { DailySummary } from '../dispatch.types';
 
 @Component({
     standalone: true,
     selector: 'app-daily-incident-summary',
-    imports: [ChartModule],
+    imports: [ChartModule, SkeletonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
         <div class="flex justify-center">
-            <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
+            @if (chartReady()) {
+                <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
+            } @else {
+                <p-skeleton width="20rem" height="20rem" shape="circle" />
+            }
         </div>
     </div>`
 })
@@ -19,6 +24,15 @@ export class DailyIncidentSummaryWidget {
     private destroyRef = inject(DestroyRef);
 
     summary = input<DailySummary | null>(null);
+
+    // Set by the dashboard while the stream has not yet delivered a
+    // snapshot for the current selection.
+    loading = input<boolean>(false);
+
+    // The chart is only shown once `initChart` has actually run against
+    // delivered data - the first build happens before anything has
+    // arrived and would otherwise paint a chart full of zeros.
+    protected readonly chartReady = signal(false);
 
     chartData = signal<any>(null);
 
@@ -31,6 +45,17 @@ export class DailyIncidentSummaryWidget {
     constructor() {
         afterNextRender(() => {
             this.scheduleInitChart(true);
+        });
+
+        // Hide the chart the moment a new selection starts loading. Without
+        // this the canvas keeps showing the previous shift's figures until
+        // the rebuild lands, which is the same "confident but wrong" state
+        // the skeletons exist to prevent - just harder to notice, because it
+        // is real data under the wrong heading.
+        effect(() => {
+            if (this.loading()) {
+                this.chartReady.set(false);
+            }
         });
 
         // A theme change recolours both the datasets and the axis/legend
@@ -80,6 +105,8 @@ export class DailyIncidentSummaryWidget {
 
         const summary = this.summary();
         const data = [summary?.morning ?? 0, summary?.afternoon ?? 0, summary?.night ?? 0];
+
+        this.chartReady.set(!this.loading());
 
         this.chartData.set({
             labels: ['เช้า', 'บ่าย', 'ดึก'],
