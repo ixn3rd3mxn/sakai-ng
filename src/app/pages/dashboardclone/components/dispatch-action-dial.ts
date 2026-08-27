@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, ElementRef, OnDestroy, ViewChild, inject, OnInit } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnDestroy, ViewChild, inject, signal, OnInit } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -107,8 +107,8 @@ import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from 
             </div>
         </div>
         <ng-template #footer>
-            <p-button label="รีเซ็ต" severity="secondary" (click)="resetForm()" />
-            <p-button label="บันทึก" (click)="onSaveClick($event)" />
+            <p-button label="รีเซ็ต" severity="secondary" [disabled]="saving()" (click)="resetForm()" />
+            <p-button label="บันทึก" [loading]="saving()" (click)="onSaveClick($event)" />
         </ng-template>
     </p-dialog>`,
     providers: [MessageService, ConfirmationService]
@@ -207,6 +207,14 @@ export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
         return this.callType?.code !== 'NY';
     }
 
+    // In flight from the moment the confirmation is accepted until the POST
+    // settles. Drives `[loading]` on the save button, which PrimeNG also
+    // renders as a spinner and - the part that matters - disables, so the
+    // same incident cannot be submitted twice while the first is in flight.
+    // A signal rather than a plain field: change detection is zoneless here,
+    // so a field written from inside an rxjs callback would not repaint.
+    readonly saving = signal(false);
+
     formSubmitted: boolean = false;
 
     get isCallTypeInvalid(): boolean {
@@ -286,6 +294,12 @@ export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
     ];
 
     onSaveClick(event: Event) {
+        // The speed dial can reopen this dialog independently of the button's
+        // disabled state, so re-entry is guarded here too.
+        if (this.saving()) {
+            return;
+        }
+
         this.formSubmitted = true;
 
         if (!this.isFormValid) {
@@ -357,13 +371,20 @@ export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
                     return;
                 }
 
+                this.saving.set(true);
+
                 this.dataService.createIncident(payload).subscribe({
                     next: () => {
+                        this.saving.set(false);
                         this.messageService.add({ severity: 'success', summary: 'บันทึกสำเร็จ', detail: 'ข้อมูลได้ถูกบันทึกแล้ว' });
                         this.display = false;
                         this.formSubmitted = false;
                     },
                     error: () => {
+                        // Left open with the entry intact so it can be retried -
+                        // the `display` setter clears the form, so closing here
+                        // would lose what the dispatcher typed.
+                        this.saving.set(false);
                         this.messageService.add({ severity: 'error', summary: 'บันทึกไม่สำเร็จ', detail: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง' });
                     }
                 });
