@@ -11,10 +11,19 @@ import { DailySummary } from '../dispatch.types';
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
         <div class="flex justify-center">
-            @if (chartReady()) {
-                <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
+            @if (!chartReady()) {
+                <!-- Boxed to the chart's own h-90 so finishing the load does not
+                     resize the card; the circle itself stays 20rem. -->
+                <div class="h-90 flex items-center justify-center">
+                    <p-skeleton width="20rem" height="20rem" shape="circle" />
+                </div>
+            } @else if (isEmpty()) {
+                <div class="h-90 flex flex-col items-center justify-center gap-3 text-muted-color">
+                    <i class="pi pi-chart-pie text-5xl opacity-30"></i>
+                    <span>ยังไม่มีการบันทึกข้อมูล</span>
+                </div>
             } @else {
-                <p-skeleton width="20rem" height="20rem" shape="circle" />
+                <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
             }
         </div>
     </div>`
@@ -33,6 +42,13 @@ export class DailyIncidentSummaryWidget {
     // delivered data - the first build happens before anything has
     // arrived and would otherwise paint a chart full of zeros.
     protected readonly chartReady = signal(false);
+
+    // Set from inside `initChart`, so it always describes the dataset that
+    // is actually drawn rather than the input that will be drawn 150ms from
+    // now. Chart.js renders nothing at all for an all-zero doughnut or an
+    // empty bar series, which leaves a card that looks broken rather than
+    // one that says there were no incidents.
+    protected readonly isEmpty = signal(false);
 
     chartData = signal<any>(null);
 
@@ -107,6 +123,7 @@ export class DailyIncidentSummaryWidget {
         const data = [summary?.morning ?? 0, summary?.afternoon ?? 0, summary?.night ?? 0];
 
         this.chartReady.set(!this.loading());
+        this.isEmpty.set(data.every((value) => value === 0));
 
         this.chartData.set({
             labels: ['เช้า', 'บ่าย', 'ดึก'],

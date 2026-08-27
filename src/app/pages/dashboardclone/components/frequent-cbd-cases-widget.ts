@@ -10,11 +10,16 @@ import { CbdItem } from '../dispatch.types';
     imports: [ChartModule, SkeletonModule],
     template: `<div class="card mb-8!">
         <div class="font-semibold text-xl mb-4">เคส CBD ที่เกิดเหตุบ่อยที่สุด</div>
-        @if (chartReady()) {
-                <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
-            } @else {
-                <p-skeleton width="100%" height="25rem" />
-            }
+        @if (!chartReady()) {
+            <p-skeleton width="100%" height="25rem" />
+        } @else if (isEmpty()) {
+            <div class="h-100 flex flex-col items-center justify-center gap-3 text-muted-color">
+                <i class="pi pi-chart-bar text-5xl opacity-30"></i>
+                <span>ยังไม่มีการบันทึกข้อมูล</span>
+            </div>
+        } @else {
+            <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-100" />
+        }
     </div>`
 })
 export class FrequentCbdCasesWidget {
@@ -31,6 +36,13 @@ export class FrequentCbdCasesWidget {
     // delivered data - the first build happens before anything has
     // arrived and would otherwise paint a chart full of zeros.
     protected readonly chartReady = signal(false);
+
+    // Set from inside `initChart`, so it always describes the dataset that
+    // is actually drawn rather than the input that will be drawn 150ms from
+    // now. Chart.js renders nothing at all for an all-zero doughnut or an
+    // empty bar series, which leaves a card that looks broken rather than
+    // one that says there were no incidents.
+    protected readonly isEmpty = signal(false);
 
     chartData = signal<any>(null);
 
@@ -106,6 +118,7 @@ export class FrequentCbdCasesWidget {
         const palette = [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-300'), documentStyle.getPropertyValue('--p-primary-200')];
 
         this.chartReady.set(!this.loading());
+        this.isEmpty.set(items.length === 0);
 
         this.chartData.set({
             labels: items.map((item) => item.cbd_name),
