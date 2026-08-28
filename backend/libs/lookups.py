@@ -10,6 +10,7 @@ once at startup instead of joining against Mongo on every aggregation.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Optional
 
 from libs.configs import db
@@ -31,8 +32,46 @@ CALL_CODE_TO_NAME: dict[str, str] = {
 }
 
 
+_loaded = False
+
+# `load()` runs on a threadpool worker, and startup can have two of them in
+# flight at once: its bounded first attempt cannot cancel the thread it is
+# waiting on, so a slow-but-eventually-successful Mongo leaves that thread
+# running when the background retry starts a second. Without this lock the
+# two interleave on the dicts below - one clearing while the other has
+# already set `_loaded`, publishing a half-populated cache as if it were
+# complete, which is exactly what `loaded()` exists to rule out.
+_load_lock = threading.Lock()
+
+
+def loaded() -> bool:
+    """Whether `load()` has completed successfully at least once.
+
+    Startup no longer aborts when Mongo is unreachable (the call-stats feed
+    shares nothing with the database and must stay up), so every endpoint that
+    reads reference data has to check this first. Without the check, an empty
+    cache does not raise - `aggregations` builds its breakdown rows by
+    iterating these dicts, so it would quietly return a well-formed summary
+    with zero rows, and the dashboard would render empty charts as though it
+    were a quiet shift.
+    """
+    return _loaded
+
+
 def load() -> None:
-    """(Re)load all reference collections into memory."""
+    """(Re)load all reference collections into memory.
+
+    Serialised: concurrent callers queue rather than interleave, so the cache
+    is never observed half-cleared (see `_load_lock`).
+    """
+    global _loaded
+    with _load_lock:
+        _loaded = False
+        _load_locked()
+
+
+def _load_locked() -> None:
+    global _loaded
     _call_types.clear()
     _case_types.clear()
     _cbd_categories.clear()
@@ -55,6 +94,8 @@ def load() -> None:
             "name": doc["severity_name"],
             "des": doc.get("severity_des", ""),
         }
+
+    _loaded = True
 
 
 def call_types() -> dict[int, str]:

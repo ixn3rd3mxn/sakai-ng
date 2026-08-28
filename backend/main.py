@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date as date_cls
@@ -14,16 +15,58 @@ from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import aggregations, events, lookups
+from libs import aggregations, call_stats, events, lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import IncidentCreateIn
 from libs.shift import Shift, now_local, resolve_context, resolve_day_context
 
 
+logger = logging.getLogger(__name__)
+
+# How long startup waits for the reference collections before giving up and
+# continuing without them. They are ~40 tiny documents, so a healthy Atlas
+# answers in well under a second; anything near this bound means trouble.
+LOOKUP_LOAD_TIMEOUT = 10
+
+
+async def _load_lookups_forever() -> None:
+    """Keep retrying `lookups.load()` until it succeeds.
+
+    pymongo is synchronous and blocks for the full server-selection timeout
+    when Mongo is unreachable, so it goes to the threadpool rather than
+    stalling the event loop - and with it every call-stats stream.
+    """
+    delay = 2
+    while True:
+        try:
+            await run_in_threadpool(lookups.load)
+            logger.info("reference collections loaded")
+            return
+        except PyMongoError as exc:
+            logger.warning("could not load reference collections (%s); retrying in %ss", exc, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    lookups.load()
+    # A Mongo outage must not take the whole API down with it. The call-stats
+    # endpoints read from an external feed and touch no collection, so an
+    # unreachable Atlas used to blank a widget whose own data source was
+    # perfectly healthy - startup raised and nothing served at all. Load the
+    # reference data in the background instead, retrying until it lands.
+    retry_task: Optional[asyncio.Task] = None
+    try:
+        await asyncio.wait_for(run_in_threadpool(lookups.load), timeout=LOOKUP_LOAD_TIMEOUT)
+    except (PyMongoError, asyncio.TimeoutError) as exc:
+        logger.warning("starting without reference collections (%s)", exc)
+        retry_task = asyncio.create_task(_load_lookups_forever())
+
     yield
+
+    if retry_task is not None:
+        retry_task.cancel()
+    await call_stats.aclose()
 
 
 app = FastAPI(title="EMS Dispatch Dashboard API", lifespan=lifespan)
@@ -49,6 +92,21 @@ def _resolve(date: Optional[date_cls], shift: Optional[str]):
     return resolve_context(date, _parse_shift(shift))
 
 
+def _require_lookups() -> None:
+    """Refuse to serve reference-backed data before the cache is populated.
+
+    Startup is allowed to proceed without Mongo so the call-stats feed stays
+    up, which means these endpoints can now be reached in a state that used to
+    be impossible. Erroring here keeps the old fail-loud behaviour exactly
+    where it matters: `aggregations` derives its breakdown rows *from* these
+    dicts, so serving on an empty cache would return a valid-looking summary
+    with no rows rather than an error - empty charts that read as a quiet
+    shift instead of a broken backend.
+    """
+    if not lookups.loaded():
+        raise HTTPException(status_code=503, detail="reference data unavailable; database not reachable yet")
+
+
 @app.get("/api/health")
 def health():
     try:
@@ -71,6 +129,7 @@ def get_context(date: Optional[date_cls] = Query(None), shift: Optional[str] = Q
 
 @app.get("/api/lookups")
 def get_lookups():
+    _require_lookups()
     return {
         "call_types": [{"id": k, "name": v} for k, v in sorted(lookups.call_types().items())],
         "case_types": [{"id": k, "name": v} for k, v in sorted(lookups.case_types().items())],
@@ -86,6 +145,7 @@ def get_lookups():
 
 @app.get("/api/dashboard/summary")
 def get_summary(date: Optional[date_cls] = Query(None), shift: Optional[str] = Query(None)):
+    _require_lookups()
     ctx = _resolve(date, shift)
     return aggregations.build_summary(ctx)
 
@@ -124,6 +184,7 @@ async def stream_summary(
     periodic re-check itself is nearly free: it's pure datetime math with no
     Mongo query unless one of those two things actually happened, so an idle
     connection does not hit the database every tick."""
+    _require_lookups()
     requested_shift = _parse_shift(shift)
 
     async def event_generator():
@@ -176,8 +237,54 @@ async def stream_summary(
     return EventSourceResponse(event_generator())
 
 
+@app.get("/api/call-stats/summary")
+async def get_call_stats(day: Optional[date_cls] = Query(None)):
+    """Call-centre counters for one Bangkok calendar day (default: today).
+
+    `day` is a date, not an epoch range: the browser must not do that
+    arithmetic itself. Asia/Bangkok has never changed its UTC offset, so
+    adding 86400 per day would in fact work today - but it bakes that into
+    the frontend invisibly, and the backend already derives the window from
+    the zone in one tested place (`day_epoch_window`).
+    """
+    if day is not None and day > call_stats.bangkok_calendar_day():
+        raise HTTPException(status_code=400, detail="day cannot be in the future")
+    return await call_stats.get_call_stats(day)
+
+
+@app.get("/api/call-stats/stream")
+async def stream_call_stats(request: Request):
+    """Server-sent events for the call-stats widget.
+
+    All the work happens in `libs.call_stats`'s single shared poll loop: this
+    connection is just a queue it broadcasts to. Frames are only produced when
+    the payload actually changes - including at Bangkok midnight, when the
+    day rolls over and yesterday's numbers are replaced. An idle overnight
+    connection therefore transfers nothing but sse-starlette's keepalive.
+    """
+
+    async def event_generator():
+        queue = await call_stats.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    # The timeout does no work; it just returns control often
+                    # enough to notice a client that has gone away.
+                    payload = await asyncio.wait_for(queue.get(), timeout=5)
+                except asyncio.TimeoutError:
+                    continue
+                yield {"event": "call-stats", "data": _sse_data(payload)}
+        finally:
+            call_stats.unsubscribe(queue)
+
+    return EventSourceResponse(event_generator())
+
+
 @app.get("/api/incident-history")
 def get_incident_history(date: Optional[date_cls] = Query(None)):
+    _require_lookups()
     ctx = resolve_day_context(date)
     return aggregations.build_incident_history(ctx.operational_day, ctx.is_current, ctx.server_now)
 
@@ -189,6 +296,8 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
     connection while viewing today, so `last_is_current` here is normally
     always true; the historical-day poll interval is kept anyway so a
     connection left open across a day rollover still behaves sanely."""
+    _require_lookups()
+
     async def event_generator():
         last_signature: Optional[str] = None
         last_day: Optional[date_cls] = None
@@ -236,6 +345,7 @@ def create_incident(body: IncidentCreateIn):
     """Always writes with the server's current timestamp - there is no way
     to backdate an incident, which is what keeps "only the current shift can
     save" true without needing a separate check here."""
+    _require_lookups()
     call_id = lookups.resolve_call_id(body.call_type_code)
     if call_id is None:
         raise HTTPException(status_code=400, detail="unknown call_type_code")
