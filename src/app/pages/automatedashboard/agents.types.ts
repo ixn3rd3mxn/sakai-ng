@@ -1,0 +1,39 @@
+// Mirrors the payload built by backend/libs/agents.py.
+
+/** The states the board shows. OFFLINE rows are filtered out server-side -
+ *  those are unmanned spare extensions, not absent staff.
+ *
+ *  `unknown` is the catch-all for an upstream action we have not mapped. It
+ *  exists because RINGING turned up in a live watch after this was first
+ *  written, and an allow-list made that agent vanish from the board for the
+ *  duration of the ring. Anything unrecognised is now shown, not dropped. */
+export type AgentStatus = 'on_call' | 'ringing' | 'break' | 'available' | 'unknown';
+
+export interface Agent {
+    /** From the upstream feed, so always correct. Shown alongside the name
+     *  because the name comes from our own mapping and can go stale: if a desk
+     *  is reassigned and nobody updates it, the extension is the identifier
+     *  that is still trustworthy. */
+    extension: string;
+    /** null when the extension is not in the mapping (a new hire, say). The
+     *  card still renders with the extension alone - an on-duty agent must
+     *  never vanish from the board over a missing reference row. */
+    name: string | null;
+    /** 1 = call taker, 5 = supervisor. */
+    role_id: number;
+    role: string;
+    status: AgentStatus;
+    /** The raw upstream action, set only when `status` is `unknown`, so the
+     *  card can show what the feed actually said. */
+    action: string | null;
+}
+
+export interface AgentsSummary {
+    /** False when the feed could not be read. Distinct from an empty `agents`
+     *  array, which would mean nobody is on duty - a very different claim. */
+    available: boolean;
+    agents: Agent[];
+    counts: Partial<Record<AgentStatus | 'total', number>>;
+    /** Naive Bangkok wall-clock of the last successful read. */
+    fetched_at: string | null;
+}

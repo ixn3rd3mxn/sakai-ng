@@ -15,7 +15,7 @@ from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import aggregations, call_stats, events, lookups
+from libs import agents, aggregations, call_stats, events, lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import IncidentCreateIn
 from libs.shift import Shift, now_local, resolve_context, resolve_day_context
@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
     if retry_task is not None:
         retry_task.cancel()
     await call_stats.aclose()
+    await agents.aclose()
 
 
 app = FastAPI(title="EMS Dispatch Dashboard API", lifespan=lifespan)
@@ -278,6 +279,43 @@ async def stream_call_stats(request: Request):
                 yield {"event": "call-stats", "data": _sse_data(payload)}
         finally:
             call_stats.unsubscribe(queue)
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/api/agents")
+async def get_agents():
+    """On-duty agents for the branch, with live status.
+
+    No Mongo dependency for the status itself - the roster comes from the
+    NIEMS feed and the database only supplies names, so this still answers
+    during a database outage (with extensions in place of names).
+    """
+    return await agents.get_agents()
+
+
+@app.get("/api/agents/stream")
+async def stream_agents(request: Request):
+    """Server-sent events for the agent board.
+
+    Polled far more often than the call statistics - status flips the moment
+    somebody answers a call - but through the same shared loop, so the number
+    of upstream requests does not grow with the number of open boards.
+    """
+
+    async def event_generator():
+        queue = await agents.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=5)
+                except asyncio.TimeoutError:
+                    continue
+                yield {"event": "agents", "data": _sse_data(payload)}
+        finally:
+            agents.unsubscribe(queue)
 
     return EventSourceResponse(event_generator())
 

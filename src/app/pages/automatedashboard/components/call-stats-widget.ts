@@ -27,10 +27,18 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
         </div>
         @for (card of cards(); track card.label) {
             <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-                <div class="card mb-0" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
+                <!-- h-full so every card in the row is the height of the
+                     tallest. These are grid items and stretch already; without
+                     it the card inside only grows to its own content, so one
+                     label wrapping to a second line left the row ragged. -->
+                <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
                     <div class="flex justify-between mb-4">
                         <div>
-                            <span class="block font-medium mb-4 text-xl">{{ card.label }}</span>
+                            <!-- text-base, not text-xl: at 150% zoom with the
+                                 sidebar open these are one-sixth-width, and
+                                 "ไม่ได้รับสาย คิวเต็ม" - the longest of the six,
+                                 with a space to break on - wrapped. -->
+                            <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
                             <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.value }}</div>
                         </div>
                     </div>
@@ -38,21 +46,25 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                          against, rather than shown as +0 - which would claim
                          the previous day matched exactly. -->
                     @if (card.diff !== null) {
-                        <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
-                        <span> เทียบกับเมื่อวาน</span>
+                        <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
+                             line gets, and at base size it wrapped too. -->
+                        <div class="text-sm">
+                            <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
+                            <span> เทียบกับเมื่อวาน</span>
+                        </div>
                     }
                 </div>
             </div>
         }
         @for (card of timeCards(); track card.label) {
             <div class="col-span-6 xl:col-span-3">
-                <div class="card mb-0" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
+                <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
                     <div class="flex justify-between mb-4">
                         <div>
-                            <!-- text-base, not the counters' text-xl: these four
-                                 labels are the longest on the board and sit in
-                                 quarter-width cards, so at 150% browser zoom
-                                 text-xl wrapped to a second line. -->
+                            <!-- text-base, matching the counter row above: these
+                                 four labels are the longest on the board and sit
+                                 in quarter-width cards, so text-xl wrapped at
+                                 150% browser zoom. -->
                             <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
                             <!-- Smaller below sm: these cards are half-width on a
                                  phone and HH:MM:SS is eight characters, so 5xl
@@ -61,8 +73,13 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                         </div>
                     </div>
                     @if (card.diff !== null) {
-                        <span [class]="durationDiffClass(card.diff)">{{ durationDiffText(card.diff) }}</span>
-                        <span> เทียบกับเมื่อวาน</span>
+                        <!-- Same xs/sm split as the counter row. This line is
+                             longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
+                             is the one that wrapped first on mobile. -->
+                        <div class="text-xs sm:text-sm">
+                            <span [class]="durationDiffClass(card.diff)">{{ durationDiffText(card.diff) }}</span>
+                            <span> เทียบกับเมื่อวาน</span>
+                        </div>
                     }
                 </div>
             </div>
@@ -107,11 +124,14 @@ export class CallStatsWidget {
 
     // Second row: durations rather than counts, so these format as H:MM:SS
     // instead of a thousands-separated integer.
+    // Ordered and coloured in pairs: talk time (emerald) then answer time
+    // (amber), so the colour groups the two metrics that measure the same
+    // thing rather than distinguishing all four from each other.
     private static readonly TIME_CARDS: { label: string; color: string; field: keyof CallTimes }[] = [
-        { label: 'ค่าเฉลี่ยเวลาตอบรับ', color: 'sky', field: 'avg_accept' },
-        { label: 'เวลาที่ตอบรับนานที่สุด', color: 'indigo', field: 'longest_accept' },
-        { label: 'ค่าเฉลี่ยเวลาคุยสาย', color: 'amber', field: 'avg_service' },
-        { label: 'ระยะเวลารวมคุยสาย', color: 'teal', field: 'total_service' }
+        { label: 'ค่าเฉลี่ยเวลาคุยสาย', color: 'emerald', field: 'avg_service' },
+        { label: 'ระยะเวลารวมคุยสาย', color: 'emerald', field: 'total_service' },
+        { label: 'ค่าเฉลี่ยเวลาตอบรับ', color: 'amber', field: 'avg_accept' },
+        { label: 'เวลาที่ตอบรับนานที่สุด', color: 'amber', field: 'longest_accept' }
     ];
 
     readonly timeCards = computed<StatCard[]>(() => {
