@@ -66,6 +66,14 @@ LIVE_URL = os.environ.get(
 # cost of only `queue_full_abandon` lagging.
 LIVE_FIELDS = ("incoming", "answer", "sla")
 
+# Duration statistics. Same host, parameters and rollup semantics as
+# `BASE_URL` - including the 404 for a range outside retention - just a
+# different projection, so it is fetched and cached alongside the counters.
+TIMES_URL = os.environ.get(
+    "CALL_STATS_TIMES_URL",
+    "https://rnis-api-qm.niems.go.th/v2/stats/summary/times",
+)
+
 # How long a successful response stays good for. The upstream aggregates a
 # whole day, so sub-minute freshness buys nothing and just adds load to a
 # service we do not own.
@@ -140,6 +148,41 @@ def parse_stats(body: dict) -> CallStats:
     return CallStats(**totals)
 
 
+@dataclass(frozen=True)
+class CallTimes:
+    """The four duration statistics the second row renders, in **seconds**.
+
+    The upstream also returns `*_user_wait`, `*_abandon` and `total_accept`;
+    dropped for the same reason the counters drop their extras - the contract
+    the frontend sees is the one it uses.
+    """
+
+    avg_accept: int = 0       # ค่าเฉลี่ยเวลาตอบรับ
+    longest_accept: int = 0   # เวลาที่ตอบรับนานที่สุด
+    avg_service: int = 0      # ค่าเฉลี่ยเวลาคุยสาย
+    total_service: int = 0    # ระยะเวลารวมคุยสาย
+
+
+def parse_times(body: dict) -> Optional[CallTimes]:
+    """First row of `data`, or None when there is none.
+
+    Unlike `parse_stats` this does *not* sum across rows. Counters add up;
+    averages and maxima do not - summing two branches' `avg_service` would
+    invent a number that describes neither. We always query one branch, so
+    the first row is the answer; a multi-branch response would need a
+    weighted mean and a max, which is deliberately not guessed at here.
+    """
+    rows = body.get("data") or []
+    row = next((r for r in rows if isinstance(r, dict)), None)
+    if row is None:
+        return None
+    values = {}
+    for field in CallTimes.__dataclass_fields__:
+        value = row.get(field)
+        values[field] = int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+    return CallTimes(**values)
+
+
 @dataclass
 class _Entry:
     """The cached result of one upstream fetch, scoped to the day it covers."""
@@ -152,6 +195,7 @@ class _Entry:
     stale: bool           # the last attempt failed; `stats` is from an earlier one
     available: bool       # False when the upstream holds no data for `day`
     live: bool = False    # LIVE_FIELDS came from the live feed, not the rollup
+    times: Optional["CallTimes"] = None  # None when the durations feed had nothing
 
     @property
     def final(self) -> bool:
@@ -223,6 +267,36 @@ async def _fetch(day: date_cls) -> Optional[CallStats]:
     return parse_stats(response.json())
 
 
+async def _fetch_times(day: date_cls) -> Optional[CallTimes]:
+    """Durations for `day`, or None when the upstream holds nothing for it.
+
+    Same 404-means-no-rows contract as `_fetch`. Never raises: the durations
+    are a second row of cards, so losing them must blank those four rather
+    than fail the six that come from the counters feed.
+    """
+    range_from, range_until = day_epoch_window(day)
+    try:
+        response = await _http().get(
+            TIMES_URL,
+            params={
+                "branch_id": BRANCH_ID,
+                "from": range_from,
+                "until": range_until,
+                "org_code": ORG_CODE,
+            },
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return parse_times(response.json())
+    except Exception as exc:
+        # One line, not a traceback: this path is expected and self-healing
+        # (see `_fetch_live` below for the full reasoning).
+        logger.warning("call-stats durations feed unavailable (%s: %s); the four duration cards will blank", type(exc).__name__, exc)
+        logger.debug("call-stats durations feed error detail", exc_info=True)
+        return None
+
+
 async def _fetch_live() -> Optional[dict[str, int]]:
     """The live feed's `LIVE_FIELDS`, or None if it cannot be used.
 
@@ -245,8 +319,16 @@ async def _fetch_live() -> Optional[dict[str, int]]:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 values[field] = int(value)
         return values
-    except Exception:
-        logger.warning("live call-stats feed unavailable; falling back to the rollup", exc_info=True)
+    except Exception as exc:
+        # Deliberately one line rather than a traceback. This is a designed,
+        # self-healing degradation: the counters simply come from the rollup
+        # for this cycle and the next poll recovers on its own. A transient
+        # DNS blip or a dropped connection is routine over a 60s-forever poll
+        # against a network we do not control, and printing 60 lines of stack
+        # for it trains everyone to ignore the log - the traceback is still
+        # available at DEBUG when something is actually being investigated.
+        logger.warning("live call-stats feed unavailable (%s: %s); using the rollup for %s", type(exc).__name__, exc, ", ".join(LIVE_FIELDS))
+        logger.debug("live call-stats feed error detail", exc_info=True)
         return None
 
 
@@ -349,6 +431,7 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
             stale=False,
             available=True,
             live=live,
+            times=await _fetch_times(day),
         ),
         today,
     )
@@ -388,6 +471,19 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls) -> dict:
     if entry.available and previous.available:
         diff = {field: getattr(entry.stats, field) - getattr(previous.stats, field) for field in CallStats.__dataclass_fields__}
 
+    # Independent of `diff`: the durations feed can have both days while the
+    # counters feed is missing one, or the reverse.
+    #
+    # Worth knowing when reading these: only two of the four are honest
+    # comparisons mid-day. `avg_accept` and `avg_service` are averages, so
+    # they do not depend on how much of the day has elapsed - "answer time
+    # doubled, 6s -> 12s" is a real signal at 09:00. `longest_accept` is a
+    # maximum that can only climb, and `total_service` is cumulative, so both
+    # read low all morning for no reason other than the day being young.
+    times_diff = None
+    if entry.times is not None and previous.times is not None:
+        times_diff = {field: getattr(entry.times, field) - getattr(previous.times, field) for field in CallTimes.__dataclass_fields__}
+
     return {
         "day": entry.day.isoformat(),
         # Mirrors the `is_current` the dispatch/history pages already key
@@ -405,6 +501,13 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls) -> dict:
         # every counter is the rollup's, which lags by 10+ minutes - worth
         # surfacing because the board looks identical either way.
         "live": entry.live,
+        # Null when the durations feed had nothing for this day, so the four
+        # duration cards can blank independently of the six counter cards.
+        # Values are seconds; the frontend formats them.
+        "times": asdict(entry.times) if entry.times is not None else None,
+        # Per-duration change vs `compare_day`, in seconds and signed. Null
+        # when either day's durations are missing - see `times_diff` above.
+        "times_diff": times_diff,
         "compare_day": previous.day.isoformat(),
         # NOTE: when `day` is today this compares a day in progress against a
         # completed one, because the upstream ignores the time-of-day part of

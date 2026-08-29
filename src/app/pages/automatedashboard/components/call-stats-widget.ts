@@ -1,5 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
-import { CallStatsDiff, CallStatsSummary } from '../call-stats.types';
+import { CallStatsDiff, CallStatsSummary, CallTimes } from '../call-stats.types';
 import { CallStatsDataService } from '../services/call-stats-data.service';
 import { parseIsoDate } from '../../dashboardclone/services/date-utils';
 
@@ -44,6 +44,29 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                 </div>
             </div>
         }
+        @for (card of timeCards(); track card.label) {
+            <div class="col-span-6 xl:col-span-3">
+                <div class="card mb-0" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
+                    <div class="flex justify-between mb-4">
+                        <div>
+                            <!-- text-base, not the counters' text-xl: these four
+                                 labels are the longest on the board and sit in
+                                 quarter-width cards, so at 150% browser zoom
+                                 text-xl wrapped to a second line. -->
+                            <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
+                            <!-- Smaller below sm: these cards are half-width on a
+                                 phone and HH:MM:SS is eight characters, so 5xl
+                                 overflows where the counters' 2-3 digits do not. -->
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl sm:text-5xl">{{ card.value }}</div>
+                        </div>
+                    </div>
+                    @if (card.diff !== null) {
+                        <span [class]="durationDiffClass(card.diff)">{{ durationDiffText(card.diff) }}</span>
+                        <span> เทียบกับเมื่อวาน</span>
+                    }
+                </div>
+            </div>
+        }
     `
 })
 export class CallStatsWidget {
@@ -78,6 +101,32 @@ export class CallStatsWidget {
             label,
             color,
             value: hasNumbers ? (summary![field] as number).toLocaleString('en-US') : '—',
+            diff: diff ? diff[field] : null
+        }));
+    });
+
+    // Second row: durations rather than counts, so these format as H:MM:SS
+    // instead of a thousands-separated integer.
+    private static readonly TIME_CARDS: { label: string; color: string; field: keyof CallTimes }[] = [
+        { label: 'ค่าเฉลี่ยเวลาตอบรับ', color: 'sky', field: 'avg_accept' },
+        { label: 'เวลาที่ตอบรับนานที่สุด', color: 'indigo', field: 'longest_accept' },
+        { label: 'ค่าเฉลี่ยเวลาคุยสาย', color: 'amber', field: 'avg_service' },
+        { label: 'ระยะเวลารวมคุยสาย', color: 'teal', field: 'total_service' }
+    ];
+
+    readonly timeCards = computed<StatCard[]>(() => {
+        // `times` is independent of the counters: this row can blank while the
+        // six above still show numbers, so it gets its own guard rather than
+        // reusing hasNumbers().
+        const times = this.data.loading() ? null : (this.data.summary()?.times ?? null);
+        // Only offered alongside a real duration, and independently of the
+        // counter row's diff - the two feeds can be missing different days.
+        const diff = times ? (this.data.summary()?.times_diff ?? null) : null;
+
+        return CallStatsWidget.TIME_CARDS.map(({ label, color, field }) => ({
+            label,
+            color,
+            value: times ? formatDuration(times[field]) : '—',
             diff: diff ? diff[field] : null
         }));
     });
@@ -121,4 +170,43 @@ export class CallStatsWidget {
     diffText(diff: number): string {
         return diff > 0 ? `+${diff}` : `${diff}`;
     }
+
+    // Deliberately the INVERSE of diffClass above, and the one place these two
+    // rows disagree on colour.
+    //
+    // The counter row colours by direction because "more calls" carries no
+    // valence - a busy day is not a bad day. A duration has one: every second
+    // added to ค่าเฉลี่ยเวลาตอบรับ is a caller waiting longer. Reusing
+    // diffClass would paint "answer time doubled, 6s -> 12s" green, which
+    // states the opposite of what happened. Two conventions on one screen is
+    // the lesser problem, because colour is read before digits are.
+    durationDiffClass(diff: number): string {
+        if (diff > 0) return 'text-red-500 font-medium';
+        if (diff < 0) return 'text-green-500 font-medium';
+        return 'text-gray-500 font-medium';
+    }
+
+    // Signed, and formatted as a duration so it reads against the HH:MM:SS
+    // above it - a bare "+6" next to "00:00:12" gives no unit.
+    durationDiffText(diff: number): string {
+        return `${diff < 0 ? '-' : '+'}${formatDuration(Math.abs(diff))}`;
+    }
+}
+
+/** Seconds -> a full `HH:MM:SS` clock reading, e.g. 12554 -> "03:29:14".
+ *
+ *  The upstream reports every duration in seconds, and a raw "12554" on a wall
+ *  display tells an operator nothing. Every field is padded and no component
+ *  is ever dropped, so the four cards stay the same width and can be compared
+ *  at a glance - a variable-width "2:21" next to "03:29:14" reads as a
+ *  different kind of quantity rather than a shorter one.
+ *
+ *  Hours are padded to two digits but not truncated to two: `total_service` is
+ *  the sum across every agent, so a busy branch can exceed 24h in a day and
+ *  must render as "31:07:02" rather than wrapping to "07:07:02".
+ */
+function formatDuration(totalSeconds: number): string {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const pad = (n: number) => `${n}`.padStart(2, '0');
+    return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
 }

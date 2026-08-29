@@ -43,6 +43,20 @@ export interface CallStatsSummary {
     queue_full_abandon: number;
     outgoing: number;
 
+    /** Duration statistics, or null when that feed has nothing for this day.
+     *  Independent of `available`: the four duration cards can blank while the
+     *  six counter cards still show numbers, and vice versa. */
+    times: CallTimes | null;
+    /** Per-duration change vs `compare_day`, in signed seconds, or null when
+     *  either day's durations are missing.
+     *
+     *  Only `avg_accept` and `avg_service` are honest comparisons mid-day:
+     *  averages do not depend on how much of the day has elapsed.
+     *  `longest_accept` is a maximum that only climbs and `total_service` is
+     *  cumulative, so both read low all morning simply because the day is
+     *  young - the same partial-day caveat the counter row carries. */
+    times_diff: CallTimes | null;
+
     /** The day `diff` is measured against - always the day before `day`. */
     compare_day: string;
     /** Per-counter change vs `compare_day`, or null when there is nothing
@@ -60,3 +74,16 @@ export interface CallStatsSummary {
 }
 
 export type CallStatsDiff = Pick<CallStatsSummary, 'incoming' | 'answer' | 'sla' | 'abandon' | 'queue_full_abandon' | 'outgoing'>;
+
+/** Duration statistics for the second row, every value in **seconds**.
+ *  Formatting to H:MM:SS is the widget's job. */
+export interface CallTimes {
+    /** ค่าเฉลี่ยเวลาตอบรับ */
+    avg_accept: number;
+    /** เวลาที่ตอบรับนานที่สุด */
+    longest_accept: number;
+    /** ค่าเฉลี่ยเวลาคุยสาย */
+    avg_service: number;
+    /** ระยะเวลารวมคุยสาย */
+    total_service: number;
+}
