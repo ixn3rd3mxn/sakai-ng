@@ -10,10 +10,13 @@
 export type AgentStatus = 'on_call' | 'ringing' | 'break' | 'available' | 'unknown';
 
 export interface Agent {
-    /** From the upstream feed, so always correct. Shown alongside the name
-     *  because the name comes from our own mapping and can go stale: if a desk
-     *  is reassigned and nobody updates it, the extension is the identifier
-     *  that is still trustworthy. */
+    /** From the upstream feed, so always correct - unlike `name`, which comes
+     *  from our own mapping and can go stale if a desk is reassigned and
+     *  nobody updates it.
+     *
+     *  No longer rendered on the card by choice; it still stands in for a
+     *  missing name, so an agent absent from the mapping remains identifiable
+     *  rather than anonymous. */
     extension: string;
     /** null when the extension is not in the mapping (a new hire, say). The
      *  card still renders with the extension alone - an on-duty agent must

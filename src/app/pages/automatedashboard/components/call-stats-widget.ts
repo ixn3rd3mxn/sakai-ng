@@ -3,12 +3,18 @@ import { CallStatsDiff, CallStatsSummary, CallTimes } from '../call-stats.types'
 import { CallStatsDataService } from '../services/call-stats-data.service';
 import { parseIsoDate } from '../../dashboardclone/services/date-utils';
 
+/** Whether a rise in this metric is an improvement, a deterioration, or
+ *  neither. It is the metric's property, not the card's, which is why every
+ *  entry in CARDS and TIME_CARDS declares one. */
+type Polarity = 'up-good' | 'down-good' | 'neutral';
+
 interface StatCard {
     label: string;
     value: string;
     color: string;
     /** null when there is no comparison to show - see CallStatsSummary.diff. */
     diff: number | null;
+    polarity: Polarity;
 }
 
 // `th-TH` resolves to the Buddhist calendar, so this renders e.g.
@@ -49,7 +55,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                         <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
                              line gets, and at base size it wrapped too. -->
                         <div class="text-sm">
-                            <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
+                            <span [class]="diffClass(card.diff, card.polarity)">{{ diffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>
                     }
@@ -77,7 +83,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
                              is the one that wrapped first on mobile. -->
                         <div class="text-xs sm:text-sm">
-                            <span [class]="durationDiffClass(card.diff)">{{ durationDiffText(card.diff) }}</span>
+                            <span [class]="diffClass(card.diff, card.polarity)">{{ durationDiffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>
                     }
@@ -93,13 +99,16 @@ export class CallStatsWidget {
     // upstream field names are bound to what is on screen. Keyed on
     // CallStatsDiff rather than CallStatsSummary so a card can only ever name
     // one of the six counters, never `day` or `stale`.
-    private static readonly CARDS: { label: string; color: string; field: keyof CallStatsDiff }[] = [
-        { label: 'สายเข้าทั้งหมด', color: 'blue', field: 'incoming' },
-        { label: 'รับสาย', color: 'emerald', field: 'answer' },
-        { label: 'รับสาย SLA', color: 'emerald', field: 'sla' },
-        { label: 'ไม่ได้รับสาย', color: 'red', field: 'abandon' },
-        { label: 'ไม่ได้รับสาย คิวเต็ม', color: 'red', field: 'queue_full_abandon' },
-        { label: 'โทรออก', color: 'violet', field: 'outgoing' }
+    private static readonly CARDS: { label: string; color: string; field: keyof CallStatsDiff; polarity: Polarity }[] = [
+        // incoming and outgoing are neutral on purpose: call volume is demand,
+        // not performance. Painting a busy day red would pass judgement on
+        // something the centre does not control.
+        { label: 'สายเข้าทั้งหมด', color: 'blue', field: 'incoming', polarity: 'neutral' },
+        { label: 'รับสาย', color: 'emerald', field: 'answer', polarity: 'neutral' },
+        { label: 'รับสาย SLA', color: 'emerald', field: 'sla', polarity: 'neutral' },
+        { label: 'ไม่ได้รับสาย', color: 'red', field: 'abandon', polarity: 'down-good' },
+        { label: 'ไม่ได้รับสาย คิวเต็ม', color: 'red', field: 'queue_full_abandon', polarity: 'down-good' },
+        { label: 'โทรออก', color: 'violet', field: 'outgoing', polarity: 'neutral' }
     ];
 
     readonly cards = computed<StatCard[]>(() => {
@@ -114,9 +123,10 @@ export class CallStatsWidget {
         // dropped whenever the counters themselves are a dash.
         const diff = hasNumbers ? summary!.diff : null;
 
-        return CallStatsWidget.CARDS.map(({ label, color, field }) => ({
+        return CallStatsWidget.CARDS.map(({ label, color, field, polarity }) => ({
             label,
             color,
+            polarity,
             value: hasNumbers ? (summary![field] as number).toLocaleString('en-US') : '—',
             diff: diff ? diff[field] : null
         }));
@@ -127,11 +137,14 @@ export class CallStatsWidget {
     // Ordered and coloured in pairs: talk time (emerald) then answer time
     // (amber), so the colour groups the two metrics that measure the same
     // thing rather than distinguishing all four from each other.
-    private static readonly TIME_CARDS: { label: string; color: string; field: keyof CallTimes }[] = [
-        { label: 'ค่าเฉลี่ยเวลาคุยสาย', color: 'emerald', field: 'avg_service' },
-        { label: 'ระยะเวลารวมคุยสาย', color: 'emerald', field: 'total_service' },
-        { label: 'ค่าเฉลี่ยเวลาตอบรับ', color: 'amber', field: 'avg_accept' },
-        { label: 'เวลาที่ตอบรับนานที่สุด', color: 'amber', field: 'longest_accept' }
+    private static readonly TIME_CARDS: { label: string; color: string; field: keyof CallTimes; polarity: Polarity }[] = [
+        // Talk time is neutral: a shorter call can mean an efficient handover
+        // or a caller being rushed through an emergency, and nothing here can
+        // tell those apart. Time-to-answer has no such ambiguity.
+        { label: 'ค่าเฉลี่ยเวลาคุยสาย', color: 'emerald', field: 'avg_service', polarity: 'neutral' },
+        { label: 'ระยะเวลารวมคุยสาย', color: 'emerald', field: 'total_service', polarity: 'neutral' },
+        { label: 'ค่าเฉลี่ยเวลาตอบรับ', color: 'amber', field: 'avg_accept', polarity: 'down-good' },
+        { label: 'เวลาที่ตอบรับนานที่สุด', color: 'amber', field: 'longest_accept', polarity: 'down-good' }
     ];
 
     readonly timeCards = computed<StatCard[]>(() => {
@@ -143,9 +156,10 @@ export class CallStatsWidget {
         // counter row's diff - the two feeds can be missing different days.
         const diff = times ? (this.data.summary()?.times_diff ?? null) : null;
 
-        return CallStatsWidget.TIME_CARDS.map(({ label, color, field }) => ({
+        return CallStatsWidget.TIME_CARDS.map(({ label, color, field, polarity }) => ({
             label,
             color,
+            polarity,
             value: times ? formatDuration(times[field]) : '—',
             diff: diff ? diff[field] : null
         }));
@@ -173,37 +187,25 @@ export class CallStatsWidget {
         return summary.fetched_at?.slice(11, 16) ?? '';
     }
 
-    // Same colouring and formatting as incident-type-stats-widget, so the two
-    // day-over-day figures read identically across the two dashboards.
+    // Green means better, red means worse, grey means neither - the one rule
+    // on this board, and the convention every mainstream analytics tool uses.
     //
-    // Note this is colour-by-direction, not by good/bad: on the "ไม่ได้รับสาย"
-    // cards a rise is green even though more missed calls is worse. That is
-    // inherited from the dispatch widget on purpose - diverging here would
-    // mean the same green arrow meant "up" on one page and "better" on the
-    // other, which is harder to read than one consistent convention.
-    diffClass(diff: number): string {
-        if (diff > 0) return 'text-green-500 font-medium';
-        if (diff < 0) return 'text-red-500 font-medium';
-        return 'text-gray-500 font-medium';
+    // It replaces colouring by arithmetic sign, which duplicated the +/- that
+    // is already printed and painted "12 more missed calls" green. The sign
+    // still carries direction, so "-5" in green reads unambiguously as five
+    // fewer and that being an improvement.
+    //
+    // Note /report/dashboard's incident-type-stats-widget still colours by
+    // direction. Aligning it is a follow-up; its counts are mostly neutral, so
+    // most of them would simply turn grey.
+    diffClass(diff: number, polarity: Polarity): string {
+        if (diff === 0 || polarity === 'neutral') return 'font-black';
+        const better = polarity === 'up-good' ? diff > 0 : diff < 0;
+        return better ? 'text-green-500 font-black' : 'text-red-500 font-black';
     }
 
     diffText(diff: number): string {
         return diff > 0 ? `+${diff}` : `${diff}`;
-    }
-
-    // Deliberately the INVERSE of diffClass above, and the one place these two
-    // rows disagree on colour.
-    //
-    // The counter row colours by direction because "more calls" carries no
-    // valence - a busy day is not a bad day. A duration has one: every second
-    // added to ค่าเฉลี่ยเวลาตอบรับ is a caller waiting longer. Reusing
-    // diffClass would paint "answer time doubled, 6s -> 12s" green, which
-    // states the opposite of what happened. Two conventions on one screen is
-    // the lesser problem, because colour is read before digits are.
-    durationDiffClass(diff: number): string {
-        if (diff > 0) return 'text-red-500 font-medium';
-        if (diff < 0) return 'text-green-500 font-medium';
-        return 'text-gray-500 font-medium';
     }
 
     // Signed, and formatted as a duration so it reads against the HH:MM:SS
