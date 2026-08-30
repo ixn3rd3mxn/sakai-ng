@@ -78,6 +78,17 @@ TIMES_URL = os.environ.get(
 # whole day, so sub-minute freshness buys nothing and just adds load to a
 # service we do not own.
 POLL_SECONDS = int(os.environ.get("CALL_STATS_POLL_SECONDS", "60"))
+# The live feed is the only source here that can move second to second, so it
+# is polled on its own much shorter clock. Polling the rollup this often would
+# be pure waste - measured, it holds one value for 5-10 minutes and then jumps
+# - while polling the live feed at the rollup's rate was what left the board a
+# minute behind the official one.
+LIVE_POLL_SECONDS = int(os.environ.get("CALL_STATS_LIVE_POLL_SECONDS", "5"))
+# How long a good overlay may be reused after a failed refresh. Without it a
+# single transient blip drops the three counters back to the rollup, which
+# lags by minutes - so the numbers would visibly count *down*, which reads as
+# corruption rather than staleness.
+LIVE_GRACE_SECONDS = int(os.environ.get("CALL_STATS_LIVE_GRACE_SECONDS", "60"))
 # After a failure, retry sooner than the normal interval - but not so fast
 # that an upstream outage turns into a hammering loop.
 RETRY_SECONDS = int(os.environ.get("CALL_STATS_RETRY_SECONDS", "15"))
@@ -218,23 +229,33 @@ MAX_CACHED_DAYS = 150
 
 _lock = asyncio.Lock()
 _client: Optional[httpx.AsyncClient] = None
+_client_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def _http() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
+    global _client, _client_loop
+    # Rebuilt if the event loop changed. An AsyncClient's connections belong
+    # to the loop that opened them, so a cached one raises "Event loop is
+    # closed" the moment it is reused on another - which is what any script
+    # doing two separate asyncio.run() calls does, and what the test suite
+    # does between cases. Under uvicorn there is one loop for the process and
+    # this never triggers.
+    loop = asyncio.get_running_loop()
+    if _client is None or _client_loop is not loop:
         _client = httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+        _client_loop = loop
     return _client
 
 
 async def aclose() -> None:
-    global _client, _poller
+    global _client, _client_loop, _poller
     if _poller is not None:
         _poller.cancel()
         _poller = None
     if _client is not None:
         await _client.aclose()
         _client = None
+        _client_loop = None
 
 
 async def _fetch(day: date_cls) -> Optional[CallStats]:
@@ -332,16 +353,59 @@ async def _fetch_live() -> Optional[dict[str, int]]:
         return None
 
 
+_live_values: Optional[dict[str, int]] = None
+_live_at: float = 0.0
+_live_day: Optional[date_cls] = None
+# Wall-clock of the last successful live read, distinct from the monotonic
+# `_live_at` used for the TTL. This is what the board prints, because when an
+# overlay is applied it - not the rollup's fetch time - is when the numbers on
+# screen were actually read.
+_live_fetched_at: Optional[datetime] = None
+
+
+async def _live_overlay(now: float, force: bool, today: date_cls) -> Optional[dict[str, int]]:
+    """The live feed's LIVE_FIELDS, on their own short TTL.
+
+    Deliberately not part of the day entry: that is cached for POLL_SECONDS
+    because the rollup behind it cannot change faster, and folding the overlay
+    into it made the live counters inherit a staleness they do not have.
+
+    Scoped to `today`. The feed serves only the current day, so at the Bangkok
+    midnight rollover a cached overlay describes the day that just ended -
+    and the grace window below would paint yesterday's totals onto the new
+    day's card for up to a minute. Changing day discards it outright.
+    """
+    global _live_values, _live_at, _live_day
+    if _live_day != today:
+        _live_values, _live_at, _live_day = None, 0.0, today
+    if not force and _live_values is not None and now - _live_at < LIVE_POLL_SECONDS:
+        return _live_values
+
+    values = await _fetch_live()
+    # All or nothing: a partial overlay would mix observation times *within*
+    # the three live fields, on top of the mismatch they already carry against
+    # the rollup's three.
+    if values and all(field in values for field in LIVE_FIELDS):
+        global _live_fetched_at
+        _live_values, _live_at = values, now
+        _live_fetched_at = datetime.now(BANGKOK_TZ)
+        return values
+    if _live_values is not None and now - _live_at < LIVE_GRACE_SECONDS:
+        return _live_values
+    return None
+
+
 async def get_call_stats(day: Optional[date_cls] = None, force: bool = False) -> dict:
     """Stats for `day` (default: the current Bangkok day) plus a day-over-day
     diff against the day before it.
 
-    `force` skips the freshness check and always attempts an upstream fetch.
-    Only the poll loop passes it: the loop's own sleep already paces the
-    upstream, and without this a sleep that lands a few milliseconds short of
-    the TTL would return the cache and silently skip a cycle. It applies to
-    the requested day only - the comparison day is finished and immutable, so
-    forcing it would re-fetch a value that cannot have changed.
+    `force` applies to the **live overlay only**, and is passed by the poll
+    loop so a sleep landing a few milliseconds short of the overlay's TTL
+    cannot silently skip a cycle. It deliberately does not reach the rollup:
+    the loop now ticks every LIVE_POLL_SECONDS, and forcing the rollup at that
+    rate would refetch - twelve times a minute - a value that upstream only
+    recomputes every five to ten minutes. The rollup keeps its own POLL_SECONDS
+    TTL, and the comparison day is immutable once fetched.
 
     "Today" is re-resolved on every call, so a rollover past midnight simply
     changes which key is live. Yesterday's numbers can never be served under
@@ -352,13 +416,16 @@ async def get_call_stats(day: Optional[date_cls] = None, force: bool = False) ->
     now = time_module.monotonic()
 
     async with _lock:
-        entry = await _resolve(requested, today, now, force)
+        entry = await _resolve(requested, today, now, force=False)
         # The day before, for the diff. Always cache-first: once fetched it is
         # a completed day, so this costs one upstream call ever - not one per
         # poll - and after a midnight rollover the new comparison day is
         # already in the cache from when it was "today".
         previous = await _resolve(requested - timedelta(days=1), today, now, force=False)
-        return _payload(entry, previous, today)
+        # Today only: a finished day cannot move, and the live feed serves no
+        # day but today anyway.
+        overlay = await _live_overlay(now, force, today) if requested == today else None
+        return _payload(entry, previous, today, overlay)
 
 
 async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _Entry:
@@ -407,20 +474,6 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
         else:
             return _remember(_unavailable_entry(day, today, now), today)
 
-    # Today only. A past day is finished, and the rollup has long since caught
-    # up on it, so there is nothing fresher to overlay - and the live feed
-    # cannot serve any day but today anyway.
-    live = False
-    if day == today:
-        overlay = await _fetch_live()
-        # All or nothing, enforced here rather than in the fetcher: this is
-        # where the invariant actually bites. Merging a partial overlay would
-        # mix observation times *within* the three live fields, on top of the
-        # mismatch they already carry against the rollup's three.
-        if overlay and all(field in overlay for field in LIVE_FIELDS):
-            stats = replace(stats, **overlay)
-            live = True
-
     return _remember(
         _Entry(
             day=day,
@@ -430,7 +483,6 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
             checked_at=now,
             stale=False,
             available=True,
-            live=live,
             times=await _fetch_times(day),
         ),
         today,
@@ -461,15 +513,28 @@ def _unavailable_entry(day: date_cls, today: date_cls, now: float) -> _Entry:
     )
 
 
-def _payload(entry: _Entry, previous: _Entry, today: date_cls) -> dict:
+def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional[dict[str, int]] = None) -> dict:
     range_from, range_until = day_epoch_window(entry.day)
+
+    stats = entry.stats
+    live = False
+    fetched_at = entry.fetched_at
+    if overlay and entry.available:
+        stats = replace(stats, **overlay)
+        live = True
+        # The overlay is the freshest thing being shown, so it dates the
+        # payload. Reporting the rollup's timestamp here would have the board
+        # claim its live counters were a minute old, and would collapse the
+        # per-poll heartbeat back to the rollup's interval.
+        if _live_fetched_at is not None:
+            fetched_at = _live_fetched_at
 
     # Null rather than zeros whenever there is nothing honest to compare
     # against - a missing comparison day must read as "no comparison", not as
     # "no change". The frontend hides the line entirely in that case.
     diff = None
     if entry.available and previous.available:
-        diff = {field: getattr(entry.stats, field) - getattr(previous.stats, field) for field in CallStats.__dataclass_fields__}
+        diff = {field: getattr(stats, field) - getattr(previous.stats, field) for field in CallStats.__dataclass_fields__}
 
     # Independent of `diff`: the durations feed can have both days while the
     # counters feed is missing one, or the reverse.
@@ -494,13 +559,13 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls) -> dict:
         "range_until": range_until,
         # Naive Bangkok wall-clock, matching how every other timestamp
         # crosses this API (see libs.shift.now_local).
-        "fetched_at": entry.fetched_at.replace(tzinfo=None).isoformat(),
+        "fetched_at": fetched_at.replace(tzinfo=None).isoformat(),
         "available": entry.available,
         "stale": entry.stale,
         # True when incoming/answer/sla came from the live feed. False means
         # every counter is the rollup's, which lags by 10+ minutes - worth
         # surfacing because the board looks identical either way.
-        "live": entry.live,
+        "live": live,
         # Null when the durations feed had nothing for this day, so the four
         # duration cards can blank independently of the six counter cards.
         # Values are seconds; the frontend formats them.
@@ -516,7 +581,7 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls) -> dict:
         # therefore most negative just after midnight and converges as the day
         # fills in. Same semantics as the dispatch page's shift diff.
         "diff": diff,
-        **asdict(entry.stats),
+        **asdict(stats),
     }
 
 
@@ -594,7 +659,10 @@ async def _poll_loop() -> None:
         # whichever comes first. Landing on the boundary is what swaps the
         # widget onto the new day the second it begins, with no tick loop
         # scanning for it and no scheduled job.
-        interval = RETRY_SECONDS if payload["stale"] else POLL_SECONDS
+        # LIVE_POLL_SECONDS, not POLL_SECONDS: the loop must tick as fast as
+        # the fastest source it publishes. The per-day entry has its own
+        # longer TTL, so the rollup is still only refetched once a minute.
+        interval = RETRY_SECONDS if payload["stale"] else LIVE_POLL_SECONDS
         await asyncio.sleep(min(interval, seconds_until_next_bangkok_midnight() + 1))
 
 
