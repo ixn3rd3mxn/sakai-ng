@@ -1,7 +1,10 @@
 import { Component, computed, inject } from '@angular/core';
+import { ProgressSpinnerModule } from 'primeng/progressspinner';
+import { SkeletonModule } from 'primeng/skeleton';
 import { CallStatsDiff, CallStatsSummary, CallTimes } from '../call-stats.types';
 import { CallStatsDataService } from '../services/call-stats-data.service';
 import { parseIsoDate } from '../../dashboardclone/services/date-utils';
+import { formatDuration } from '../format-utils';
 
 /** Whether a rise in this metric is an improvement, a deterioration, or
  *  neither. It is the metric's property, not the card's, which is why every
@@ -24,11 +27,30 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 @Component({
     standalone: true,
     selector: 'app-call-stats-widget',
+    imports: [SkeletonModule, ProgressSpinnerModule],
+    styles: `
+        /* Every card here is tinted - 40% of a status colour mixed into the
+           surface - and the default skeleton is a 6% white wash tuned for a
+           neutral background, which all but disappears on them. Tinting with
+           the text colour instead keeps it legible on all five card colours
+           and follows the theme, since --text-color flips in dark mode.
+           Custom properties inherit, so setting them on .card reaches the
+           skeletons without a descendant selector. */
+        .card {
+            --p-skeleton-background: color-mix(in srgb, var(--text-color) 12%, transparent);
+            --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
+        }
+    `,
     template: `
         <div class="col-span-12">
             <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
                 <div class="font-semibold text-xl">สถิติการให้บริการต่อวัน</div>
-                <div class="text-sm text-surface-500 dark:text-surface-400">{{ status() }}</div>
+                <div class="flex items-center gap-2 text-sm text-surface-500 dark:text-surface-400">
+                    @if (loading()) {
+                        <p-progress-spinner [style]="{ width: '1rem', height: '1rem' }" strokeWidth="8" ariaLabel="กำลังโหลด" />
+                    }
+                    <span>{{ status() }}</span>
+                </div>
             </div>
         </div>
         @for (card of cards(); track card.label) {
@@ -45,13 +67,19 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                                  "ไม่ได้รับสาย คิวเต็ม" - the longest of the six,
                                  with a space to break on - wrapped. -->
                             <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
-                            <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.value }}</div>
+                            @if (loading()) {
+                                <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
+                            } @else {
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.value }}</div>
+                            }
                         </div>
                     </div>
                     <!-- Omitted entirely when there is nothing to compare
                          against, rather than shown as +0 - which would claim
                          the previous day matched exactly. -->
-                    @if (card.diff !== null) {
+                    @if (loading()) {
+                        <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
+                    } @else if (card.diff !== null) {
                         <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
                              line gets, and at base size it wrapped too. -->
                         <div class="text-sm">
@@ -75,10 +103,16 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                             <!-- Smaller below sm: these cards are half-width on a
                                  phone and HH:MM:SS is eight characters, so 5xl
                                  overflows where the counters' 2-3 digits do not. -->
-                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl sm:text-5xl">{{ card.value }}</div>
+                            @if (loading()) {
+                                <p-skeleton width="min(9rem, 100%)" height="3rem" />
+                            } @else {
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl sm:text-5xl">{{ card.value }}</div>
+                            }
                         </div>
                     </div>
-                    @if (card.diff !== null) {
+                    @if (loading()) {
+                        <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
+                    } @else if (card.diff !== null) {
                         <!-- Same xs/sm split as the counter row. This line is
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
                              is the one that wrapped first on mobile. -->
@@ -94,6 +128,11 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 })
 export class CallStatsWidget {
     private readonly data = inject(CallStatsDataService);
+
+    // Skeletons only while the first payload is in flight. Once it has
+    // arrived, a missing number is a dash - "we asked and there is nothing
+    // for this day" - and a skeleton would promise something still coming.
+    protected readonly loading = this.data.loading;
 
     // Label, colour, and which counter each card reads - the one place the
     // upstream field names are bound to what is on screen. Keyed on
@@ -199,7 +238,7 @@ export class CallStatsWidget {
     // direction. Aligning it is a follow-up; its counts are mostly neutral, so
     // most of them would simply turn grey.
     diffClass(diff: number, polarity: Polarity): string {
-        if (diff === 0 || polarity === 'neutral') return 'font-black';
+        if (diff === 0 || polarity === 'neutral') return 'text-gray-500 font-medium';
         const better = polarity === 'up-good' ? diff > 0 : diff < 0;
         return better ? 'text-green-500 font-black' : 'text-red-500 font-black';
     }
@@ -213,22 +252,4 @@ export class CallStatsWidget {
     durationDiffText(diff: number): string {
         return `${diff < 0 ? '-' : '+'}${formatDuration(Math.abs(diff))}`;
     }
-}
-
-/** Seconds -> a full `HH:MM:SS` clock reading, e.g. 12554 -> "03:29:14".
- *
- *  The upstream reports every duration in seconds, and a raw "12554" on a wall
- *  display tells an operator nothing. Every field is padded and no component
- *  is ever dropped, so the four cards stay the same width and can be compared
- *  at a glance - a variable-width "2:21" next to "03:29:14" reads as a
- *  different kind of quantity rather than a shorter one.
- *
- *  Hours are padded to two digits but not truncated to two: `total_service` is
- *  the sum across every agent, so a busy branch can exceed 24h in a day and
- *  must render as "31:07:02" rather than wrapping to "07:07:02".
- */
-function formatDuration(totalSeconds: number): string {
-    const seconds = Math.max(0, Math.floor(totalSeconds));
-    const pad = (n: number) => `${n}`.padStart(2, '0');
-    return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
 }

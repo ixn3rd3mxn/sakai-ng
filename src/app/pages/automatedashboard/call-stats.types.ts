@@ -1,6 +1,26 @@
 // Mirrors the payload built by backend/libs/call_stats.py. The upstream NIEMS
 // response carries more fields (missed_call, percent_sla, ...); the backend
 // drops them, so this is deliberately the whole contract and not a subset.
+/** One hour of the Bangkok day, for the hourly chart. Always 24 of them, in
+ *  order, with quiet hours present as zeros - a missing hour would shift every
+ *  later bar one place to the left. */
+export interface HourlyBucket {
+    /** 0-23, from the upstream's own `pointer` rather than array position. */
+    hour: number;
+    /** `HH:00`, formatted server-side to match every other clock on the page. */
+    label: string;
+    /** Exactly `answer + missed` - verified across a full day, every hour. It
+     *  is what makes the stacked bar honest rather than approximate: the total
+     *  height of a bar *is* this number, not something close to it. */
+    incoming: number;
+    answer: number;
+    /** The upstream's `missed_call`, which is `abandon + queue_full_abandon`.
+     *  Carried as one number because queue-full abandons have been zero in
+     *  every hour observed, so splitting them would add a permanently empty
+     *  third segment to every bar. */
+    missed: number;
+}
+
 export interface CallStatsSummary {
     /** Bangkok calendar day these counters cover, as `YYYY-MM-DD`. Resolved
      *  server-side - never computed in the browser, whose clock and timezone
@@ -56,6 +76,11 @@ export interface CallStatsSummary {
      *  cumulative, so both read low all morning simply because the day is
      *  young - the same partial-day caveat the counter row carries. */
     times_diff: CallTimes | null;
+
+    /** 24 hourly buckets for the chart, or null when that feed could not be
+     *  read. Independent of `available` and of `times`: the chart blanks on
+     *  its own, exactly as the duration cards do. */
+    hourly: HourlyBucket[] | null;
 
     /** The day `diff` is measured against - always the day before `day`. */
     compare_day: string;

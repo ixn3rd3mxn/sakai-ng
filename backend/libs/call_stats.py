@@ -74,6 +74,11 @@ TIMES_URL = os.environ.get(
     "https://rnis-api-qm.niems.go.th/v2/stats/summary/times",
 )
 
+HOURLY_URL = os.environ.get(
+    "CALL_STATS_HOURLY_URL",
+    "https://rnis-api-qm.niems.go.th/v2/stats/hourly/summaries",
+)
+
 # How long a successful response stays good for. The upstream aggregates a
 # whole day, so sub-minute freshness buys nothing and just adds load to a
 # service we do not own.
@@ -207,6 +212,7 @@ class _Entry:
     available: bool       # False when the upstream holds no data for `day`
     live: bool = False    # LIVE_FIELDS came from the live feed, not the rollup
     times: Optional["CallTimes"] = None  # None when the durations feed had nothing
+    hourly: Optional[list[dict]] = None  # None when the hourly feed could not be read
 
     @property
     def final(self) -> bool:
@@ -228,6 +234,48 @@ _entries: dict[date_cls, _Entry] = {}
 MAX_CACHED_DAYS = 150
 
 _lock = asyncio.Lock()
+def parse_hourly(body: dict) -> Optional[list[dict]]:
+    """24 buckets, one per hour of the Bangkok day, or None if the response
+    carried none.
+
+    `pointer` (0-23) is trusted over row position, and any hour the upstream
+    omits is filled with zeros, so the chart always has exactly 24 columns and
+    a quiet hour is a gap in the bars rather than a missing category that
+    shifts every later hour one place to the left.
+
+    Only three of the twelve fields per row are kept. `missed_call` is carried
+    rather than `abandon` + `queue_full_abandon` separately because it is
+    exactly their sum (verified across a full day) and the chart stacks it as
+    one segment - see the widget for why it is not split.
+    """
+    rows = body.get("data") or []
+    buckets: dict[int, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        hour = row.get("pointer")
+        if not isinstance(hour, int) or isinstance(hour, bool) or not 0 <= hour <= 23:
+            continue
+        buckets[hour] = {
+            "hour": hour,
+            "label": f"{hour:02d}:00",
+            "incoming": int(row.get("incoming") or 0),
+            "answer": int(row.get("answer") or 0),
+            "missed": int(row.get("missed_call") or 0),
+        }
+
+    if not buckets:
+        # No usable rows at all is a broken response, not a quiet day - a quiet
+        # day answers 200 with 24 rows of zeros. Returning zeros here would
+        # draw an empty chart that claims to be data.
+        return None
+
+    return [
+        buckets.get(hour, {"hour": hour, "label": f"{hour:02d}:00", "incoming": 0, "answer": 0, "missed": 0})
+        for hour in range(24)
+    ]
+
+
 _client: Optional[httpx.AsyncClient] = None
 _client_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -289,16 +337,48 @@ async def _fetch(day: date_cls) -> Optional[CallStats]:
 
 
 async def _fetch_times(day: date_cls) -> Optional[CallTimes]:
-    """Durations for `day`, or None when the upstream holds nothing for it.
+    """Durations for `day`, or None when the upstream holds no rows for it.
 
-    Same 404-means-no-rows contract as `_fetch`. Never raises: the durations
-    are a second row of cards, so losing them must blank those four rather
-    than fail the six that come from the counters feed.
+    Same 404-means-no-rows contract as `_fetch`, and the same division of
+    labour: None means the range is empty, and only the caller knows whether
+    that is a young day or a date the upstream has forgotten.
+
+    Raises on anything else. It used to swallow transport errors and return
+    None for those too, which was fine only while None blanked the cards
+    either way; once None for today came to mean "zero so far", an unreachable
+    feed would have rendered 00:00:00 - stating that no time was spent on
+    calls when the truth was that nothing was known. The caller catches it and
+    blanks the four cards, so the six counters are still unaffected.
+    """
+    range_from, range_until = day_epoch_window(day)
+    response = await _http().get(
+        TIMES_URL,
+        params={
+            "branch_id": BRANCH_ID,
+            "from": range_from,
+            "until": range_until,
+            "org_code": ORG_CODE,
+        },
+    )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return parse_times(response.json())
+
+
+async def _fetch_hourly(day: date_cls) -> Optional[list[dict]]:
+    """The 24 hourly buckets for `day`, or None if they could not be read.
+
+    Never raises, and unlike `_fetch_times` it needs no today-versus-past rule:
+    this endpoint answers 200 with 24 rows of zeros for a day that has not
+    started, so there is no 404 to disambiguate. None here always means the
+    same thing - nothing to draw - and the chart blanks rather than the six
+    counters failing with it.
     """
     range_from, range_until = day_epoch_window(day)
     try:
         response = await _http().get(
-            TIMES_URL,
+            HOURLY_URL,
             params={
                 "branch_id": BRANCH_ID,
                 "from": range_from,
@@ -309,12 +389,10 @@ async def _fetch_times(day: date_cls) -> Optional[CallTimes]:
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        return parse_times(response.json())
+        return parse_hourly(response.json())
     except Exception as exc:
-        # One line, not a traceback: this path is expected and self-healing
-        # (see `_fetch_live` below for the full reasoning).
-        logger.warning("call-stats durations feed unavailable (%s: %s); the four duration cards will blank", type(exc).__name__, exc)
-        logger.debug("call-stats durations feed error detail", exc_info=True)
+        logger.warning("call-stats hourly feed unavailable (%s: %s); the chart will blank", type(exc).__name__, exc)
+        logger.debug("call-stats hourly feed error detail", exc_info=True)
         return None
 
 
@@ -474,6 +552,37 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
         else:
             return _remember(_unavailable_entry(day, today, now), today)
 
+    try:
+        times = await _fetch_times(day)
+    except Exception as exc:
+        # Unreachable, not empty. The four duration cards blank; the six
+        # counters above them are already in hand and are unaffected. One
+        # line, not a traceback: this path is expected and self-healing.
+        logger.warning(
+            "call-stats durations feed unavailable (%s: %s); the four duration cards will blank",
+            type(exc).__name__,
+            exc,
+        )
+        logger.debug("call-stats durations feed error detail", exc_info=True)
+        times = None
+    else:
+        if times is None and day == today:
+            # A 404 from the durations feed carries the same two meanings as
+            # the counters' 404, so it gets the same rule, decided by the
+            # caller that knows which day it asked for.
+            #
+            # Without this the four duration cards showed a dash from midnight
+            # until the first call of the day while the six counters beside
+            # them showed 0, which read as the durations being broken rather
+            # than the day being new. A dash means "not known"; before the
+            # first call the answer is known, and it is zero.
+            #
+            # Still None for any other day, so a date outside retention keeps
+            # its dash - claiming zero average talk time for a real past day
+            # would be a false statement rather than a gap. And still None on
+            # a transport error, which the except branch above handles.
+            times = CallTimes()
+
     return _remember(
         _Entry(
             day=day,
@@ -483,7 +592,14 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
             checked_at=now,
             stale=False,
             available=True,
-            times=await _fetch_times(day),
+            times=times,
+            # Fetched for every day resolved, including the comparison day
+            # nothing draws. That is one wasted request per process: a past
+            # day's entry is `final` the moment it is built and never refetched,
+            # so the alternative - threading a "do I need this?" flag through
+            # the cache - would buy one request and cost a way for a cached
+            # entry to exist with the chart data missing and no path to fill it.
+            hourly=await _fetch_hourly(day),
         ),
         today,
     )
@@ -573,6 +689,9 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
         # Per-duration change vs `compare_day`, in seconds and signed. Null
         # when either day's durations are missing - see `times_diff` above.
         "times_diff": times_diff,
+        # 24 buckets for the hourly chart, or null when that feed could not be
+        # read - the chart blanks on its own, like the duration cards.
+        "hourly": entry.hourly,
         "compare_day": previous.day.isoformat(),
         # NOTE: when `day` is today this compares a day in progress against a
         # completed one, because the upstream ignores the time-of-day part of

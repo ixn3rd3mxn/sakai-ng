@@ -28,25 +28,24 @@ export class AppMenu {
                 items: [{ label: 'หน้าหลัก', icon: 'pi pi-fw pi-home', routerLink: ['/home'] }]
             },
             {
-                label: 'Auto Report',
+                label: 'Auto EMS CALL Report',
+                items: [
+                    { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/report/manual-dashboard'] },
+                ]
+            },
+            {
+                label: 'Manual EMS CALL Report',
                 items: [
                     { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/report/dashboard'] },
                     { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/report/summary'] },
                 ]
             },
             {
-                label: 'Manual Report',
-                items: [
-                    { label: 'แดชบอร์ด', icon: 'pi pi-fw pi-objects-column', routerLink: ['/report/manual-dashboard'] },
-                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/report/summary'] },
-                ]
-            },
-            {
                 label: 'Map',
                 items: [
-                    { label: 'แผนที่', icon: 'pi pi-fw pi-map', routerLink: ['/'] },
-                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/'] },
-                    { label: 'จัดการข้อมูล', icon: 'pi pi-fw pi-wrench', routerLink: ['/'] }
+                    { label: 'แผนที่', icon: 'pi pi-fw pi-map', routerLink: ['/map/view'] },
+                    { label: 'สรุปผล', icon: 'pi pi-fw pi-slack', routerLink: ['/map/summary'] },
+                    { label: 'จัดการข้อมูล', icon: 'pi pi-fw pi-wrench', routerLink: ['/map/manage'] }
                 ]
             },
         ];

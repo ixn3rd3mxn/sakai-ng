@@ -24,8 +24,15 @@ export class AgentsDataService implements OnDestroy {
 
     /** True only once a payload has arrived and the feed was readable. An
      *  empty roster is a real state ("nobody signed in"); an unreadable feed
-     *  is not, and the two must not render the same way. */
+     *  is not, and the two must not render the same way.
+     *
+     *  Stays true while the backend is holding a roster over a failed poll, so
+     *  the cards keep their DOM - and their animations - through a blip. */
     readonly hasRoster = computed(() => !this._loading() && (this._summary()?.available ?? false));
+
+    /** The rows on screen are the last good ones and the feed is currently
+     *  unreadable. The board keeps showing them and says how old they are. */
+    readonly isStale = computed(() => !this._loading() && (this._summary()?.stale ?? false));
 
     constructor() {
         this.subscription = this.stream().subscribe((summary) => {

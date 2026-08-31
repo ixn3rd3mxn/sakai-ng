@@ -115,13 +115,23 @@ def test_counts_and_the_unreadable_feed_are_distinguishable():
     assert payload["counts"]["available"] == 2 and payload["counts"]["on_call"] == 1
     assert payload["counts"]["total"] == 3
 
+    # An unreadable feed is now marked by `stale` first and `available` only
+    # once the held-over roster ages out - the rows are kept in between so a
+    # blip does not empty the board. The distinction this test exists for
+    # survives either way: a broken feed never looks like a quiet one.
     unreadable = agents._payload(None)
-    assert unreadable["available"] is False and unreadable["agents"] == []
+    assert unreadable["stale"] is True and unreadable["available"] is True
+    assert len(unreadable["agents"]) == 3, "held over, not blanked"
+
+    agents._last_good_at -= agents.GRACE_SECONDS + 1
+    expired = agents._payload(None)
+    assert expired["available"] is False and expired["agents"] == []
+
     # An empty roster is a real state ("nobody signed in"); an unreadable feed
     # is not. Rendering both as blank would let a broken feed pass as an
     # unmanned centre.
     empty = agents._payload([])
-    assert empty["available"] is True and empty["agents"] == []
+    assert empty["available"] is True and empty["stale"] is False and empty["agents"] == []
 
 
 def test_the_name_cache_treats_an_empty_mapping_as_cached():
@@ -148,9 +158,80 @@ def test_the_name_cache_treats_an_empty_mapping_as_cached():
     real_db = agents.db
     agents.db = FakeDB()
     try:
-        asyncio.run(agents._load_names())
-        asyncio.run(agents._load_names())
-        asyncio.run(agents._load_names())
+        asyncio.run(agents.load_names())
+        asyncio.run(agents.load_names())
+        asyncio.run(agents.load_names())
         assert len(calls) == 1, "an empty mapping must still satisfy the TTL"
     finally:
         agents.db = real_db
+
+
+# ---------------------------------------------------------------------------
+# Holding the roster over a failed poll
+# ---------------------------------------------------------------------------
+
+
+def _roster():
+    return agents.parse_agents({"data": [_row("94011", "DND_OFF", 5), _row("94018", "ANSWER", 1)]}, {})
+
+
+def test_a_failed_poll_keeps_the_last_good_roster():
+    """The bug this section exists for.
+
+    A single failed fetch used to empty the board: available went false, the
+    widget's own guard collapsed the roster to zero cards, every card
+    unmounted and every animation restarted - and because the loop then backed
+    off, the blackout lasted the whole retry interval rather than one poll.
+    A roster two seconds old still answers "who is on duty"; nothing does not.
+    """
+    agents._payload(_roster())
+    held = agents._payload(None)
+    assert held["available"] is True, "a blip must not empty a dispatch board"
+    assert [a["extension"] for a in held["agents"]] == ["94011", "94018"]
+    assert held["stale"] is True, "held-over rows must not be passed off as current"
+
+
+def test_a_held_over_roster_keeps_the_timestamp_of_the_real_read():
+    """So the board can say how old it is rather than restating 'now'."""
+    fresh = agents._payload(_roster())
+    held = agents._payload(None)
+    assert held["fetched_at"] == fresh["fetched_at"]
+
+
+def test_counts_describe_the_rows_actually_shown():
+    """The counts are recomputed from whatever rows the payload carries, so a
+    held-over roster reports its own tally rather than the empty dict a
+    failure used to send."""
+    assert agents._payload(_roster())["counts"]["total"] == 2
+    assert agents._payload(None)["counts"]["total"] == 2
+
+
+def test_the_roster_is_dropped_once_it_is_too_old_to_trust():
+    """Past the grace window "who is on duty" genuinely is unknown, and saying
+    so beats a frozen roster."""
+    agents._payload(_roster())
+    agents._last_good_at -= agents.GRACE_SECONDS + 1
+    expired = agents._payload(None)
+    assert expired["available"] is False and expired["agents"] == []
+    assert expired["fetched_at"] is None
+
+
+def test_a_failure_before_any_good_read_has_nothing_to_hold():
+    fresh = agents._payload(None)
+    assert fresh["available"] is False and fresh["agents"] == []
+
+
+def test_recovery_replaces_the_held_roster():
+    agents._payload(_roster())
+    agents._payload(None)
+    back = agents._payload(agents.parse_agents({"data": [_row("94004", "RINGING", 5)]}, {}))
+    assert back["stale"] is False
+    assert [a["extension"] for a in back["agents"]] == ["94004"]
+
+
+def test_a_held_over_payload_still_differs_from_a_fresh_one():
+    """The SSE loop only broadcasts on a signature change, so going stale has
+    to be visible in the payload or the board would never learn about it."""
+    fresh = agents._payload(_roster())
+    held = agents._payload(None)
+    assert agents._signature(fresh) != agents._signature(held)

@@ -32,9 +32,15 @@ export interface Agent {
 }
 
 export interface AgentsSummary {
-    /** False when the feed could not be read. Distinct from an empty `agents`
-     *  array, which would mean nobody is on duty - a very different claim. */
+    /** False when the feed could not be read *and* the last good roster has
+     *  aged past its grace window. Distinct from an empty `agents` array,
+     *  which would mean nobody is on duty - a very different claim. */
     available: boolean;
+    /** True when the most recent poll failed. With `available` also true these
+     *  are the last good rows, held over so a transient blip does not empty
+     *  the board - see the reasoning in backend/libs/agents.py `_payload`.
+     *  `fetched_at` then says when they were actually read. */
+    stale: boolean;
     agents: Agent[];
     counts: Partial<Record<AgentStatus | 'total', number>>;
     /** Naive Bangkok wall-clock of the last successful read. */

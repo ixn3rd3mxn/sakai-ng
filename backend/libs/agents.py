@@ -57,7 +57,18 @@ BRANCH_ID = os.environ.get("CALL_STATS_BRANCH_ID", "94")
 # loop: 30 requests a minute in total, no matter how many boards are open, and
 # only while at least one of them is being watched.
 POLL_SECONDS = int(os.environ.get("AGENTS_POLL_SECONDS", "2"))
-RETRY_SECONDS = int(os.environ.get("AGENTS_RETRY_SECONDS", "15"))
+# Lowered from 15s once a failure stopped being visible to the viewer. While a
+# failed poll emptied the board there was little point retrying hard - the
+# damage was already on screen - so backing off was the lesser evil. With the
+# last good roster held over (see `_payload`) a failure costs nothing until the
+# grace window runs out, which makes recovering quickly worth far more than the
+# handful of requests it spends.
+RETRY_SECONDS = int(os.environ.get("AGENTS_RETRY_SECONDS", "5"))
+# How long a held-over roster may be served before the board admits it does not
+# know. Fifteen retries at RETRY_SECONDS, and well past any transient blip: if
+# the feed has been unreadable for half a minute, something is actually wrong
+# and a supervisor should see that rather than a frozen roster.
+GRACE_SECONDS = int(os.environ.get("AGENTS_GRACE_SECONDS", "30"))
 TIMEOUT_SECONDS = float(os.environ.get("AGENTS_TIMEOUT_SECONDS", "10"))
 # The name mapping changes at hiring speed, not at poll speed.
 NAMES_TTL_SECONDS = int(os.environ.get("AGENTS_NAMES_TTL_SECONDS", "60"))
@@ -170,8 +181,12 @@ _names: dict[str, str] = {}
 _names_at: float = 0.0
 
 
-async def _load_names() -> dict[str, str]:
+async def load_names() -> dict[str, str]:
     """Extension -> name from Mongo, cached.
+
+    Public because libs.call_log needs the same mapping: the call log names
+    the agent who took each call, and a second copy of this lookup would be
+    a second cache to keep warm and a second place for a name to go stale.
 
     Returns whatever is cached if the database is unreachable. The board is
     far more useful showing extensions with no names than not rendering: this
@@ -210,30 +225,77 @@ async def _fetch() -> Optional[list[dict]]:
         body = response.json()
         if body.get("status") != "OK":
             return None
-        return parse_agents(body, await _load_names())
+        return parse_agents(body, await load_names())
     except Exception as exc:
         logger.warning("agent feed unavailable (%s: %s)", type(exc).__name__, exc)
         logger.debug("agent feed error detail", exc_info=True)
         return None
 
 
-def _payload(agents: Optional[list[dict]]) -> dict:
-    if agents is None:
-        # Distinguishable from "nobody on duty": the board shows an error
-        # rather than an empty roster, which would read as an unmanned centre.
-        return {"available": False, "agents": [], "counts": {}, "fetched_at": None}
-
+def _counts(agents: list[dict]) -> dict[str, int]:
     counts = {key: 0 for key in ("on_call", "ringing", "break", "available", "unknown")}
     for agent in agents:
         counts[agent["status"]] = counts.get(agent["status"], 0) + 1
     counts["total"] = len(agents)
+    return counts
 
-    return {
-        "available": True,
-        "agents": agents,
-        "counts": counts,
-        "fetched_at": datetime.now(BANGKOK_TZ).replace(tzinfo=None).isoformat(),
-    }
+
+# The last roster that was read successfully, kept so a failed poll can serve
+# it instead of nothing. See `_payload` for why.
+_last_good: Optional[list[dict]] = None
+_last_good_at: float = 0.0
+_last_good_fetched_at: Optional[str] = None
+
+
+def _payload(agents: Optional[list[dict]]) -> dict:
+    """The board's payload, with the last good roster held over on failure.
+
+    Without this a single failed poll emptied the board: `agents` came back
+    None, `available` went false, and the widget's own guard collapsed the
+    roster to zero cards - so every card unmounted, every animation restarted,
+    and because the loop then backed off, the blackout lasted the whole retry
+    interval rather than one poll.
+
+    That is the wrong trade for a feed polled every two seconds against a
+    third party. A roster a few seconds old is still an accurate answer to
+    "who is on duty"; an empty board is not an answer at all. This module
+    already reasons this way about the Mongo name lookup, which keeps its
+    cached names through a database outage - the roster feed is the more
+    important of the two and had no equivalent.
+
+    `stale` is what makes it honest: the data is held over, and the board says
+    so rather than passing it off as current. Past `GRACE_SECONDS` the held
+    roster is dropped, because at some point "who is on duty" genuinely is
+    unknown and claiming otherwise would be worse than blanking.
+    """
+    global _last_good, _last_good_at, _last_good_fetched_at
+
+    if agents is not None:
+        _last_good = agents
+        _last_good_at = time_module.monotonic()
+        _last_good_fetched_at = datetime.now(BANGKOK_TZ).replace(tzinfo=None).isoformat()
+        return {
+            "available": True,
+            "stale": False,
+            "agents": agents,
+            "counts": _counts(agents),
+            "fetched_at": _last_good_fetched_at,
+        }
+
+    if _last_good is not None and time_module.monotonic() - _last_good_at < GRACE_SECONDS:
+        # `fetched_at` deliberately stays at the last successful read, so the
+        # board can say how old this is instead of restating "now".
+        return {
+            "available": True,
+            "stale": True,
+            "agents": _last_good,
+            "counts": _counts(_last_good),
+            "fetched_at": _last_good_fetched_at,
+        }
+
+    # Distinguishable from "nobody on duty": the board shows an error rather
+    # than an empty roster, which would read as an unmanned centre.
+    return {"available": False, "stale": True, "agents": [], "counts": {}, "fetched_at": None}
 
 
 async def get_agents() -> dict:
@@ -272,7 +334,10 @@ async def _poll_loop() -> None:
                     except asyncio.QueueEmpty:
                         pass
                 queue.put_nowait(payload)
-        await asyncio.sleep(POLL_SECONDS if payload["available"] else RETRY_SECONDS)
+        # Keyed on `stale`, not `available`: a held-over payload is still
+        # available, and pacing on that would poll a failing upstream at the
+        # healthy 2s rate for the whole grace window.
+        await asyncio.sleep(POLL_SECONDS if not payload["stale"] else RETRY_SECONDS)
 
 
 async def subscribe() -> asyncio.Queue:

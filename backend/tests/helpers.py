@@ -72,12 +72,28 @@ def reset_call_stats(module) -> None:
 def reset_agents(module) -> None:
     module._names = {}
     module._names_at = 0.0
+    # The held-over roster, or a grace window left open by an earlier test
+    # would let the next one assert against the previous one's data.
+    module._last_good = None
+    module._last_good_at = 0.0
+    module._last_good_fetched_at = None
     module._latest = None
     module._latest_signature = None
     module._subscribers.clear()
     module._poller = None
     module._client = None
     module._client_loop = None
+
+
+def reset_call_log(module) -> None:
+    module._latest = None
+    module._latest_signature = None
+    module._subscribers.clear()
+    module._poller = None
+    module._client = None
+    module._client_loop = None
+    for name, func in _CALL_LOG_ORIGINALS.items():
+        setattr(module, name, func)
 
 
 def reset_all() -> None:
@@ -87,10 +103,11 @@ def reset_all() -> None:
     each test remembering to reset - which is how the live suite ended up
     asserting against stubs the offline suite had left installed.
     """
-    from libs import agents as _agents, call_stats as _call_stats
+    from libs import agents as _agents, call_log as _call_log, call_stats as _call_stats
 
     reset_call_stats(_call_stats)
     reset_agents(_agents)
+    reset_call_log(_call_log)
 
 
 def stub_call_stats(module, *, rollup=None, live=None, times=None) -> None:
@@ -116,3 +133,61 @@ def stub_call_stats(module, *, rollup=None, live=None, times=None) -> None:
     module._fetch = _rollup
     module._fetch_live = _live
     module._fetch_times = _times
+
+
+_CALL_LOG_ORIGINALS: dict[str, object] = {}
+
+
+def stub_call_log(module, *, abandoned=None, calls=None) -> None:
+    """Replace both of libs.call_log's fetchers.
+
+    Both together, never one: the two feeds are gathered concurrently, so
+    leaving either real means it reaches the network mid-test and the
+    assertion is made against whatever the call centre is doing right now.
+    Passing None for one models that feed being unreachable, which is the
+    case the independent availability flags exist for.
+    """
+    for name in ("_fetch_abandoned", "_fetch_call_logs"):
+        _CALL_LOG_ORIGINALS.setdefault(name, getattr(module, name))
+
+    async def _abandoned():
+        return abandoned() if callable(abandoned) else abandoned
+
+    async def _calls(day, names):
+        return calls(day, names) if callable(calls) else calls
+
+    module._fetch_abandoned = _abandoned
+    module._fetch_call_logs = _calls
+
+
+class FakeResponse:
+    """Enough of httpx.Response for the fetchers: a status, a body, and a
+    raise_for_status that behaves like the real one."""
+
+    def __init__(self, status_code: int, body: dict | None = None):
+        self.status_code = status_code
+        self._body = body if body is not None else {}
+
+    def json(self) -> dict:
+        return self._body
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def stub_call_log_http(module, response: FakeResponse) -> None:
+    """Replace the shared client so a specific HTTP status can be exercised.
+
+    Registered in _CALL_LOG_ORIGINALS so reset_call_log puts the real `_http`
+    back before the next test - without that the fake client outlives the test
+    that installed it and the live suite starts asserting against it, which is
+    the failure mode that made these suites order-dependent once already.
+    """
+    _CALL_LOG_ORIGINALS.setdefault("_http", module._http)
+
+    class _Client:
+        async def get(self, url, params=None):
+            return response
+
+    module._http = lambda: _Client()

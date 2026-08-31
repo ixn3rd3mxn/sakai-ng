@@ -15,7 +15,7 @@ from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import agents, aggregations, call_stats, events, lookups
+from libs import agents, aggregations, call_log, call_stats, events, lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import IncidentCreateIn
 from libs.shift import Shift, now_local, resolve_context, resolve_day_context
@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
         retry_task.cancel()
     await call_stats.aclose()
     await agents.aclose()
+    await call_log.aclose()
 
 
 app = FastAPI(title="EMS Dispatch Dashboard API", lifespan=lifespan)
@@ -316,6 +317,43 @@ async def stream_agents(request: Request):
                 yield {"event": "agents", "data": _sse_data(payload)}
         finally:
             agents.unsubscribe(queue)
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/api/call-log")
+async def get_call_log():
+    """Answered calls and abandoned callers for today, in one payload.
+
+    Mongo supplies only the agent names, so this still answers during a
+    database outage - with extensions in place of names, as the agent board
+    does.
+    """
+    return await call_log.get_call_log()
+
+
+@app.get("/api/call-log/stream")
+async def stream_call_log(request: Request):
+    """Server-sent events for the two log tables.
+
+    Polled far more slowly than the agent board: these are logs rather than
+    live status, and the abandoned-call feed takes seconds to answer. One
+    shared loop serves both tables and every open board.
+    """
+
+    async def event_generator():
+        queue = await call_log.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=5)
+                except asyncio.TimeoutError:
+                    continue
+                yield {"event": "call-log", "data": _sse_data(payload)}
+        finally:
+            call_log.unsubscribe(queue)
 
     return EventSourceResponse(event_generator())
 

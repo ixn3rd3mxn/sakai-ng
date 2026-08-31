@@ -262,8 +262,20 @@ def test_diffs_are_computed_against_the_previous_day():
 
 
 def test_durations_blank_independently_of_the_counters():
+    """An unreachable durations feed blanks its four cards and leaves the six
+    counters alone.
+
+    Stubbed to raise rather than to return None: since None for today came to
+    mean "zero so far", an outage has to be signalled by raising, or the cards
+    would render 00:00:00 and state that no time was spent on calls when the
+    truth is that nothing is known.
+    """
+
+    def unreachable(day):
+        raise RuntimeError("durations feed down")
+
     helpers.reset_call_stats(cs)
-    helpers.stub_call_stats(cs, rollup=lambda d: _stats(incoming=10), live=None, times=None)
+    helpers.stub_call_stats(cs, rollup=lambda d: _stats(incoming=10), live=None, times=unreachable)
     p = asyncio.run(cs.get_call_stats())
     assert p["times"] is None and p["times_diff"] is None
     assert p["available"] is True and p["incoming"] == 10
@@ -330,3 +342,125 @@ def test_a_slow_client_keeps_the_newest_payload():
         assert q.get_nowait()["incoming"] == 2, "drop the superseded frame, not the fresh one"
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Midnight: the duration cards
+# ---------------------------------------------------------------------------
+
+
+def test_todays_durations_are_zero_not_missing_before_the_first_call():
+    """The four duration cards showed a dash from midnight until the first
+    call of the day while the six counters beside them showed 0 - which read
+    as the durations being broken rather than the day being new.
+
+    The durations feed 404s for an empty range exactly as the counters feed
+    does, so it gets the same rule: for today the answer is known and it is
+    zero."""
+    today = cs.bangkok_calendar_day()
+    helpers.stub_call_stats(cs, rollup=None, live=None, times=None)
+    payload = asyncio.run(cs.get_call_stats(today))
+    assert payload["available"] is True
+    assert payload["times"] is not None, "a dash means 'not known'; before the first call it is known"
+    assert payload["times"] == {"avg_accept": 0, "longest_accept": 0, "avg_service": 0, "total_service": 0}
+
+
+def test_a_past_day_outside_retention_keeps_its_dash():
+    """The other half of the same 404. Claiming zero average talk time for a
+    real past date would be a false statement rather than a gap."""
+    long_ago = cs.bangkok_calendar_day() - dt.timedelta(days=400)
+    helpers.stub_call_stats(cs, rollup=None, live=None, times=None)
+    payload = asyncio.run(cs.get_call_stats(long_ago))
+    assert payload["available"] is False
+    assert payload["times"] is None
+
+
+def test_the_comparison_survives_a_day_that_has_not_started():
+    """What the card actually renders at 00:00:01: zeros against yesterday's
+    real durations, so "xx:xx:xx เทียบกับเมื่อวาน" appears instead of nothing."""
+    today = cs.bangkok_calendar_day()
+    yesterday = today - dt.timedelta(days=1)
+
+    def times(day):
+        return None if day == today else cs.CallTimes(avg_accept=7, longest_accept=44, avg_service=57, total_service=6664)
+
+    helpers.stub_call_stats(cs, rollup=lambda day: cs.CallStats(), live=None, times=times)
+    payload = asyncio.run(cs.get_call_stats(today))
+    assert payload["times_diff"] == {
+        "avg_accept": -7,
+        "longest_accept": -44,
+        "avg_service": -57,
+        "total_service": -6664,
+    }
+
+
+def test_an_outage_is_not_mistaken_for_a_day_that_has_not_started():
+    """The distinction the two branches exist for, asserted side by side: on
+    the same day, an empty range reads as zero and an unreachable feed reads
+    as unknown."""
+    today = cs.bangkok_calendar_day()
+
+    def unreachable(day):
+        raise RuntimeError("durations feed down")
+
+    helpers.stub_call_stats(cs, rollup=lambda d: cs.CallStats(), live=None, times=unreachable)
+    assert asyncio.run(cs.get_call_stats(today))["times"] is None
+
+    helpers.reset_call_stats(cs)
+    helpers.stub_call_stats(cs, rollup=lambda d: cs.CallStats(), live=None, times=None)
+    assert asyncio.run(cs.get_call_stats(today))["times"] == {
+        "avg_accept": 0, "longest_accept": 0, "avg_service": 0, "total_service": 0
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hourly buckets (the chart)
+# ---------------------------------------------------------------------------
+
+
+def _hour(pointer, incoming=0, answer=0, missed=0):
+    return {"pointer": pointer, "separator": f"{pointer:02d}:00", "incoming": incoming,
+            "answer": answer, "missed_call": missed, "abandon": missed, "queue_full_abandon": 0}
+
+
+def test_hourly_always_yields_24_buckets_in_order():
+    """A missing hour would shift every later bar one place left, so gaps are
+    filled rather than dropped."""
+    body = {"data": [_hour(14, 10, 8, 2), _hour(2, 2, 2, 0)]}
+    out = cs.parse_hourly(body)
+    assert len(out) == 24
+    assert [b["hour"] for b in out] == list(range(24))
+    assert out[14]["incoming"] == 10 and out[2]["incoming"] == 2
+    assert out[0]["incoming"] == 0, "an hour the upstream omitted is a quiet hour, not a missing category"
+
+
+def test_hourly_is_keyed_on_pointer_not_row_order():
+    """The chart's x-axis is the hour, so it must not depend on the upstream
+    happening to return the rows sorted."""
+    out = cs.parse_hourly({"data": [_hour(23, 5, 5, 0), _hour(0, 1, 1, 0)]})
+    assert out[23]["incoming"] == 5 and out[0]["incoming"] == 1
+
+
+def test_hourly_labels_are_padded_clock_readings():
+    out = cs.parse_hourly({"data": [_hour(9, 1, 1, 0)]})
+    assert out[9]["label"] == "09:00" and out[23]["label"] == "23:00"
+
+
+def test_hourly_stack_sums_to_incoming():
+    """What makes the stacked bar honest rather than approximate: the height of
+    a column *is* the hour's incoming total, not something close to it."""
+    out = cs.parse_hourly({"data": [_hour(14, 10, 8, 2)]})
+    assert out[14]["answer"] + out[14]["missed"] == out[14]["incoming"]
+
+
+def test_an_empty_hourly_response_is_null_not_a_flat_chart():
+    """A quiet day answers 200 with 24 rows of zeros; no rows at all is a
+    broken response. Zeros here would draw an empty chart claiming to be data."""
+    assert cs.parse_hourly({"data": []}) is None
+    assert cs.parse_hourly({}) is None
+
+
+def test_hourly_ignores_rows_with_an_unusable_pointer():
+    out = cs.parse_hourly({"data": [_hour(24, 9, 9, 0), {"pointer": True}, _hour(5, 3, 3, 0)]})
+    assert out[5]["incoming"] == 3
+    assert sum(b["incoming"] for b in out) == 3, "hour 24 does not exist and must not be folded in"
