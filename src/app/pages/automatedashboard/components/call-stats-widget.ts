@@ -32,7 +32,7 @@ const SCALE_KEY = 'automate-dashboard.label-scale';
 // that fits at 200% on a wall monitor has a fraction of the width to live in
 // and wraps into a mess. Scaling is a wall-display affordance; a phone is not
 // one, and neither is a narrow window.
-const LARGE_SCREEN = '(min-width: 1280px)';
+const LARGE_SCREEN = '(min-width: 1024px)';
 
 // `th-TH` resolves to the Buddhist calendar, so this renders e.g.
 // "28 สิงหาคม พ.ศ. 2569" without a hand-maintained month/era table.
