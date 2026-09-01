@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component } from '@angular/core';
 import { RouterModule } from '@angular/router';
 
 interface Destination {
@@ -47,33 +47,13 @@ const DESTINATIONS: Destination[] = [
     { label: 'จัดการข้อมูล', group: 'Map', detail: 'จัดการข้อมูลพื้นที่และจุดให้บริการ', icon: 'pi-wrench', color: 'slate', link: '/map/manage', pending: true }
 ];
 
-// Bangkok explicitly, not the viewer's zone. A board opened from anywhere must
-// read in the dispatch centre's time - the same rule the rest of this app
-// follows for every timestamp it shows.
-const BANGKOK = 'Asia/Bangkok';
-const THAI_DATE = new Intl.DateTimeFormat('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: BANGKOK });
-const THAI_TIME = new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: BANGKOK });
-
 @Component({
     selector: 'app-home',
     standalone: true,
     imports: [RouterModule],
     template: `
         <div class="grid grid-cols-12 gap-1">
-            <!-- Identity first: this runs on a shared screen, and the first
-                 thing it should answer is which centre it belongs to. -->
             <div class="col-span-12">
-                <div class="card mb-0 flex flex-col sm:flex-row sm:items-center gap-6">
-                    <img src="demo/images/place/logo-512.png" alt="" class="w-20 h-20 object-contain shrink-0" />
-                    <div class="min-w-0">
-                        <div class="text-surface-900 dark:text-surface-0 font-semibold text-2xl">ศูนย์รับแจ้งเหตุและสั่งการการแพทย์ฉุกเฉิน</div>
-                        <div class="text-lg text-surface-600 dark:text-surface-300 mt-1">องค์การบริหารส่วนจังหวัดปัตตานี</div>
-                        <div class="text-sm text-muted-color mt-3 tabular-nums">{{ today() }} · {{ clock() }}</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-span-12 mt-4">
                 <div class="font-semibold text-xl mb-4">เมนูหลัก</div>
             </div>
 
@@ -109,16 +89,5 @@ const THAI_TIME = new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2
     `
 })
 export class HomeComponent {
-    private readonly destroyRef = inject(DestroyRef);
-
     protected readonly destinations = DESTINATIONS;
-
-    private readonly now = signal(new Date());
-    protected readonly today = computed(() => THAI_DATE.format(this.now()));
-    protected readonly clock = computed(() => THAI_TIME.format(this.now()));
-
-    constructor() {
-        const ticking = setInterval(() => this.now.set(new Date()), 1000);
-        this.destroyRef.onDestroy(() => clearInterval(ticking));
-    }
 }

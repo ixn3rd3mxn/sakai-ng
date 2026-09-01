@@ -79,7 +79,24 @@ MAX_PAGES = int(os.environ.get("CALL_LOG_MAX_PAGES", "4"))
 # libs.agents: an allow-list silently drops anything new, and an unfamiliar
 # action showing up in the table is easier to notice and ask about than a call
 # that never appears at all.
-UNANSWERED_ACTIONS = frozenset({"ABANDON", "QUEUE_FULL_ABANDON"})
+# Every outcome the log records, mapped to a key the widget renders as a
+# labelled tag.
+#
+# These rows used to be *excluded* - the table showed answered calls only,
+# because an unanswered one rendered as an agent who had handled a call of
+# 00:00:01, which read as staff hanging up on people. A status column removes
+# that ambiguity at the source: the row can say what it is, so it no longer has
+# to be hidden to avoid lying.
+#
+# Unknown actions map to "unknown" and carry the raw value through, the same
+# deny-list-shaped reasoning as libs.agents: a new upstream outcome should show
+# up as something to ask about, not as a call that silently never appears.
+STATUSES: dict[str, str] = {
+    "HANGUP": "answered",              # รับสาย
+    "ABANDON": "abandoned",            # ไม่ได้รับสาย - the caller gave up
+    "QUEUE_FULL_ABANDON": "queue_full",  # ไม่ได้รับสาย คิวเต็ม - never reached a desk
+    "NO_ANSWER": "no_answer",          # เจ้าหน้าที่ไม่รับสาย - rang, nobody picked up
+}
 
 # How many digits an agent extension has ("94009"). Queues are shorter ("942").
 EXTENSION_DIGITS = int(os.environ.get("CALL_LOG_EXTENSION_DIGITS", "5"))
@@ -88,25 +105,16 @@ EXTENSION_DIGITS = int(os.environ.get("CALL_LOG_EXTENSION_DIGITS", "5"))
 def reached_an_agent(destination: str) -> bool:
     """Whether this row was ever delivered to somebody's desk.
 
-    The second and more durable of the two filters, added after the first one
-    failed in production within a day of being written.
+    No longer decides whether a row is shown - every row is now shown, labelled
+    by its status - but it still decides whether the agent column means
+    anything. A call that reached a desk carries that agent's extension in
+    `destination`; a queue-level event carries the queue instead ("942"), with
+    an empty `agent_username` and nobody attached to it.
 
-    The deny-list above was reasoned from a single day's sample, in which the
-    only two actions were HANGUP and ABANDON. The next day's feed carried
-    QUEUE_FULL_ABANDON - callers who hit a full queue and never reached anyone -
-    and because the list named only ABANDON, ten of them were being drawn in the
-    answered-call table as an "agent" called 942 handling calls of 00:00:00.
-
-    So the action name alone is not a safe test: it is an open set owned by the
-    upstream, and every new member defaults to being treated as answered. This
-    asks the structural question instead. A call that reached an agent carries
-    that agent's extension in `destination`; a queue-level event carries the
-    queue. No new upstream action can make "942" five digits long, so this holds
-    for actions nobody has seen yet.
-
-    Both filters are kept. This one excludes what never reached a person; the
-    deny-list excludes what reached a person and still went unanswered, which
-    is exactly what an ABANDON row is.
+    Verified across a full day: HANGUP, ABANDON and NO_ANSWER all carry a real
+    five-digit extension, QUEUE_FULL_ABANDON never does. Structural rather than
+    keyed on the action name, so a future outcome nobody has seen still gets the
+    right answer - no new action can make "942" five digits long.
     """
     return destination.isdigit() and len(destination) == EXTENSION_DIGITS
 
@@ -159,7 +167,7 @@ def parse_abandoned(body: dict) -> list[dict]:
 
 
 def parse_call_logs(body: dict, names: dict[str, str]) -> list[dict]:
-    """Answered calls, most recent first.
+    """Every logged call, most recent first, each carrying its outcome.
 
     `a_number` is the caller, not `source`: on a sampled day three rows had an
     agent extension in `source` (an internal transfer) while `a_number` held
@@ -169,28 +177,38 @@ def parse_call_logs(body: dict, names: dict[str, str]) -> list[dict]:
     for row in body.get("data") or []:
         if not isinstance(row, dict):
             continue
-        if row.get("action") in UNANSWERED_ACTIONS:
-            continue
         begin, end = row.get("call_begin_at"), row.get("call_end_at")
         if not begin or not end:
             continue
         extension = str(row.get("destination") or "")
-        if not reached_an_agent(extension):
+        if not extension:
             continue
+        action = row.get("action")
+        status = STATUSES.get(action, "unknown")
+        reached = reached_an_agent(extension)
         rows.append(
             {
-                # None when the extension is not in the mapping. The extension
-                # stands in - a handled call must never show a blank operator
-                # because a reference row is missing.
-                "agent": names.get(extension),
-                "extension": extension,
+                # Only meaningful when the call actually reached a desk. A
+                # queue-full row carries the queue in `destination`, so naming
+                # it would invent an agent called 942 who handled the call.
+                "agent": names.get(extension) if reached else None,
+                "extension": extension if reached else None,
+                "reached_agent": reached,
                 "phone": str(row.get("a_number") or ""),
                 "answered_at": _clock(begin),
                 "hung_up_at": _clock(end),
+                # For an answered call this is talk time; for the rest it is how
+                # long the caller waited before the call ended. The column is
+                # labelled neutrally for that reason.
+                #
                 # Clamped at zero: a sampled day contained one row whose end
                 # equalled its begin, and a negative duration would format as
                 # a nonsense clock reading.
                 "duration": max(0, int(end) - int(begin)),
+                "status": status,
+                # The raw value, set only when unmapped, so a new upstream
+                # outcome shows what it actually said rather than a bare label.
+                "action": action if status == "unknown" else None,
                 "begin_epoch": int(begin),
             }
         )

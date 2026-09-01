@@ -1,4 +1,5 @@
 import { afterNextRender, Component, DestroyRef, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ButtonModule } from 'primeng/button';
 import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
@@ -45,9 +46,28 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
 @Component({
     standalone: true,
     selector: 'app-hourly-chart',
-    imports: [ChartModule, SkeletonModule],
+    imports: [ChartModule, SkeletonModule, ButtonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">สถิติจำนวนการใช้บริการตามเวลา</div>
+        <div class="flex items-center justify-between gap-2 mb-4">
+            <div class="font-semibold text-xl">สถิติจำนวนการใช้บริการตามเวลา</div>
+            <!-- Opens the official NIEMS page in a new tab. An anchor rather
+                 than a button because pButton is an attribute directive, so
+                 this is a real link: middle-click works, and the board
+                 itself is never navigated away from. -->
+            <a
+                pButton
+                href="https://rnis-qm.niems.go.th/chart-by-time"
+                target="_blank"
+                rel="noopener noreferrer"
+                label="ดูรายละเอียด"
+                icon="pi pi-external-link"
+                iconPos="right"
+                severity="secondary"
+                size="small"
+                [text]="true"
+                class="shrink-0"
+            ></a>
+        </div>
         @if (!chartReady()) {
             <p-skeleton width="100%" height="22rem" />
         } @else if (isEmpty()) {

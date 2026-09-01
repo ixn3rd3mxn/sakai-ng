@@ -1,4 +1,5 @@
 import { Component, computed, input } from '@angular/core';
+import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
 import { SkeletonModule } from 'primeng/skeleton';
 import { MissedCallEntry } from '../call-log.types';
@@ -10,9 +11,28 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as MissedCallEntry);
 @Component({
     standalone: true,
     selector: 'app-missed-calls',
-    imports: [TableModule, SkeletonModule],
+    imports: [TableModule, SkeletonModule, ButtonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">สายที่ไม่ได้รับ</div>
+        <div class="flex items-center justify-between gap-2 mb-4">
+            <div class="font-semibold text-xl">สายที่ไม่ได้รับ</div>
+            <!-- Opens the official NIEMS page in a new tab. An anchor rather
+                     than a button because pButton is an attribute directive, so
+                     this is a real link: middle-click works, and the board
+                     itself is never navigated away from. -->
+                <a
+                    pButton
+                    href="https://rnis-qm.niems.go.th/contact-history"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    label="ดูรายละเอียด"
+                    icon="pi pi-external-link"
+                    iconPos="right"
+                    severity="secondary"
+                    size="small"
+                    [text]="true"
+                    class="shrink-0"
+                ></a>
+        </div>
         <p-table [value]="tableRows()" [paginator]="!loading()" [rows]="8" stripedRows [scrollable]="true" [rowHover]="true" responsiveLayout="scroll">
             <ng-template #header>
                 <!-- The same 8rem floor the call log uses on every column, so

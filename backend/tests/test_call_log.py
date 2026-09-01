@@ -42,24 +42,37 @@ def _abandon_row(**over):
 # ---------------------------------------------------------------------------
 
 
-def test_abandoned_rows_are_excluded_from_the_answered_table():
-    """The decision this suite exists for.
+def test_an_unanswered_call_is_labelled_not_hidden():
+    """These rows used to be dropped.
 
-    ABANDON rows in the call-log feed carry a `destination` and an
-    `agent_username` - the desk the call was ringing at when the caller gave
-    up. Left in, the table would attribute an unanswered call to an agent and
-    print a one-second "duration" that is really ring time, which reads as
-    staff hanging up on people.
+    An ABANDON row carries a real agent extension and a one-second duration, so
+    shown unlabelled it read as an agent hanging up on somebody - which is why
+    it was excluded. A status column removes the ambiguity at the source: the
+    row can now say what it is, so it no longer has to be hidden to avoid
+    lying.
     """
     body = {"data": [_log_row(action="ABANDON"), _log_row(destination="94017")]}
     out = call_log.parse_call_logs(body, {})
-    assert [r["extension"] for r in out] == ["94017"]
+    assert [r["status"] for r in out] == ["abandoned", "answered"]
+    assert all(r["extension"] for r in out), "both reached a desk, so both name one"
+
+
+def test_every_documented_outcome_maps_to_a_status():
+    body = {"data": [
+        _log_row(action="HANGUP"),
+        _log_row(action="ABANDON"),
+        _log_row(action="NO_ANSWER"),
+        _log_row(action="QUEUE_FULL_ABANDON", destination="942"),
+    ]}
+    assert [r["status"] for r in call_log.parse_call_logs(body, {})] == [
+        "answered", "abandoned", "no_answer", "queue_full"
+    ]
 
 
 def test_an_unknown_action_is_kept_not_dropped():
-    """A deny-list, not an allow-list of HANGUP - the RINGING lesson from
-    libs.agents. An unfamiliar action showing up in the table is easier to
-    notice and ask about than a call that silently never appears."""
+    """The RINGING lesson from libs.agents: an unfamiliar outcome showing up in
+    the table is easier to notice and ask about than a call that silently never
+    appears."""
     body = {"data": [_log_row(action="TRANSFER")]}
     out = call_log.parse_call_logs(body, {})
     assert len(out) == 1, "an answered call must not vanish over an unmapped action"
@@ -237,27 +250,25 @@ def test_the_day_is_recomputed_every_cycle():
     assert asyncio.run(call_log.get_call_log())["day"] == today.isoformat()
 
 
-def test_queue_full_abandons_never_reach_the_answered_table():
-    """Found in production, not in review.
-
-    The deny-list was written from a day whose only actions were HANGUP and
-    ABANDON. The next day's feed carried QUEUE_FULL_ABANDON - callers who hit a
-    full queue and never reached anyone - and ten of them were being drawn as
-    an "agent" called 942 handling calls of 00:00:00.
-    """
+def test_a_queue_full_row_names_no_agent():
+    """It never reached a desk. `destination` holds the queue ("942"), and
+    `agent_username` is empty - so naming anyone would invent an agent called
+    942 who handled a call nobody took."""
     body = {"data": [
         {"action": "QUEUE_FULL_ABANDON", "destination": "942", "agent_username": "",
          "a_number": "0930378017", "call_begin_at": 1788166966, "call_end_at": 1788166966},
         _log_row(destination="94017"),
     ]}
-    assert [r["extension"] for r in call_log.parse_call_logs(body, {})] == ["94017"]
+    out = call_log.parse_call_logs(body, {"94017": "ฮาลีเม๊าะ"})
+    assert out[0]["status"] == "queue_full"
+    assert out[0]["reached_agent"] is False
+    assert out[0]["agent"] is None and out[0]["extension"] is None
+    assert out[1]["reached_agent"] is True and out[1]["agent"] == "ฮาลีเม๊าะ"
 
 
-def test_a_queue_destination_is_rejected_whatever_the_action_is_called():
-    """The durable half of the fix. The action name is an open set owned by the
-    upstream and every new member defaults to "answered"; the destination is
-    structural, so an action nobody has seen yet is still excluded when it never
-    reached a desk."""
+def test_a_queue_destination_names_no_agent_whatever_the_action_is_called():
+    """Structural, not keyed on the action name. The action set is the
+    upstream's to extend; no new member of it can make "942" five digits."""
     body = {"data": [
         {"action": "SOME_NEW_QUEUE_EVENT", "destination": "942",
          "call_begin_at": 1788166966, "call_end_at": 1788166970},
@@ -265,8 +276,16 @@ def test_a_queue_destination_is_rejected_whatever_the_action_is_called():
          "a_number": "0812345678", "call_begin_at": 1788166966, "call_end_at": 1788166970},
     ]}
     out = call_log.parse_call_logs(body, {})
-    assert [r["extension"] for r in out] == ["94017"], \
-        "a new action that did reach a desk is still shown - the RINGING lesson stands"
+    assert [r["reached_agent"] for r in out] == [False, True]
+    # Both still appear, and both say what the upstream actually called it.
+    assert [r["status"] for r in out] == ["unknown", "unknown"]
+    assert [r["action"] for r in out] == ["SOME_NEW_QUEUE_EVENT", "SOME_NEW_QUEUE_EVENT"]
+
+
+def test_a_mapped_status_carries_no_raw_action():
+    """`action` is set only when the status is unknown, so the widget shows the
+    raw value exactly when it has nothing better to show."""
+    assert call_log.parse_call_logs({"data": [_log_row()]}, {})[0]["action"] is None
 
 
 def test_reached_an_agent_separates_desks_from_queues():

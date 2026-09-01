@@ -1,4 +1,5 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ButtonModule } from 'primeng/button';
 import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { SkeletonModule } from 'primeng/skeleton';
 import { CallStatsDiff, CallStatsSummary, CallTimes } from '../call-stats.types';
@@ -20,6 +21,19 @@ interface StatCard {
     polarity: Polarity;
 }
 
+// Remembered per browser, so the machine driving the wall monitor is set once
+// instead of on every page load. Scoped to this widget rather than the app: a
+// desk user and the wall screen are different viewers of the same board and
+// want different answers.
+const SCALE_KEY = 'automate-dashboard.label-scale';
+
+// Tailwind's `lg`. Below it the six counter cards drop from a sixth of the row
+// to a half (col-span-6), and the four duration cards do the same - so a label
+// that fits at 200% on a wall monitor has a fraction of the width to live in
+// and wraps into a mess. Scaling is a wall-display affordance; a phone is not
+// one, and neither is a narrow window.
+const LARGE_SCREEN = '(min-width: 1280px)';
+
 // `th-TH` resolves to the Buddhist calendar, so this renders e.g.
 // "28 สิงหาคม พ.ศ. 2569" without a hand-maintained month/era table.
 const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -27,7 +41,15 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 @Component({
     standalone: true,
     selector: 'app-call-stats-widget',
-    imports: [SkeletonModule, ProgressSpinnerModule],
+    imports: [SkeletonModule, ProgressSpinnerModule, ButtonModule],
+    host: {
+        // Set on the host so it inherits to every card. The host is
+        // display:contents (the page applies `class="contents"`), which does not
+        // create a box - but custom properties still inherit through it, so this
+        // reaches the labels without wrapping the widget in a real element and
+        // breaking its participation in the page's 12-column grid.
+        '[style.--label-scale]': 'appliedScale()'
+    },
     styles: `
         /* Every card here is tinted - 40% of a status colour mixed into the
            surface - and the default skeleton is a 6% white wash tuned for a
@@ -40,16 +62,98 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
             --p-skeleton-background: color-mix(in srgb, var(--text-color) 12%, transparent);
             --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
         }
+
+        /* The card labels, sized off a variable rather than a Tailwind step.
+           1rem is text-base, the size these were tuned to for a desk monitor at
+           150% zoom; the scale only ever grows it.
+
+           line-height is set explicitly because font-size alone would leave the
+           label rows cramped as the text grows - Tailwind's text-base carries a
+           fixed 1.5rem line-height that does not follow a calc(). */
+        .stat-label {
+            font-size: calc(1rem * var(--label-scale, 1));
+            line-height: 1.4;
+        }
     `,
     template: `
         <div class="col-span-12">
-            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div class="font-semibold text-xl">สถิติการให้บริการต่อวัน</div>
-                <div class="flex items-center gap-2 text-sm text-surface-500 dark:text-surface-400">
+                <div class="flex items-center gap-3 text-sm text-surface-500 dark:text-surface-400">
                     @if (loading()) {
                         <p-progress-spinner [style]="{ width: '1rem', height: '1rem' }" strokeWidth="8" ariaLabel="กำลังโหลด" />
                     }
-                    <span>{{ status() }}</span>
+                    @if (status()) {
+                        <span>{{ status() }}</span>
+                    }
+                    <!-- Sized for a wall monitor read from across the room, where
+                         only the 7xl numbers are legible and the labels are not.
+                         The setting is remembered per browser, so the screen on
+                         the wall is set once rather than on every page load.
+
+                         Hidden below lg, not disabled. Disabled says "not right
+                         now"; here nothing the viewer could do would ever enable
+                         it on that device, so it is an irrelevant control rather
+                         than a blocked one - and it would be clutter in the
+                         header exactly where the header has least room.
+
+                         appliedScale still clamps to 1 below lg, so a size set
+                         on a wide screen cannot follow the board into a narrow
+                         one and wrap the labels there. -->
+                    @if (largeScreen()) {
+                        <span class="flex items-center gap-1">
+                            <p-button
+                                icon="pi pi-minus"
+                                severity="secondary"
+                                [text]="true"
+                                [rounded]="true"
+                                size="small"
+                                ariaLabel="ลดขนาดตัวอักษรหัวข้อ"
+                                [disabled]="labelScale() <= MIN_SCALE"
+                                (onClick)="scaleDown()"
+                            />
+                            <span class="tabular-nums text-center" style="min-width: 3rem">{{ scaleLabel() }}</span>
+                            <p-button
+                                icon="pi pi-plus"
+                                severity="secondary"
+                                [text]="true"
+                                [rounded]="true"
+                                size="small"
+                                ariaLabel="เพิ่มขนาดตัวอักษรหัวข้อ"
+                                [disabled]="labelScale() >= MAX_SCALE"
+                                (onClick)="scaleUp()"
+                            />
+                            <!-- pi-undo, not pi-refresh: refresh on a live board
+                                 reads as "reload the data", which this does not do. -->
+                            <p-button
+                                icon="pi pi-undo"
+                                severity="secondary"
+                                [text]="true"
+                                [rounded]="true"
+                                size="small"
+                                ariaLabel="คืนค่าขนาดตัวอักษรเริ่มต้น"
+                                [disabled]="labelScale() === MIN_SCALE"
+                                (onClick)="resetScale()"
+                            />
+                        </span>
+                    }
+                    <!-- Opens the official NIEMS page in a new tab. An anchor
+                         rather than a button because pButton is an attribute
+                         directive, so this is a real link: middle-click works,
+                         and the board itself is never navigated away from. -->
+                    <a
+                        pButton
+                        href="https://rnis-qm.niems.go.th/stats-by-center"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        label="ดูรายละเอียด"
+                        icon="pi pi-external-link"
+                        iconPos="right"
+                        severity="secondary"
+                        size="small"
+                        [text]="true"
+                        class="shrink-0"
+                    ></a>
                 </div>
             </div>
         </div>
@@ -62,11 +166,14 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                 <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
                     <div class="flex justify-between mb-4">
                         <div>
-                            <!-- text-base, not text-xl: at 150% zoom with the
+                            <!-- stat-label, base 1rem: at 150% zoom with the
                                  sidebar open these are one-sixth-width, and
                                  "ไม่ได้รับสาย คิวเต็ม" - the longest of the six,
-                                 with a space to break on - wrapped. -->
-                            <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
+                                 with a space to break on - wrapped at text-xl.
+                                 That size suits a desk; the +/- control scales
+                                 it up for a wall monitor without changing it
+                                 for everyone. -->
+                            <span class="block font-medium mb-4 stat-label">{{ card.label }}</span>
                             @if (loading()) {
                                 <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                             } @else {
@@ -95,11 +202,11 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                 <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
                     <div class="flex justify-between mb-4">
                         <div>
-                            <!-- text-base, matching the counter row above: these
-                                 four labels are the longest on the board and sit
+                            <!-- Same scaled label as the counter row above:
+                                 these four are the longest on the board and sit
                                  in quarter-width cards, so text-xl wrapped at
                                  150% browser zoom. -->
-                            <span class="block font-medium mb-4 text-base">{{ card.label }}</span>
+                            <span class="block font-medium mb-4 stat-label">{{ card.label }}</span>
                             <!-- Smaller below sm: these cards are half-width on a
                                  phone and HH:MM:SS is eight characters, so 5xl
                                  overflows where the counters' 2-3 digits do not. -->
@@ -128,6 +235,68 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 })
 export class CallStatsWidget {
     private readonly data = inject(CallStatsDataService);
+
+    // 1 is text-base, the size the labels were tuned to for a desk monitor at
+    // 150% zoom, so the default is exactly today's board. The ceiling is 2x:
+    // past that a label out-sizes the number it belongs to, and the six-column
+    // row starts wrapping "ไม่ได้รับสาย คิวเต็ม" onto three lines.
+    protected readonly MIN_SCALE = 1;
+    protected readonly MAX_SCALE = 2;
+    private static readonly STEP = 0.25;
+
+    // The stored preference, which is not necessarily what is rendered.
+    protected readonly labelScale = signal(readStoredScale());
+
+    protected readonly largeScreen = signal(matchesLargeScreen());
+
+    /** What actually reaches the CSS.
+     *
+     *  Disabling the buttons below `lg` stops the scale being *raised* there,
+     *  but on its own it would not stop the problem: the preference is
+     *  remembered per browser, so a window resized narrow - or a desktop
+     *  profile opened on a smaller screen - would keep applying whatever was
+     *  set while it was wide, which is the wrapping this is meant to avoid.
+     *  Clamping what is applied, while leaving the stored value alone, means
+     *  the wall setting comes back intact the moment the window is wide again.
+     */
+    protected readonly appliedScale = computed(() => (this.largeScreen() ? this.labelScale() : this.MIN_SCALE));
+
+    // Reads the applied value, not the stored one, so the number on screen
+    // always describes the text on screen.
+    protected readonly scaleLabel = computed(() => `${Math.round(this.appliedScale() * 100)}%`);
+
+    constructor() {
+        if (typeof window === 'undefined' || !window.matchMedia) return;
+        const query = window.matchMedia(LARGE_SCREEN);
+        const onChange = (event: MediaQueryListEvent) => this.largeScreen.set(event.matches);
+        query.addEventListener('change', onChange);
+        inject(DestroyRef).onDestroy(() => query.removeEventListener('change', onChange));
+    }
+
+    protected scaleUp(): void {
+        this.setScale(this.labelScale() + CallStatsWidget.STEP);
+    }
+
+    protected scaleDown(): void {
+        this.setScale(this.labelScale() - CallStatsWidget.STEP);
+    }
+
+    /** Straight back to the default, rather than stepping down four times. */
+    protected resetScale(): void {
+        this.setScale(this.MIN_SCALE);
+    }
+
+    private setScale(value: number): void {
+        const clamped = Math.min(this.MAX_SCALE, Math.max(this.MIN_SCALE, Number(value.toFixed(2))));
+        this.labelScale.set(clamped);
+        try {
+            localStorage.setItem(SCALE_KEY, `${clamped}`);
+        } catch {
+            // Private windows and locked-down kiosk profiles throw on write.
+            // The size still applies for this session; it just is not
+            // remembered, which is a far better outcome than failing to set it.
+        }
+    }
 
     // Skeletons only while the first payload is in flight. Once it has
     // arrived, a missing number is a dash - "we asked and there is nothing
@@ -204,19 +373,25 @@ export class CallStatsWidget {
         }));
     });
 
-    // Always names the day on screen. The service can be pointed at a past day
-    // (`select()`), so the heading alone would not say which day these numbers
-    // belong to - this line always does.
+    // Empty while everything is healthy, matching the agent board above it.
+    //
+    // It used to end with "ข้อมูลวันที่ ... ณ เวลา ...", which restated the day
+    // the board is obviously showing and a fetch time nobody reads from four
+    // metres away. Kept for the three states the cards genuinely cannot
+    // express: nothing has arrived, the source is unreachable, and the day
+    // being shown has no data.
+    //
+    // The stale line keeps its clock and drops the date - when the numbers
+    // have stopped refreshing, how old they are is the whole message.
     readonly status = computed(() => {
         if (this.data.loading()) return 'กำลังเชื่อมต่อ...';
 
         const summary = this.data.summary();
         if (!summary) return 'ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้';
 
-        const day = THAI_DATE.format(parseIsoDate(summary.day));
-        if (!summary.available) return `ไม่พบข้อมูลของวันที่ ${day}`;
-        if (this.data.isStale()) return `ข้อมูลวันที่ ${day} (ล่าสุด ${this.fetchedTime(summary)} กำลังลองใหม่)`;
-        return `ข้อมูลวันที่ ${day} ณ เวลา ${this.fetchedTime(summary)}`;
+        if (!summary.available) return `ไม่พบข้อมูลของวันที่ ${THAI_DATE.format(parseIsoDate(summary.day))}`;
+        if (this.data.isStale()) return `ล่าสุด ${this.fetchedTime(summary)} กำลังลองใหม่`;
+        return '';
     });
 
     // `fetched_at` is a naive Bangkok wall-clock string from the backend, so
@@ -252,4 +427,30 @@ export class CallStatsWidget {
     durationDiffText(diff: number): string {
         return `${diff < 0 ? '-' : '+'}${formatDuration(Math.abs(diff))}`;
     }
+}
+
+
+/** The remembered scale, or 1 when there is nothing usable stored.
+ *
+ *  Guarded because reading localStorage throws outright in some contexts (a
+ *  private window, a browser configured to block site data), and a board that
+ *  refuses to render because it could not read a font preference would be a
+ *  poor trade.
+ */
+function readStoredScale(): number {
+    try {
+        const stored = Number(localStorage.getItem(SCALE_KEY));
+        // Also rejects NaN, which is what Number(null) of a missing key gives.
+        return stored >= 1 && stored <= 2 ? stored : 1;
+    } catch {
+        return 1;
+    }
+}
+
+
+/** Whether the viewport is at least Tailwind's `lg`. False during SSR or in any
+ *  context without matchMedia, which is the safe default: no scaling. */
+function matchesLargeScreen(): boolean {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia(LARGE_SCREEN).matches;
 }

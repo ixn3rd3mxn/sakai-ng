@@ -5,13 +5,23 @@
 // roughly seventy times slower than the call log, so one being unreachable
 // while the other answers is a normal state, not an edge case.
 
+/** The outcome the upstream recorded for a call. `unknown` is the catch-all
+ *  for an action we have not mapped - it renders with the raw value rather than
+ *  being hidden, so a new upstream outcome is something to ask about instead of
+ *  a call that silently never appears. */
+export type CallStatus = 'answered' | 'abandoned' | 'queue_full' | 'no_answer' | 'unknown';
+
 export interface CallLogEntry {
-    /** From our own Mongo mapping, so null for an unmapped desk. The extension
-     *  stands in - a handled call must never show a blank operator because a
-     *  reference row is missing. */
+    /** From our own Mongo mapping. Null when the desk is unmapped *or* when the
+     *  call never reached a desk at all - see `reached_agent`. */
     agent: string | null;
-    /** From the upstream feed, so always correct, unlike `agent`. */
-    extension: string;
+    /** The agent's extension, or null when the call never reached one. A
+     *  queue-full row carries the queue ("942") in the upstream's
+     *  `destination`; showing that would invent an agent who handled it. */
+    extension: string | null;
+    /** False for a call that ended in the queue and was never delivered to
+     *  anybody. The agent column shows a dash rather than a name. */
+    reached_agent: boolean;
     /** The caller. Taken from `a_number`, not `source`: on a sampled day three
      *  rows carried an agent extension in `source` (an internal transfer)
      *  while `a_number` held the outside number throughout. */
@@ -26,10 +36,14 @@ export interface CallLogEntry {
      *  column heading says "ช่วงเวลาการโทร" for that reason, not "สนทนา". */
     answered_at: string;
     hung_up_at: string;
-    /** Seconds between the two above, clamped at zero. Carried rather than
-     *  derived in the browser: only the backend holds the epoch values, so
-     *  only it can subtract them correctly across a midnight boundary. */
+    /** Seconds between the two above, clamped at zero. For an answered call
+     *  this is talk time; for every other status it is how long the caller
+     *  waited before the call ended - which is why the column is labelled
+     *  "รวมเวลา" and not something that claims conversation. */
     duration: number;
+    status: CallStatus;
+    /** The raw upstream action, set only when `status` is `unknown`. */
+    action: string | null;
     /** Sort key the backend has already ordered by, newest first. */
     begin_epoch: number;
 }

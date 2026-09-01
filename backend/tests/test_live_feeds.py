@@ -150,11 +150,17 @@ def test_abandoned_feed_is_grouped_by_caller_not_by_call():
         "one row per number - if this fails the feed has started returning per-call rows"
 
 
-def test_call_log_feed_carries_answered_and_abandoned_actions():
-    """If ABANDON ever stops appearing, the exclusion in parse_call_logs is
-    dead code and the reason for it should be re-checked rather than assumed."""
+def test_every_live_action_is_one_we_have_mapped():
+    """An unmapped outcome still renders - as "ไม่ทราบสถานะ" carrying the raw
+    value - so this does not break the board. It fails loudly because a new
+    outcome deserves a decision about its wording and colour, not a shrug.
+
+    It has already earned its keep twice: QUEUE_FULL_ABANDON appeared a day
+    after the first mapping was written, and NO_ANSWER the day after that.
+    """
     requires_live()
-    start, end = cs.day_epoch_window(_a_day_with_traffic())
+    today = cs.bangkok_calendar_day()
+    start, end = cs.day_epoch_window(today)
     import httpx
 
     body = httpx.get(cl.CALL_LOGS_URL, params={
@@ -162,21 +168,16 @@ def test_call_log_feed_carries_answered_and_abandoned_actions():
         "start_date": start, "end_date": end,
     }, timeout=cl.TIMEOUT_SECONDS).json()
     actions = {r.get("action") for r in body.get("data") or []}
-    assert "HANGUP" in actions, "a day with no answered calls means something else is wrong"
+    unmapped = actions - set(cl.STATUSES)
+    assert not unmapped, f"unmapped action(s) {unmapped} - give them a label and a colour"
 
-    # This caught QUEUE_FULL_ABANDON on its first appearance, a day after the
-    # deny-list was written from a sample that did not contain it - ten rows
-    # were being drawn as answered calls. Any further new action gets the same
-    # treatment: look at it and decide, rather than let it default to answered.
-    unknown = actions - {"HANGUP"} - set(cl.UNANSWERED_ACTIONS)
-    assert not unknown, f"undocumented action(s) {unknown} - decide whether they are answered calls"
-
-    # The structural guard behind the deny-list: whatever the action is called,
-    # a row that never reached a desk must not reach the table.
+    # Only a queue-level outcome may lack an agent. If a row that reached a
+    # desk ever stops carrying its extension, the agent column silently
+    # becomes a dash for calls somebody actually took.
     for row in body.get("data") or []:
-        if row.get("action") in cl.UNANSWERED_ACTIONS:
-            continue
-        assert cl.reached_an_agent(str(row.get("destination") or "")),             f"action {row.get('action')!r} has destination {row.get('destination')!r}, which is not an agent extension"
+        reached = cl.reached_an_agent(str(row.get("destination") or ""))
+        if row.get("action") != "QUEUE_FULL_ABANDON":
+            assert reached, f"{row.get('action')!r} has destination {row.get('destination')!r}, not an extension"
 
 
 def test_call_log_feed_fits_in_one_page():
