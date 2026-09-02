@@ -15,6 +15,7 @@ export const appRoutes: Routes = [
             { path: 'uikit', loadChildren: () => import('./app/pages/uikit/uikit.routes') },
             { path: 'report', loadChildren: () => import('./app/pages/report.routes') },
             { path: 'map', loadChildren: () => import('./app/pages/map.routes') },
+            { path: 'flood', loadChildren: () => import('./app/pages/flood.routes') },
             { path: 'documentation', loadComponent: () => import('./app/pages/documentation/documentation').then((m) => m.Documentation) },
             { path: 'pages', loadChildren: () => import('./app/pages/pages.routes') }
         ]

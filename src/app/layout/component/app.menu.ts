@@ -41,6 +41,12 @@ export class AppMenu {
                 ]
             },
             {
+                label: 'Flood Response',
+                items: [
+                    { label: 'รับแจ้งอุทกภัย', icon: 'pi pi-fw pi-inbox', routerLink: ['/flood/intake'] },
+                ]
+            },
+            {
                 label: 'Map',
                 items: [
                     { label: 'แผนที่', icon: 'pi pi-fw pi-map', routerLink: ['/map/view'] },

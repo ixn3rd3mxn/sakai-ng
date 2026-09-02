@@ -9,16 +9,23 @@ from contextlib import asynccontextmanager
 from datetime import date as date_cls
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
 from libs import agents, aggregations, call_log, call_stats, events, lookups
+from libs import flood_cases, flood_events, flood_lookups
 from libs.configs import CORS_ORIGINS, db
-from libs.models import IncidentCreateIn
-from libs.shift import Shift, now_local, resolve_context, resolve_day_context
+from libs.models import (
+    FloodCaseBulkStatusIn,
+    FloodCaseCreateIn,
+    FloodCaseStatusIn,
+    FloodCaseUpdateIn,
+    IncidentCreateIn,
+)
+from libs.shift import SHIFT_LABELS, Shift, now_local, resolve_context, resolve_day_context
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +55,36 @@ async def _load_lookups_forever() -> None:
             delay = min(delay * 2, 60)
 
 
+async def _load_flood_areas_forever() -> None:
+    """Keep retrying the flood area cache until it succeeds, then build the
+    `flood_cases` indexes.
+
+    Never awaited during startup, unlike `lookups.load()` above. That one is
+    given a bounded first attempt because the three EMS report pages cannot
+    serve without it; this one backs a page that did not exist last week, and
+    letting it delay startup - or worse, raise into it - would mean a problem
+    with flood master data taking the dashboards offline. It retries in the
+    background for as long as the process lives instead.
+    """
+    delay = 2
+    while True:
+        try:
+            await run_in_threadpool(flood_lookups.load)
+            logger.info("flood area master data loaded")
+            break
+        except PyMongoError as exc:
+            logger.warning("could not load flood area master data (%s); retrying in %ss", exc, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
+
+    try:
+        await run_in_threadpool(flood_cases.ensure_indexes)
+    except PyMongoError as exc:
+        # Idempotent and retried on the next boot; the collection still reads
+        # correctly without them, just more slowly. Not worth a crash loop.
+        logger.warning("could not create flood_cases indexes (%s)", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # A Mongo outage must not take the whole API down with it. The call-stats
@@ -62,8 +99,12 @@ async def lifespan(app: FastAPI):
         logger.warning("starting without reference collections (%s)", exc)
         retry_task = asyncio.create_task(_load_lookups_forever())
 
+    # Always backgrounded, never awaited - see `_load_flood_areas_forever`.
+    flood_task = asyncio.create_task(_load_flood_areas_forever())
+
     yield
 
+    flood_task.cancel()
     if retry_task is not None:
         retry_task.cancel()
     await call_stats.aclose()
@@ -467,3 +508,312 @@ def create_incident(body: IncidentCreateIn):
         },
         "context": resolve_context(None, None).to_dict(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Flood-response intake
+#
+# Appended below every EMS endpoint and sharing none of their state: a
+# separate lookup cache (`flood_lookups`), a separate SSE wake-up bus
+# (`flood_events`), and a separate collection. `_require_lookups` is
+# deliberately *not* called by anything here, so the two features cannot take
+# each other down.
+#
+# Route order matters: FastAPI matches in declaration order, so every fixed
+# path below has to be declared before `/api/flood-cases/{case_id}` or that
+# parameterised route would swallow "stream", "export" and the rest.
+# ---------------------------------------------------------------------------
+
+
+def _require_flood_lookups() -> None:
+    """Refuse to serve area-backed data before the flood cache is populated.
+
+    Its own check, mirroring `_require_lookups` but reading a different flag.
+    Without it an unloaded cache does not raise - it just rejects every amphoe
+    as unknown, which reads to the operator as "the master data is wrong"
+    rather than "the database is not up yet".
+    """
+    if not flood_lookups.loaded():
+        raise HTTPException(status_code=503, detail="ข้อมูลพื้นที่ยังไม่พร้อม (ยังเชื่อมต่อฐานข้อมูลไม่ได้)")
+
+
+def _flood_filters(
+    tab: Optional[str],
+    date_from: Optional[date_cls],
+    date_to: Optional[date_cls],
+    district_code: Optional[str],
+    shift: Optional[str],
+    agent_name: Optional[str],
+    status: Optional[str],
+    search: Optional[str],
+    limit: int,
+    offset: int,
+) -> flood_cases.CaseFilters:
+    return flood_cases.CaseFilters(
+        tab=tab or flood_cases.TAB_ALL,
+        date_from=date_from,
+        date_to=date_to,
+        district_code=district_code,
+        shift=shift,
+        agent_name=agent_name,
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/flood-lookups")
+def get_flood_lookups():
+    """Districts, subdistricts and the operator roster in one response.
+
+    One payload rather than three endpoints because the whole set is tiny (12
+    + 115 + 19 rows) and the amphoe/tambon dependency has to resolve without a
+    round trip: the operator picks both while still on the call, and a request
+    per amphoe change would be felt.
+
+    The roster is read straight from `agents` - the same collection the agent
+    board uses - and never written to. Names come back exactly as stored,
+    without an honorific: the flood spreadsheet wrote "นางเจะรอฮานี วันหวัง"
+    where `agents` holds "เจะรอฮานี วันหวัง", and inventing the prefix here
+    would mean writing to a collection another page owns.
+    """
+    _require_flood_lookups()
+
+    try:
+        roster = [
+            {"agent_name": doc["agent_name"], "agent_extension": str(doc.get("agent_extension") or "")}
+            for doc in db.agents.find({}, {"agent_name": 1, "agent_extension": 1, "_id": 0})
+            if doc.get("agent_name")
+        ]
+        roster.sort(key=lambda a: a["agent_name"])
+    except PyMongoError:
+        # The roster is a convenience - the field is free text on the form
+        # anyway - so losing it must not cost the operator the area lists.
+        roster = []
+
+    return {
+        "districts": flood_lookups.districts(),
+        "subdistricts": flood_lookups.subdistricts(),
+        "agents": roster,
+        "channels": [{"code": k, "label": v} for k, v in flood_cases.CHANNEL_LABELS.items()],
+        "genders": [{"code": k, "label": v} for k, v in flood_cases.GENDER_LABELS.items()],
+        "statuses": [{"code": k, "label": v} for k, v in flood_cases.STATUS_LABELS.items()],
+        "shifts": [{"code": k, "label": v} for k, v in SHIFT_LABELS.items()],
+        "reporter_shortcuts": list(flood_cases.REPORTER_SHORTCUTS),
+    }
+
+
+@app.get("/api/flood-cases")
+def get_flood_cases(
+    tab: Optional[str] = Query(None),
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+    district_code: Optional[str] = Query(None),
+    shift: Optional[str] = Query(None),
+    agent_name: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(flood_cases.DEFAULT_LIMIT),
+    offset: int = Query(0),
+):
+    filters = _flood_filters(
+        tab, date_from, date_to, district_code, shift, agent_name, status, search, limit, offset
+    )
+    try:
+        return flood_cases.list_cases(filters)
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/flood-cases/stream")
+async def stream_flood_cases(
+    request: Request,
+    tab: Optional[str] = Query(None),
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+    district_code: Optional[str] = Query(None),
+    shift: Optional[str] = Query(None),
+    agent_name: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(flood_cases.DEFAULT_LIMIT),
+    offset: int = Query(0),
+):
+    """Server-sent events for the case table.
+
+    The reason this is not optional: several operators take calls at once, and
+    the duplicate check only works if each of them can see what the others
+    just wrote. A table that refreshes on a timer would leave a window in
+    which two people both accept the same flooded house.
+
+    Same signature-and-dedup mechanics as `stream_incident_history` - a frame
+    only when the payload actually changed, with a poll timeout as the
+    fallback that also catches the 08:30 shift rollover. Woken through
+    `flood_events`, never `events`, so writing a flood case does not make the
+    three EMS report pages rebuild their aggregations.
+    """
+    filters = _flood_filters(
+        tab, date_from, date_to, district_code, shift, agent_name, status, search, limit, offset
+    )
+
+    async def event_generator():
+        last_signature: Optional[str] = None
+        wake_queue = flood_events.subscribe()
+        try:
+            first = True
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                if not first:
+                    try:
+                        # Woken immediately by a same-process write; the
+                        # timeout covers a cross-process write and the shift
+                        # rollover, neither of which produces a wake-up here.
+                        await asyncio.wait_for(wake_queue.get(), timeout=5)
+                    except asyncio.TimeoutError:
+                        pass
+
+                # pymongo is synchronous: called straight from this async
+                # generator it would block the event loop - and with it every
+                # other connection - for the duration of the query.
+                payload = await run_in_threadpool(flood_cases.list_cases, filters)
+                signature = _payload_signature(payload)
+
+                if signature != last_signature:
+                    last_signature = signature
+                    yield {"event": "flood-cases", "data": _sse_data(payload)}
+
+                first = False
+        finally:
+            flood_events.unsubscribe(wake_queue)
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/api/flood-cases/export")
+def export_flood_cases(
+    tab: Optional[str] = Query(None),
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+    district_code: Optional[str] = Query(None),
+    shift: Optional[str] = Query(None),
+    agent_name: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+):
+    """The rows currently on screen, as CSV.
+
+    Takes the same filter parameters as the table so the file matches what the
+    operator is looking at - exporting everything when the screen shows one
+    amphoe is the kind of mismatch that gets noticed only after the file has
+    been sent on.
+    """
+    filters = _flood_filters(
+        tab, date_from, date_to, district_code, shift, agent_name, status, search,
+        flood_cases.MAX_LIMIT, 0,
+    )
+    try:
+        body = flood_cases.export_csv(filters)
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Excel on Windows reads a BOM-less UTF-8 CSV as the system codepage and
+    # renders every Thai column as mojibake; the BOM is what makes a
+    # double-click work.
+    return Response(
+        content="﻿" + body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="' + flood_cases.export_filename() + '"'},
+    )
+
+
+@app.get("/api/flood-cases/duplicate-check")
+def check_flood_duplicates(
+    phone: Optional[str] = Query(None),
+    subdistrict_code: Optional[str] = Query(None),
+    location_note: Optional[str] = Query(None),
+    exclude: Optional[str] = Query(None),
+):
+    """Recent cases that may be the same incident as the one being typed.
+
+    Advisory only - it never blocks a save. Called on a debounce while the
+    operator is still on the phone, so it stays a couple of indexed range
+    queries and nothing else.
+    """
+    matches = flood_cases.find_duplicates(
+        phone=phone,
+        subdistrict_code=subdistrict_code,
+        location_note=location_note,
+        exclude_case_id=exclude,
+    )
+    return {"matches": matches, "window_hours": flood_cases.DUPLICATE_WINDOW_HOURS}
+
+
+@app.post("/api/flood-cases/bulk-status")
+def bulk_update_flood_status(body: FloodCaseBulkStatusIn):
+    _require_flood_lookups()
+    try:
+        updated = flood_cases.bulk_set_status(body.case_ids, body.status)
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated:
+        flood_events.notify_flood_cases_changed()
+    return {"updated": updated}
+
+
+@app.post("/api/flood-cases")
+def create_flood_case(body: FloodCaseCreateIn):
+    """Record one request for help.
+
+    Requires the area cache, because the amphoe/tambon pair is resolved and
+    validated server-side - the client filters its own dropdown, but the
+    client is not what decides what gets stored.
+    """
+    _require_flood_lookups()
+    try:
+        case = flood_cases.insert_case(body.model_dump())
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    flood_events.notify_flood_cases_changed()
+    return {"case": case}
+
+
+@app.get("/api/flood-cases/{case_id}")
+def get_flood_case(case_id: str):
+    case = flood_cases.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
+    return {"case": case}
+
+
+@app.patch("/api/flood-cases/{case_id}")
+def update_flood_case(case_id: str, body: FloodCaseUpdateIn):
+    _require_flood_lookups()
+    try:
+        case = flood_cases.apply_update(case_id, body.model_dump())
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if case is None:
+        raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
+
+    flood_events.notify_flood_cases_changed()
+    return {"case": case}
+
+
+@app.patch("/api/flood-cases/{case_id}/status")
+def update_flood_case_status(case_id: str, body: FloodCaseStatusIn):
+    """Mark one case finished (or not) without sending the other eighteen
+    fields - the action the table's row button performs, and by far the most
+    frequent one on the page."""
+    try:
+        case = flood_cases.set_status(case_id, body.status)
+    except flood_cases.FloodCaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if case is None:
+        raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
+
+    flood_events.notify_flood_cases_changed()
+    return {"case": case}

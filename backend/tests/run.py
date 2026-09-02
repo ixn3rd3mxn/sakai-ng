@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tests import helpers  # noqa: E402
 from tests.helpers import RUN_LIVE, Skip  # noqa: E402
 
-SUITES = ("test_call_stats", "test_agents", "test_call_log", "test_live_feeds")
+SUITES = ("test_call_stats", "test_agents", "test_call_log", "test_flood_cases", "test_live_feeds")
 
 
 def main(argv: list[str]) -> int:
