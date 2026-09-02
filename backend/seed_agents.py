@@ -7,9 +7,9 @@
 Safe to re-run: every row is an upsert keyed on the extension, so running it
 twice changes nothing and running it after an edit updates just what changed.
 
-Only the extension and the name are stored. The upstream feed also carries
-`agent_username`, a Thai national ID; it is deliberately never persisted, so
-no PDPA-relevant identifier reaches this database.
+Only `agent_id`, `agent_extension` and `agent_name` are stored. The upstream
+feed also carries `agent_username`, a Thai national ID; it is deliberately
+never persisted, so no PDPA-relevant identifier reaches this database.
 
 A missing name is not fatal - the board shows the extension in its place and
 the agent still appears. Nobody vanishes for want of a row here.
@@ -34,36 +34,36 @@ from libs.configs import db
 # ---------------------------------------------------------------------------
 AGENTS: list[dict[str, str]] = [
     # --- names known from the official dashboard ---
-    {"agent_extension": "94018", "name": "ฟาซีรา"},
-    {"agent_extension": "94017", "name": "ฮาลีเม๊าะ"},
-    {"agent_extension": "94015", "name": "อาสมะ"},
-    {"agent_extension": "94016", "name": "อัสรินดาร์"},
-    {"agent_extension": "94014", "name": "ฟาดีละห์"},
-    {"agent_extension": "94005", "name": "นิฮานาน"},
-    {"agent_extension": "94004", "name": "เจะรอฮานี"},
-    {"agent_extension": "94007", "name": "รวิภา"},
-    {"agent_extension": "94011", "name": "อุษา"},
-    {"agent_extension": "94010", "name": "สุไรยา"},
-    {"agent_extension": "94012", "name": "ปาตีเมาะ"},
-    {"agent_extension": "94013", "name": "นูรไอนี"},
-    {"agent_extension": "94008", "name": "วันศายนนท์"},
-    {"agent_extension": "94009", "name": "จริณ"},
-    {"agent_extension": "94020", "name": "ปองภพ"},
-    {"agent_extension": "94021", "name": "รอฝาด"},
-    {"agent_extension": "94023", "name": "รอฮัมดี"},
-    {"agent_extension": "94019", "name": "ประสิทธิ์"},
-    {"agent_extension": "94024", "name": "แวบูราฮัน"}
+    {"agent_id": "1", "agent_extension": "94008", "agent_name": "วันศายนนท์ ฮัจญีย์เราะห์อีส"},
+    {"agent_id": "2", "agent_extension": "94004", "agent_name": "เจะรอฮานี วันหวัง"},
+    {"agent_id": "3", "agent_extension": "94007", "agent_name": "รวิภา บุญณฤมิตร"},
+    {"agent_id": "4", "agent_extension": "94005", "agent_name": "นิฮานาน วาแม"},
+    {"agent_id": "5", "agent_extension": "94011", "agent_name": "อุษา มือสันทัด"},
+    {"agent_id": "6", "agent_extension": "94010", "agent_name": "สุไรยา มะลี"},
+    {"agent_id": "7", "agent_extension": "94012", "agent_name": "ปาตีเมาะ หะยีสะอุ"},
+    {"agent_id": "8", "agent_extension": "94013", "agent_name": "นูรไอนี ช่อสามารถ"},
+    {"agent_id": "9", "agent_extension": "94014", "agent_name": "ฟาดีละห์ วาเด็ง"},
+    {"agent_id": "10", "agent_extension": "94015", "agent_name": "อาสมะ ลาเตะ"},
+    {"agent_id": "11", "agent_extension": "94016", "agent_name": "อัสรินดาร์ แก่ต่อง"},
+    {"agent_id": "12", "agent_extension": "94017", "agent_name": "ฮาลีเม๊าะ มะนุ"},
+    {"agent_id": "13", "agent_extension": "94018", "agent_name": "ฟาซีรา มาน๊ะ"},
+    {"agent_id": "14", "agent_extension": "94009", "agent_name": "จริณ คงทน"},
+    {"agent_id": "15", "agent_extension": "94020", "agent_name": "ปองภพ ขีปนานนท์"},
+    {"agent_id": "16", "agent_extension": "94021", "agent_name": "รอฝาด มะสัน"},
+    {"agent_id": "17", "agent_extension": "94023", "agent_name": "รอฮัมดี อาบู"},
+    {"agent_id": "18", "agent_extension": "94019", "agent_name": "ประสิทธิ์ ราชหุ่น"},
+    {"agent_id": "19", "agent_extension": "94024", "agent_name": "แวบูราฮัน โตะแวเด็ง"}
 
     # --- seen on the live feed, names needed ---
     # Uncomment and fill each one in. Left commented they are simply absent,
     # and the board falls back to showing the extension.
-    # {"agent_extension": "94004", "name": ""},   # supervisor
-    # {"agent_extension": "94011", "name": ""},   # supervisor
-    # {"agent_extension": "94014", "name": ""},
-    # {"agent_extension": "94016", "name": ""},
-    # {"agent_extension": "94018", "name": ""},
-    # {"agent_extension": "94020", "name": ""},
-    # {"agent_extension": "94023", "name": ""},
+    # {"agent_id": "", "agent_extension": "94004", "agent_name": ""},   # supervisor
+    # {"agent_id": "", "agent_extension": "94011", "agent_name": ""},   # supervisor
+    # {"agent_id": "", "agent_extension": "94014", "agent_name": ""},
+    # {"agent_id": "", "agent_extension": "94016", "agent_name": ""},
+    # {"agent_id": "", "agent_extension": "94018", "agent_name": ""},
+    # {"agent_id": "", "agent_extension": "94020", "agent_name": ""},
+    # {"agent_id": "", "agent_extension": "94023", "agent_name": ""},
     #
     # 94501-94505 are unmanned spare desks (username "EXT_945xx", not a
     # person). They are filtered out server-side and need no names.
@@ -71,10 +71,10 @@ AGENTS: list[dict[str, str]] = [
 
 
 def _report() -> None:
-    stored = {d["agent_extension"]: d.get("name") for d in db.agents.find({}, {"_id": 0})}
+    stored = {d["agent_extension"]: d.get("agent_name") for d in db.agents.find({}, {"_id": 0})}
     print(f"{len(stored)} name(s) currently in the collection")
 
-    missing = [a["agent_extension"] for a in AGENTS if not a.get("name")]
+    missing = [a["agent_extension"] for a in AGENTS if not a.get("agent_name")]
     if missing:
         print(f"blank name(s) in this file, will be skipped: {', '.join(missing)}")
 
@@ -106,12 +106,22 @@ def main() -> int:
     check_only = "--check" in sys.argv
 
     if not check_only:
-        writable = [a for a in AGENTS if a.get("name")]
+        writable = [a for a in AGENTS if a.get("agent_name")]
         db.agents.create_index("agent_extension", unique=True)
         for agent in writable:
             db.agents.update_one(
                 {"agent_extension": agent["agent_extension"]},
-                {"$set": {"agent_extension": agent["agent_extension"], "name": agent["name"]}},
+                {
+                    "$set": {
+                        "agent_id": agent["agent_id"],
+                        "agent_extension": agent["agent_extension"],
+                        "agent_name": agent["agent_name"],
+                    },
+                    # Left over from the schema before `agent_name`; dropped so
+                    # a re-run cleans the old field out instead of leaving two
+                    # names on the row.
+                    "$unset": {"name": ""},
+                },
                 upsert=True,
             )
         print(f"wrote {len(writable)} name(s)")

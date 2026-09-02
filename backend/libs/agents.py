@@ -204,9 +204,9 @@ async def load_names() -> dict[str, str]:
 
     def load() -> dict[str, str]:
         return {
-            str(doc["agent_extension"]): doc["name"]
-            for doc in db.agents.find({}, {"agent_extension": 1, "name": 1, "_id": 0})
-            if doc.get("agent_extension") and doc.get("name")
+            str(doc["agent_extension"]): doc["agent_name"]
+            for doc in db.agents.find({}, {"agent_extension": 1, "agent_name": 1, "_id": 0})
+            if doc.get("agent_extension") and doc.get("agent_name")
         }
 
     try:
