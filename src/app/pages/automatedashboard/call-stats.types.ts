@@ -1,6 +1,8 @@
 // Mirrors the payload built by backend/libs/call_stats.py. The upstream NIEMS
 // response carries more fields (missed_call, percent_sla, ...); the backend
 // drops them, so this is deliberately the whole contract and not a subset.
+
+import { FeedHealth } from './feed-health.types';
 /** One hour of the Bangkok day, for the hourly chart. Always 24 of them, in
  *  order, with quiet hours present as zeros - a missing hour would shift every
  *  later bar one place to the left. */
@@ -55,6 +57,13 @@ export interface CallStatsSummary {
      *  they do not reconcile: answer + abandon can fall short of incoming by
      *  however many calls landed inside the rollup's lag. */
     live: boolean;
+    /** Whether these counters can be believed. Distinct from `available`,
+     *  which says only that the backend got an answer - a retired endpoint
+     *  answers perfectly well and reports zero calls all day.
+     *
+     *  When `trusted` is false the six cards render dashes rather than the
+     *  numbers, the same treatment a day outside retention already gets. */
+    health: FeedHealth;
 
     incoming: number;
     answer: number;

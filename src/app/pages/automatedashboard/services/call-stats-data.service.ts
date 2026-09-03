@@ -2,6 +2,7 @@ import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
 import { BehaviorSubject, Observable, Subscription, of, switchMap } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { CallStatsSummary } from '../call-stats.types';
+import { feedHealthMessage } from '../format-utils';
 import { CallStatsApiService } from './call-stats-api.service';
 import { formatDateParam } from '../../dashboardclone/services/date-utils';
 
@@ -32,6 +33,14 @@ export class CallStatsDataService implements OnDestroy {
     /** Real numbers, but the last upstream attempt failed - they will stop
      *  advancing until it recovers. */
     readonly isStale = computed(() => this.hasNumbers() && (this._summary()?.stale ?? false));
+
+    /** The backend's verdict on whether this feed's data can be believed.
+     *  Defaults to trusting it, so a backend that predates the field leaves
+     *  the board unchanged rather than blanking it. */
+    readonly trusted = computed(() => this._summary()?.health?.trusted ?? true);
+
+    /** Short Thai line for the status area, or `''` when the feed is fine. */
+    readonly healthMessage = computed(() => (this._loading() ? '' : feedHealthMessage(this._summary()?.health)));
 
     /** Server-decided, never a date comparison here. Assume "current" while
      *  loading so the historical banner does not flash on first paint. */

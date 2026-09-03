@@ -30,7 +30,15 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
     imports: [TableModule, SkeletonModule, ButtonModule, TagModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="flex items-center justify-between gap-2 mb-4">
-            <div class="font-semibold text-xl">ประวัติการรับสาย</div>
+            <!-- Title and feed warning share the left side, so the message sits
+                 where this page already puts one - beside the heading, not
+                 floating between the heading and the link. -->
+            <div class="flex items-baseline gap-2 min-w-0">
+                <div class="font-semibold text-xl">ประวัติการรับสาย</div>
+                @if (health()) {
+                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
+                }
+            </div>
             <!-- Opens the official NIEMS page in a new tab. An anchor rather
                      than a button because pButton is an attribute directive, so
                      this is a real link: middle-click works, and the board
@@ -133,6 +141,11 @@ export class CallLogWidget {
 
     /** False when the feed could not be read - see MissedCallsWidget. */
     available = input<boolean>(true);
+
+    /** The backend's short line about the upstream feed, or `''` when it is
+     *  healthy. Passed in rather than injected so these two tables stay
+     *  presentational, like `available` above. */
+    health = input<string>('');
 
     protected readonly tableRows = computed<CallLogEntry[]>(() => (this.loading() ? SKELETON_ROWS : this.calls()));
 

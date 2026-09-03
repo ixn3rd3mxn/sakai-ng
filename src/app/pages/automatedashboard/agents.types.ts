@@ -1,5 +1,7 @@
 // Mirrors the payload built by backend/libs/agents.py.
 
+import { FeedHealth } from './feed-health.types';
+
 /** The states the board shows. OFFLINE rows are filtered out server-side -
  *  those are unmanned spare extensions, not absent staff.
  *
@@ -45,4 +47,11 @@ export interface AgentsSummary {
     counts: Partial<Record<AgentStatus | 'total', number>>;
     /** Naive Bangkok wall-clock of the last successful read. */
     fetched_at: string | null;
+    /** Whether the roster can be believed, as opposed to whether it could be
+     *  fetched - `available` and `stale` only ever answered the second.
+     *
+     *  The check that matters here reads the feed's own `action_at`: a
+     *  decommissioned host serves a plausible roster whose timestamps have
+     *  stopped moving, and the cards look identical either way. */
+    health: FeedHealth;
 }

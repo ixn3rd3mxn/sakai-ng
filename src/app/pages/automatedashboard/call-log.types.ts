@@ -1,5 +1,9 @@
 // Mirrors the payload built by backend/libs/call_log.py.
 //
+// (See ./feed-health.types for what `health` adds over the two flags below.)
+
+import { FeedHealth } from './feed-health.types';
+//
 // Two upstream feeds behind one payload, and they fail independently - hence
 // the two `*_available` flags rather than one. The abandoned-call feed is
 // roughly seventy times slower than the call log, so one being unreachable
@@ -77,4 +81,9 @@ export interface CallLogSummary {
     calls: CallLogEntry[];
     /** Naive Bangkok wall-clock of the last cycle in which either feed read. */
     fetched_at: string | null;
+    /** This log is the independent witness the counters are checked against -
+     *  it lists calls one by one over a different endpoint, so it can
+     *  contradict a summary feed claiming the day was silent. A contradiction
+     *  lands on both payloads, because either side could be the stale one. */
+    health: FeedHealth;
 }

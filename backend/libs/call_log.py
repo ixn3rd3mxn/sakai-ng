@@ -4,7 +4,7 @@ Two upstream feeds, one for each table. They are read together in a single
 poll cycle but they cost wildly different amounts, which is worth knowing
 before changing the interval:
 
-* **abandoned** (`/v1/{branch}/abandon/today`) ~2.4s even with the connection
+* **abandoned** (`/v2/abandon/today`) ~2.4s even with the connection
   warm. Grouped by caller, not by call: one row per number, carrying `amount`
   (how many times that number gave up today) and the timestamp of its most
   recent attempt. Eleven rows can therefore represent more than eleven
@@ -37,7 +37,7 @@ from typing import Optional
 
 import httpx
 
-from libs import agents
+from libs import agents, feed_health
 from libs.call_stats import bangkok_calendar_day, day_epoch_window
 from libs.shift import BANGKOK_TZ
 
@@ -45,11 +45,11 @@ logger = logging.getLogger(__name__)
 
 ABANDON_URL = os.environ.get(
     "CALL_LOG_ABANDON_URL",
-    "https://rnis-api-sse-dashboard.niems.go.th/v1/{branch}/abandon/today",
+    "https://rnis-iqm-ptn.niems.go.th/v2/abandon/today",
 )
 CALL_LOGS_URL = os.environ.get(
     "CALL_LOG_URL",
-    "https://rnis-api-qm.niems.go.th/v2/call-logs",
+    "https://rnis-iqm-ptn.niems.go.th/v2/call-logs",
 )
 BRANCH_ID = os.environ.get("CALL_STATS_BRANCH_ID", "94")
 
@@ -235,7 +235,7 @@ def _http() -> httpx.AsyncClient:
 
 async def _fetch_abandoned() -> Optional[list[dict]]:
     try:
-        response = await _http().get(ABANDON_URL.format(branch=BRANCH_ID))
+        response = await _http().get(ABANDON_URL)
         # See the note on _fetch_call_logs. This path is fixed and always
         # names today, so a 404 here can only mean "nobody has given up yet",
         # which is the normal state of the first hours of every day.
@@ -310,6 +310,16 @@ async def get_call_log(day: Optional[date_cls] = None) -> dict:
     names = await agents.load_names()
     missed, calls = await asyncio.gather(_fetch_abandoned(), _fetch_call_logs(target, names))
 
+    # This feed is the independent witness the counters are checked against:
+    # it lists calls one by one over a different endpoint, so it can contradict
+    # a summary feed claiming the day was silent. See libs.feed_health.
+    feed_health.report_call_log(
+        day=target.isoformat(),
+        calls_available=calls is not None,
+        calls=len(calls or []),
+        missed=len(missed or []),
+    )
+
     return {
         "day": target.isoformat(),
         # Separate flags rather than one: an empty list means "none today",
@@ -324,6 +334,7 @@ async def get_call_log(day: Optional[date_cls] = None) -> dict:
             if (missed is not None or calls is not None)
             else None
         ),
+        "health": feed_health.for_feed(feed_health.CALL_LOG),
     }
 
 

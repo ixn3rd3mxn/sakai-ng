@@ -30,13 +30,14 @@ from typing import Optional
 
 import httpx
 
+from libs import feed_health
 from libs.shift import BANGKOK_TZ
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get(
     "CALL_STATS_URL",
-    "https://rnis-api-qm.niems.go.th/v2/stats/summary/summaries",
+    "https://rnis-iqm-ptn.niems.go.th/v2/stats/summary/summaries",
 )
 BRANCH_ID = os.environ.get("CALL_STATS_BRANCH_ID", "94")
 ORG_CODE = os.environ.get("CALL_STATS_ORG_CODE", "94")
@@ -47,12 +48,11 @@ ORG_CODE = os.environ.get("CALL_STATS_ORG_CODE", "94")
 # records on every request (~370ms) and tracks calls as they land.
 #
 # It cannot replace `BASE_URL`: it has no `queue_full_abandon`, and it is
-# today-only - any other path segment fails server-side trying to pull ~33MB
-# through a 4MB gRPC cap - so history and the day-over-day comparison still
-# come from the rollup.
+# today-only - the path names the day and takes no range parameters - so
+# history and the day-over-day comparison still come from the rollup.
 LIVE_URL = os.environ.get(
     "CALL_STATS_LIVE_URL",
-    "https://rnis-api-sse-dashboard.niems.go.th/v1/{branch}/summary/today",
+    "https://rnis-iqm-ptn.niems.go.th/v2/summary/today",
 )
 
 # Which counters the live feed overrides. It also publishes `abandon` and
@@ -71,12 +71,12 @@ LIVE_FIELDS = ("incoming", "answer", "sla")
 # different projection, so it is fetched and cached alongside the counters.
 TIMES_URL = os.environ.get(
     "CALL_STATS_TIMES_URL",
-    "https://rnis-api-qm.niems.go.th/v2/stats/summary/times",
+    "https://rnis-iqm-ptn.niems.go.th/v2/stats/summary/times",
 )
 
 HOURLY_URL = os.environ.get(
     "CALL_STATS_HOURLY_URL",
-    "https://rnis-api-qm.niems.go.th/v2/stats/hourly/summaries",
+    "https://rnis-iqm-ptn.niems.go.th/v2/stats/hourly/summaries",
 )
 
 # How long a successful response stays good for. The upstream aggregates a
@@ -148,9 +148,9 @@ def parse_stats(body: dict) -> CallStats:
     We always query a single `branch_id`, so in practice `data` holds exactly
     one row and the sum is that row. Summing rather than indexing `[0]` means
     a multi-branch response aggregates correctly instead of silently reporting
-    one branch's numbers, and an empty `data` array - a legitimate state at
-    00:05 before the first call of the day - yields zeros instead of an
-    IndexError.
+    one branch's numbers, and an empty `data` array yields zeros instead of an
+    IndexError. `_fetch` intercepts that empty array before it gets here, so
+    the zeros are a safety net rather than the path an empty day takes.
     """
     rows = body.get("data") or []
     totals = {field: 0 for field in CallStats.__dataclass_fields__}
@@ -309,9 +309,12 @@ async def aclose() -> None:
 async def _fetch(day: date_cls) -> Optional[CallStats]:
     """Upstream counters for `day`, or None when it holds no rows for that range.
 
-    None is deliberately not folded into zeros here, because the upstream
-    returns the byte-identical 404 for two situations that must not render
-    the same way:
+    "No rows" reaches us two ways and both mean the same thing here: a 404,
+    and - since the move to the v2 host - a 200 carrying an empty `data`
+    array. Both are collapsed to None.
+
+    None is deliberately not folded into zeros here, because either answer
+    covers two situations that must not render the same way:
 
       * today, before the first call of the morning -> a true zero;
       * a day outside the ~110 days it retains -> no data at all.
@@ -333,7 +336,10 @@ async def _fetch(day: date_cls) -> Optional[CallStats]:
     if response.status_code == 404:
         return None
     response.raise_for_status()
-    return parse_stats(response.json())
+    body = response.json()
+    if not (body.get("data") or []):
+        return None
+    return parse_stats(body)
 
 
 async def _fetch_times(day: date_cls) -> Optional[CallTimes]:
@@ -405,7 +411,7 @@ async def _fetch_live() -> Optional[dict[str, int]]:
     blanking the card. Returning None simply means "no overlay this cycle".
     """
     try:
-        response = await _http().get(LIVE_URL.format(branch=BRANCH_ID))
+        response = await _http().get(LIVE_URL)
         if response.status_code != 200:
             return None
         body = response.json()
@@ -665,6 +671,30 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
     if entry.times is not None and previous.times is not None:
         times_diff = {field: getattr(entry.times, field) - getattr(previous.times, field) for field in CallTimes.__dataclass_fields__}
 
+    # Only today is checked. A past day is a settled record: the live feed does
+    # not serve it, so there is no second source to disagree with and nothing
+    # about it can go stale. Reporting one would let an operator paging back
+    # through history trip an alert about data behaving exactly as it should.
+    if entry.day == today:
+        feed_health.report_call_stats(
+            day=entry.day.isoformat(),
+            available=entry.available,
+            incoming=stats.incoming,
+            answer=stats.answer,
+            abandon=stats.abandon,
+            # The rollup's own reading, before the overlay replaced it, so the
+            # two can be compared against each other rather than the merged
+            # number being compared with itself.
+            rollup_incoming=entry.stats.incoming if entry.available else None,
+            live_incoming=overlay.get("incoming") if overlay else None,
+            # The same 24 buckets the chart draws, summed. A second rollup over
+            # the same calls, so it is an independent witness to the daily
+            # total - and free, since the chart already needed it.
+            hourly_incoming=(
+                sum(bucket["incoming"] for bucket in entry.hourly) if entry.hourly is not None else None
+            ),
+        )
+
     return {
         "day": entry.day.isoformat(),
         # Mirrors the `is_current` the dispatch/history pages already key
@@ -700,6 +730,10 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
         # therefore most negative just after midnight and converges as the day
         # fills in. Same semantics as the dispatch page's shift diff.
         "diff": diff,
+        # Whether these numbers can be believed, as opposed to whether they
+        # could be fetched - `available` answers the second and cannot answer
+        # the first. See libs.feed_health.
+        "health": feed_health.for_feed(feed_health.CALL_STATS),
         **asdict(stats),
     }
 

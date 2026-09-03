@@ -15,7 +15,7 @@ from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import agents, aggregations, call_log, call_stats, events, lookups
+from libs import agents, aggregations, call_log, call_stats, events, feed_health, lookups
 from libs import flood_cases, flood_events, flood_lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import (
@@ -152,11 +152,31 @@ def _require_lookups() -> None:
 
 @app.get("/api/health")
 def health():
+    """Liveness for this service, plus what the upstream feeds are saying.
+
+    A degraded upstream deliberately does **not** turn this into a 503. This
+    endpoint doubles as the platform's liveness probe, and answering 503
+    because a third party began serving stale numbers would have the container
+    restarted - repeatedly and pointlessly, since a restart cannot fix
+    somebody else's API, and every one of them drops all the open SSE boards.
+    Mongo keeps its 503 because that genuinely is this process being unable to
+    do its job.
+
+    The upstream verdict travels in the body instead, next to the log lines
+    `libs.feed_health` emits on each transition. `status` is "degraded" when
+    anything is standing, and `upstream.trusted` is false only when the data
+    is contradicted rather than merely suspect.
+    """
     try:
         db.command("ping")
     except PyMongoError as exc:
         raise HTTPException(status_code=503, detail=f"database unreachable: {exc}") from exc
-    return {"status": "ok", "database": "connected"}
+    upstream = feed_health.snapshot()
+    return {
+        "status": "ok" if upstream["ok"] else "degraded",
+        "database": "connected",
+        "upstream": upstream,
+    }
 
 
 @app.get("/api/context")

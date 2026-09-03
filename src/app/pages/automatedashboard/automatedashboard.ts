@@ -56,10 +56,20 @@ import { CallStatsDataService } from './services/call-stats-data.service';
                  calls is usually a handful of rows and the log fills up as the
                  day goes on - which is the cost of putting them side by side. -->
             <div class="col-span-12 xl:col-span-4 mt-8">
-                <app-missed-calls [calls]="callLogData.missed()" [loading]="callLogData.loading()" [available]="callLogData.missedAvailable()" />
+                <app-missed-calls
+                    [calls]="callLogData.missed()"
+                    [loading]="callLogData.loading()"
+                    [available]="callLogData.missedAvailable()"
+                    [health]="callLogData.healthMessage()"
+                />
             </div>
             <div class="col-span-12 xl:col-span-8 mt-8">
-                <app-call-log [calls]="callLogData.calls()" [loading]="callLogData.loading()" [available]="callLogData.callsAvailable()" />
+                <app-call-log
+                    [calls]="callLogData.calls()"
+                    [loading]="callLogData.loading()"
+                    [available]="callLogData.callsAvailable()"
+                    [health]="callLogData.healthMessage()"
+                />
             </div>
         </div>
     `

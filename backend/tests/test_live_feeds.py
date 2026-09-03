@@ -49,9 +49,9 @@ def test_an_empty_today_reads_as_zero_not_as_missing():
 
 
 def test_a_day_outside_retention_returns_no_rows():
-    """The upstream keeps roughly 110 days and 404s beyond that - the same 404
-    it gives for a day with no calls yet, which is why the caller and not the
-    fetcher decides what it means."""
+    """The upstream keeps roughly 110 days and answers an empty `data` array
+    beyond that - the same empty answer it gives for a day with no calls yet,
+    which is why the caller and not the fetcher decides what it means."""
     requires_live()
     long_ago = cs.bangkok_calendar_day() - dt.timedelta(days=365)
     assert asyncio.run(cs._fetch(long_ago)) is None
@@ -103,7 +103,7 @@ def test_live_feed_still_lacks_queue_full_abandon():
     import httpx
 
     with httpx.Client(timeout=20) as client:
-        body = client.get(cs.LIVE_URL.format(branch=cs.BRANCH_ID)).json()
+        body = client.get(cs.LIVE_URL).json()
     assert "queue_full_abandon" not in body["data"]["summary"]
 
 
@@ -114,7 +114,7 @@ def test_agent_feed_yields_one_row_per_extension():
     import httpx
 
     with httpx.Client(timeout=20) as client:
-        body = client.get(agents.AGENTS_URL.format(branch=agents.BRANCH_ID)).json()
+        body = client.get(agents.AGENTS_URL).json()
     kept = [r for r in body["data"] if r.get("agent_type_id") in agents.ROLES]
     extensions = [r["agent_extension"] for r in kept]
     assert len(extensions) == len(set(extensions)), "the type filter no longer de-duplicates"
@@ -127,7 +127,7 @@ def test_agent_feed_actions_are_all_recognised():
     import httpx
 
     with httpx.Client(timeout=20) as client:
-        body = client.get(agents.AGENTS_URL.format(branch=agents.BRANCH_ID)).json()
+        body = client.get(agents.AGENTS_URL).json()
     seen = {r.get("action") for r in body["data"] if r.get("agent_type_id") in agents.ROLES}
     known = set(agents.STATUSES) | agents.HIDDEN_ACTIONS
     assert seen <= known, f"unmapped agent action(s): {sorted(seen - known)}"

@@ -3,6 +3,7 @@ import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Observable, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { AgentsSummary } from '../agents.types';
+import { feedHealthMessage } from '../format-utils';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -33,6 +34,14 @@ export class AgentsDataService implements OnDestroy {
     /** The rows on screen are the last good ones and the feed is currently
      *  unreadable. The board keeps showing them and says how old they are. */
     readonly isStale = computed(() => !this._loading() && (this._summary()?.stale ?? false));
+
+    /** The backend's verdict on whether this feed's data can be believed.
+     *  Defaults to trusting it, so a backend that predates the field leaves
+     *  the board unchanged rather than blanking it. */
+    readonly trusted = computed(() => this._summary()?.health?.trusted ?? true);
+
+    /** Short Thai line for the status area, or `''` when the feed is fine. */
+    readonly healthMessage = computed(() => (this._loading() ? '' : feedHealthMessage(this._summary()?.health)));
 
     constructor() {
         this.subscription = this.stream().subscribe((summary) => {

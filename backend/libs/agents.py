@@ -35,6 +35,7 @@ import httpx
 from pymongo.errors import PyMongoError
 from starlette.concurrency import run_in_threadpool
 
+from libs import feed_health
 from libs.configs import db
 from libs.shift import BANGKOK_TZ
 
@@ -42,16 +43,15 @@ logger = logging.getLogger(__name__)
 
 AGENTS_URL = os.environ.get(
     "CALL_STATS_AGENTS_URL",
-    "https://rnis-api-sse-dashboard.niems.go.th/v1/{branch}/agent",
+    "https://rnis-iqm-ptn.niems.go.th/v2/agent",
 )
 BRANCH_ID = os.environ.get("CALL_STATS_BRANCH_ID", "94")
 
 # Agent status is the fastest-moving thing on the board: a phone rings, is
 # answered and is hung up inside a minute, and the whole point of the section
 # is answering "who is free right now". The upstream exposes no push endpoint
-# (every SSE/stream path 404s, despite the host being named sse-dashboard), so
-# this interval *is* the board's latency - at 10s a call could start and end
-# before the board noticed.
+# (every SSE/stream path 404s), so this interval *is* the board's latency - at
+# 10s a call could start and end before the board noticed.
 #
 # 2s is affordable because the feed answers in ~90ms and this is one shared
 # loop: 30 requests a minute in total, no matter how many boards are open, and
@@ -150,6 +150,26 @@ def parse_agents(body: dict, names: dict[str, str]) -> list[dict]:
     return agents
 
 
+def newest_action_at(rows: list) -> int:
+    """The most recent `action_at` across the raw feed, or 0 if it has none.
+
+    Read from the raw rows rather than the parsed ones because `parse_agents`
+    drops the field - the board shows a status, not a timestamp. It matters
+    here for an entirely different reason: it is the only field in this feed
+    that distinguishes a roster that is being maintained from one that was
+    frozen when its host was retired. Statuses render identically either way,
+    which is precisely how a decommissioned mirror passes for a healthy board.
+    """
+    newest = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get("action_at")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > newest:
+            newest = int(value)
+    return newest
+
+
 _client: Optional[httpx.AsyncClient] = None
 _client_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -220,12 +240,21 @@ async def load_names() -> dict[str, str]:
 async def _fetch() -> Optional[list[dict]]:
     """Current agent rows, or None if the feed could not be read."""
     try:
-        response = await _http().get(AGENTS_URL.format(branch=BRANCH_ID))
+        response = await _http().get(AGENTS_URL)
         response.raise_for_status()
         body = response.json()
         if body.get("status") != "OK":
             return None
-        return parse_agents(body, await load_names())
+        rows = body.get("data") or []
+        parsed = parse_agents(body, await load_names())
+        # A readable feed is not the same as a live one - see libs.feed_health
+        # for the incident this exists to catch.
+        feed_health.report_agents(
+            raw_rows=len(rows),
+            parsed_rows=len(parsed),
+            newest_action_at=newest_action_at(rows),
+        )
+        return parsed
     except Exception as exc:
         logger.warning("agent feed unavailable (%s: %s)", type(exc).__name__, exc)
         logger.debug("agent feed error detail", exc_info=True)
@@ -280,6 +309,7 @@ def _payload(agents: Optional[list[dict]]) -> dict:
             "agents": agents,
             "counts": _counts(agents),
             "fetched_at": _last_good_fetched_at,
+            "health": feed_health.for_feed(feed_health.AGENTS),
         }
 
     if _last_good is not None and time_module.monotonic() - _last_good_at < GRACE_SECONDS:
@@ -291,11 +321,19 @@ def _payload(agents: Optional[list[dict]]) -> dict:
             "agents": _last_good,
             "counts": _counts(_last_good),
             "fetched_at": _last_good_fetched_at,
+            "health": feed_health.for_feed(feed_health.AGENTS),
         }
 
     # Distinguishable from "nobody on duty": the board shows an error rather
     # than an empty roster, which would read as an unmanned centre.
-    return {"available": False, "stale": True, "agents": [], "counts": {}, "fetched_at": None}
+    return {
+        "available": False,
+        "stale": True,
+        "agents": [],
+        "counts": {},
+        "fetched_at": None,
+        "health": feed_health.for_feed(feed_health.AGENTS),
+    }
 
 
 async def get_agents() -> dict:

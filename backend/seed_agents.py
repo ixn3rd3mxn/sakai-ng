@@ -83,7 +83,7 @@ def _report() -> None:
 
         from libs import agents as agents_lib
 
-        body = httpx.get(agents_lib.AGENTS_URL.format(branch=agents_lib.BRANCH_ID), timeout=20).json()
+        body = httpx.get(agents_lib.AGENTS_URL, timeout=20).json()
         on_duty = {
             r["agent_extension"]
             for r in body.get("data", [])

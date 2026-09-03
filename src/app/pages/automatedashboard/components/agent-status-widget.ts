@@ -207,6 +207,18 @@ export class AgentStatusWidget {
         // Holding the last good roster over is right - an empty board answers
         // nothing - but it must not be passed off as current, so the age is
         // stated the way the stat cards state theirs.
+        // Above `isStale` for the reason the stat cards rank it there: stale
+        // means the last fetch failed and these are the previous rows - a
+        // statement about the request. This means the rows arrived and their
+        // own timestamps show the upstream stopped maintaining them.
+        //
+        // The roster deliberately stays on screen either way. A frozen answer
+        // to "who is on duty" is still worth more than a blank panel, which is
+        // the same trade `_payload` makes when it holds rows over a failure -
+        // it just has to say so rather than pass them off as current.
+        const health = this.data.healthMessage();
+        if (health) return health;
+
         if (this.data.isStale()) return `ล่าสุด ${this.fetchedTime()} กำลังลองใหม่`;
         return '';
     });

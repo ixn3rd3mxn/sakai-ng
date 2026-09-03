@@ -322,10 +322,12 @@ export class CallStatsWidget {
     readonly cards = computed<StatCard[]>(() => {
         const summary = this.data.summary();
         // A dash, never 0, whenever the number would be made up: still
-        // connecting, the source is unreachable, or the day is outside what it
-        // retains. A real 0 (a quiet morning right after midnight) arrives as
-        // available:true and is shown as 0.
-        const hasNumbers = this.data.hasNumbers();
+        // connecting, the source is unreachable, the day is outside what it
+        // retains - or the backend has caught the source contradicting itself,
+        // which is the one case where a number *did* arrive and still must not
+        // be shown. A real 0 (a quiet morning right after midnight) arrives as
+        // available:true, trusted, and is shown as 0.
+        const hasNumbers = this.data.hasNumbers() && this.data.trusted();
 
         // The comparison is only meaningful next to a real number, so it is
         // dropped whenever the counters themselves are a dash.
@@ -359,7 +361,10 @@ export class CallStatsWidget {
         // `times` is independent of the counters: this row can blank while the
         // six above still show numbers, so it gets its own guard rather than
         // reusing hasNumbers().
-        const times = this.data.loading() ? null : (this.data.summary()?.times ?? null);
+        // Blanked by a discredited feed too: the durations come from a
+        // different endpoint but the same host, so whatever made the counters
+        // untrustworthy applies to them as well.
+        const times = this.data.loading() || !this.data.trusted() ? null : (this.data.summary()?.times ?? null);
         // Only offered alongside a real duration, and independently of the
         // counter row's diff - the two feeds can be missing different days.
         const diff = times ? (this.data.summary()?.times_diff ?? null) : null;
@@ -388,6 +393,13 @@ export class CallStatsWidget {
 
         const summary = this.data.summary();
         if (!summary) return 'ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้';
+
+        // Ranked above both of the following, because they describe the
+        // request and this describes the answer: a feed can reply promptly, on
+        // time, with numbers that cannot be true. That is the state the retired
+        // NIEMS hosts sat in for as long as they were left running.
+        const health = this.data.healthMessage();
+        if (health) return health;
 
         if (!summary.available) return `ไม่พบข้อมูลของวันที่ ${THAI_DATE.format(parseIsoDate(summary.day))}`;
         if (this.data.isStale()) return `ล่าสุด ${this.fetchedTime(summary)} กำลังลองใหม่`;

@@ -3,6 +3,7 @@ import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Observable, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { CallLogSummary } from '../call-log.types';
+import { feedHealthMessage } from '../format-utils';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -27,6 +28,16 @@ export class CallLogDataService implements OnDestroy {
     // told apart from one that never loaded.
     readonly callsAvailable = computed(() => !this._loading() && (this._summary()?.calls_available ?? false));
     readonly missedAvailable = computed(() => !this._loading() && (this._summary()?.missed_available ?? false));
+
+    /** The backend's verdict on whether this feed's data can be believed.
+     *  Defaults to trusting it, so a backend that predates the field leaves
+     *  the board unchanged rather than blanking it. */
+    readonly trusted = computed(() => this._summary()?.health?.trusted ?? true);
+
+    /** Short Thai line for the two table headers, or `''` when the feed is
+     *  fine. Both tables show the same line: the contradiction that raises it
+     *  is about the day as a whole, not about one of the two lists. */
+    readonly healthMessage = computed(() => (this._loading() ? '' : feedHealthMessage(this._summary()?.health)));
 
     constructor() {
         this.subscription = this.stream().subscribe((summary) => {
