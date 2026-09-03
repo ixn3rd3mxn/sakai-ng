@@ -27,7 +27,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as MissedCallEntry);
                      than a button because pButton is an attribute directive, so
                      this is a real link: middle-click works, and the board
                      itself is never navigated away from. -->
-                <a
+                <!-- <a
                     pButton
                     href="https://rnis-qm.niems.go.th/contact-history"
                     target="_blank"
@@ -39,7 +39,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as MissedCallEntry);
                     size="small"
                     [text]="true"
                     class="shrink-0"
-                ></a>
+                ></a> -->
         </div>
         <p-table [value]="tableRows()" [paginator]="!loading()" [rows]="8" stripedRows [scrollable]="true" [rowHover]="true" responsiveLayout="scroll">
             <ng-template #header>

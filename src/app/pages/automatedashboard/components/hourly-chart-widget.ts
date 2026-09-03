@@ -54,7 +54,7 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
                  than a button because pButton is an attribute directive, so
                  this is a real link: middle-click works, and the board
                  itself is never navigated away from. -->
-            <a
+            <!-- <a
                 pButton
                 href="https://rnis-qm.niems.go.th/chart-by-time"
                 target="_blank"
@@ -66,7 +66,7 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
                 size="small"
                 [text]="true"
                 class="shrink-0"
-            ></a>
+            ></a> -->
         </div>
         @if (!chartReady()) {
             <p-skeleton width="100%" height="22rem" />

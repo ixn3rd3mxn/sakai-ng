@@ -43,7 +43,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
                      than a button because pButton is an attribute directive, so
                      this is a real link: middle-click works, and the board
                      itself is never navigated away from. -->
-                <a
+                <!-- <a
                     pButton
                     href="https://rnis-qm.niems.go.th/contact-history"
                     target="_blank"
@@ -55,7 +55,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
                     size="small"
                     [text]="true"
                     class="shrink-0"
-                ></a>
+                ></a> -->
         </div>
         <!-- responsiveLayout="scroll" is the deliberate failure mode, not
              boilerplate: it keeps every row on one line, where wrapping would
