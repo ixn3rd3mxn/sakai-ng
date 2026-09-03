@@ -37,7 +37,7 @@ from typing import Optional
 
 import httpx
 
-from libs import agents, feed_health
+from libs import agents, feed_health, relay
 from libs.call_stats import bangkok_calendar_day, day_epoch_window
 from libs.shift import BANGKOK_TZ
 
@@ -235,7 +235,7 @@ def _http() -> httpx.AsyncClient:
 
 async def _fetch_abandoned() -> Optional[list[dict]]:
     try:
-        response = await _http().get(ABANDON_URL)
+        response = await relay.get(_http(), ABANDON_URL)
         # See the note on _fetch_call_logs. This path is fixed and always
         # names today, so a 404 here can only mean "nobody has given up yet",
         # which is the normal state of the first hours of every day.
@@ -257,9 +257,10 @@ async def _fetch_call_logs(day: date_cls, names: dict[str, str]) -> Optional[lis
     collected: list[dict] = []
     try:
         for page in range(1, MAX_PAGES + 1):
-            response = await _http().get(
+            response = await relay.get(
+                _http(),
                 CALL_LOGS_URL,
-                params={
+                {
                     "page": page,
                     "per_page": PER_PAGE,
                     "branch_id": BRANCH_ID,

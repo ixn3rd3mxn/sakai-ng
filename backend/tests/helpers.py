@@ -187,7 +187,12 @@ def stub_call_log_http(module, response: FakeResponse) -> None:
     _CALL_LOG_ORIGINALS.setdefault("_http", module._http)
 
     class _Client:
-        async def get(self, url, params=None):
+        # **kwargs because the fetchers go through libs.relay.get, which
+        # always passes params= and headers= - headers being None when no
+        # relay is configured. A narrower signature would make every test
+        # using this stub fail on an unexpected keyword rather than on
+        # whatever it set out to check.
+        async def get(self, url, params=None, **kwargs):
             return response
 
     module._http = lambda: _Client()

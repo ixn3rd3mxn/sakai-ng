@@ -35,7 +35,7 @@ import httpx
 from pymongo.errors import PyMongoError
 from starlette.concurrency import run_in_threadpool
 
-from libs import feed_health
+from libs import feed_health, relay
 from libs.configs import db
 from libs.shift import BANGKOK_TZ
 
@@ -240,7 +240,7 @@ async def load_names() -> dict[str, str]:
 async def _fetch() -> Optional[list[dict]]:
     """Current agent rows, or None if the feed could not be read."""
     try:
-        response = await _http().get(AGENTS_URL)
+        response = await relay.get(_http(), AGENTS_URL)
         response.raise_for_status()
         body = response.json()
         if body.get("status") != "OK":

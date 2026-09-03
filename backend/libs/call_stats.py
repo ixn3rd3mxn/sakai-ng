@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 
-from libs import feed_health
+from libs import feed_health, relay
 from libs.shift import BANGKOK_TZ
 
 logger = logging.getLogger(__name__)
@@ -324,9 +324,10 @@ async def _fetch(day: date_cls) -> Optional[CallStats]:
     caller knows which day it asked for, so it decides.
     """
     range_from, range_until = day_epoch_window(day)
-    response = await _http().get(
+    response = await relay.get(
+        _http(),
         BASE_URL,
-        params={
+        {
             "branch_id": BRANCH_ID,
             "from": range_from,
             "until": range_until,
@@ -357,9 +358,10 @@ async def _fetch_times(day: date_cls) -> Optional[CallTimes]:
     blanks the four cards, so the six counters are still unaffected.
     """
     range_from, range_until = day_epoch_window(day)
-    response = await _http().get(
+    response = await relay.get(
+        _http(),
         TIMES_URL,
-        params={
+        {
             "branch_id": BRANCH_ID,
             "from": range_from,
             "until": range_until,
@@ -383,9 +385,10 @@ async def _fetch_hourly(day: date_cls) -> Optional[list[dict]]:
     """
     range_from, range_until = day_epoch_window(day)
     try:
-        response = await _http().get(
+        response = await relay.get(
+            _http(),
             HOURLY_URL,
-            params={
+            {
                 "branch_id": BRANCH_ID,
                 "from": range_from,
                 "until": range_until,
@@ -411,7 +414,7 @@ async def _fetch_live() -> Optional[dict[str, int]]:
     blanking the card. Returning None simply means "no overlay this cycle".
     """
     try:
-        response = await _http().get(LIVE_URL)
+        response = await relay.get(_http(), LIVE_URL)
         if response.status_code != 200:
             return None
         body = response.json()

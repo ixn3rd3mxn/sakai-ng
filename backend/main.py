@@ -9,13 +9,14 @@ from contextlib import asynccontextmanager
 from datetime import date as date_cls
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import agents, aggregations, call_log, call_stats, events, feed_health, lookups
+from libs import agents, aggregations, call_log, call_stats, events, feed_health, lookups, relay
 from libs import flood_cases, flood_events, flood_lookups
 from libs.configs import CORS_ORIGINS, db
 from libs.models import (
@@ -176,6 +177,66 @@ def health():
         "status": "ok" if upstream["ok"] else "degraded",
         "database": "connected",
         "upstream": upstream,
+    }
+
+
+@app.get("/api/health/upstreams")
+async def health_upstreams():
+    """Can this process actually reach NIEMS right now, and how?
+
+    Separate from `/api/health` because it is not a liveness probe: it makes
+    a real request over the same path the feeds use, relay included, so it
+    costs an upstream round trip and must never be on a restart-triggering
+    endpoint.
+
+    It exists because the two ways this breaks look identical from the board
+    - every card blank - but have very different fixes:
+
+      * `blocked` - the connect timed out. NIEMS accepts Thai addresses only
+        and drops everything else silently, so this is the shape of running
+        with no relay configured on foreign hosting. Set NIEMS_RELAY_URL and
+        NIEMS_RELAY_TOKEN.
+      * `bad_token` - the relay itself rejected us. One env var, one minute.
+        Only relay.php sends `X-Relay-Error`, so this can never be confused
+        with a 403 from NIEMS.
+
+    Always 200: the verdict is the payload, and a monitor reading it wants
+    the reason, not a status code.
+    """
+    target, params, headers = relay.route(call_stats.LIVE_URL, None)
+    result = {
+        "relay": relay.describe(),
+        "upstream": call_stats.LIVE_URL,
+        "via": target if relay.enabled() else "direct",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(target, params=params, headers=headers)
+    except httpx.ConnectTimeout as exc:
+        return {
+            **result,
+            "reachable": False,
+            "reason": "blocked",
+            "detail": (
+                "connect timed out; NIEMS accepts Thai IPs only and drops the rest silently. "
+                f"Configure the relay, or host this backend in Thailand. ({type(exc).__name__})"
+            ),
+        }
+    except httpx.HTTPError as exc:
+        return {**result, "reachable": False, "reason": "transport_error", "detail": f"{type(exc).__name__}: {exc}"}
+
+    relay_error = response.headers.get(relay.ERROR_HEADER)
+    if relay_error:
+        detail = f"the relay refused this request ({relay_error}): {response.text[:200]}"
+        if relay_error == "bad_token":
+            detail = "the relay refused this request: NIEMS_RELAY_TOKEN does not match RELAY_TOKEN on the relay host"
+        return {**result, "reachable": False, "reason": relay_error, "status": response.status_code, "detail": detail}
+
+    return {
+        **result,
+        "reachable": response.status_code < 500,
+        "reason": "ok" if response.status_code < 400 else "upstream_error",
+        "status": response.status_code,
     }
 
 
