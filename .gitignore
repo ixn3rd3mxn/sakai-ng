@@ -53,3 +53,5 @@ Thumbs.db
 .vercel
 .env*
 !versel.json
+
+/relay
