@@ -6,18 +6,28 @@ import { RecentIncidentsWidget } from './components/recent-incidents-widget';
 import { FrequentCbdCasesWidget } from './components/frequent-cbd-cases-widget';
 import { DailyIncidentSummaryWidget } from './components/daily-incident-summary-widget';
 import { DispatchActionDial } from './components/dispatch-action-dial';
-import { DispatchDateTimeWarning } from './components/dispatch-datetime-warning';
 import { SHIFT_CODE_TO_LABEL, TimePeriod } from './dispatch.types';
 import { DispatchDataService } from './services/dispatch-data.service';
 
 @Component({
     selector: 'app-dispatch-dashboard',
-    imports: [IncidentTypeStatsWidget, RecentIncidentsWidget, FrequentCbdCasesWidget, DailyIncidentSummaryWidget, SeverityStatisticsWidget, ScrollTopModule, DispatchActionDial, DispatchDateTimeWarning],
+    imports: [IncidentTypeStatsWidget, RecentIncidentsWidget, FrequentCbdCasesWidget, DailyIncidentSummaryWidget, SeverityStatisticsWidget, ScrollTopModule, DispatchActionDial],
     providers: [DispatchDataService],
     template: `
-        <app-dispatch-datetime-warning [historical]="!dataService.isCurrent()" [selectedDate]="dataService.selectedDate()" [selectedTime]="selectedTimePeriod()" />
         <div class="grid grid-cols-12 gap-1">
-            <app-incident-type-stats [stats]="summary()?.incident_type_stats ?? null" [loading]="dataService.loading()" class="contents" />
+            <!-- The day and shift being shown - and, when it is a back-dated
+                 one, the warning that says so - ride in this widget's heading.
+                 They used to be a full-width banner above the grid; the line is
+                 the same, it just sits next to the numbers it qualifies. -->
+            <app-incident-type-stats
+                [stats]="summary()?.incident_type_stats ?? null"
+                [loading]="dataService.loading()"
+                [shift]="selectedTimePeriod().name"
+                [selectedDate]="dataService.selectedDate()"
+                [historical]="!dataService.isCurrent()"
+                (resetToCurrent)="dataService.selectCurrent()"
+                class="contents"
+            />
             <div class="col-span-12 xl:col-span-6">
                 <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
                 <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />

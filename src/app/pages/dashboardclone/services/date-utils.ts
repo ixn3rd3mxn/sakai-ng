@@ -21,6 +21,20 @@ export function toBuddhistYear(date: Date): number {
     return date.getFullYear() + BUDDHIST_ERA_OFFSET;
 }
 
+// "7 กันยายน 2569". `th-TH` resolves to the Buddhist calendar, so the era
+// conversion above is not needed here - the locale does it.
+export function formatThaiLongDate(date: Date | undefined): string {
+    if (!date) return '-';
+    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+// "7 ก.ย." - the same date with the year dropped, for narrow screens where the
+// long form does not fit.
+export function formatThaiShortDate(date: Date | undefined): string {
+    if (!date) return '-';
+    return date.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' });
+}
+
 // Shifts the year embedded in a dd/mm/yyyy string (the datepicker's dateFormat="dd/mm/yy",
 // where PrimeNG's "yy" token means 4-digit year) from CE to BE. Anything not matching
 // that shape (empty string, partial input) passes through unchanged.

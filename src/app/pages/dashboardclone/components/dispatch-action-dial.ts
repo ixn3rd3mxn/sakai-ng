@@ -13,7 +13,7 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { CallTypeCode, IncidentCreateRequest, SHIFT_CODE_TO_LABEL, SHIFT_LABEL_TO_CODE, SelectOption, TimePeriod } from '../dispatch.types';
 import { DispatchApiService } from '../services/dispatch-api.service';
 import { DispatchDataService } from '../services/dispatch-data.service';
-import { parseIsoDate } from '../services/date-utils';
+import { formatDateParam, parseIsoDate } from '../services/date-utils';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
 
 @Component({
@@ -24,9 +24,8 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
     <p-confirmdialog />
     <!-- zIndex matches incident-history-date-dial. Without it the dial sits at
     z-index:auto and only wins over the cards by being last in the DOM, which
-    any positioned element with a z-index (the layout chrome uses 997-999, and
-    dispatch-datetime-warning uses z-10) would silently beat wherever they
-    overlap. -->
+    any positioned element with a z-index (the layout chrome uses 997-999)
+    would silently beat wherever they overlap. -->
     <p-speeddial [model]="items" direction="up" [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10 }" [tooltipOptions]="{ tooltipPosition: 'left' }" />
 
     <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
@@ -425,8 +424,33 @@ export class DispatchActionDial implements OnInit {
 
     confirmDateTime() {
         if (this.tempSelectedDate && this.tempSelectedTime) {
+            const chosenDate = this.tempSelectedDate;
             const shiftCode = SHIFT_LABEL_TO_CODE[this.tempSelectedTime.name];
-            this.dataService.select(this.tempSelectedDate, shiftCode);
+
+            // Choosing the day and shift that are current *right now* means
+            // "follow the board", not "pin me to these values". Pinning them
+            // looks identical until the clock crosses a shift boundary, at
+            // which point the selection stops following it: at 16:30 the board
+            // sits on the finished morning shift, flips to is_current:false,
+            // and waits for someone to notice the warning. The dialog opens
+            // pre-filled with the current day and shift, so confirming without
+            // changing anything used to be enough to freeze a live board.
+            //
+            // Which day and shift are current is resolved server-side, same
+            // source of truth as resetDateTime above - never computed here.
+            this.api.getContext().subscribe({
+                next: (ctx) => {
+                    if (formatDateParam(chosenDate) === ctx.operational_day && shiftCode === ctx.shift) {
+                        this.dataService.selectCurrent();
+                    } else {
+                        this.dataService.select(chosenDate, shiftCode);
+                    }
+                },
+                // Pin it, which is what this always did. The board then shows
+                // the historical warning if the guess was wrong, rather than
+                // silently claiming to be live.
+                error: () => this.dataService.select(chosenDate, shiftCode)
+            });
 
             this.messageService.add({
                 severity: 'success',
