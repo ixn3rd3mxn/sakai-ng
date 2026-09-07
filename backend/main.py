@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date as date_cls
@@ -35,6 +36,31 @@ logger = logging.getLogger(__name__)
 # continuing without them. They are ~40 tiny documents, so a healthy Atlas
 # answers in well under a second; anything near this bound means trouble.
 LOOKUP_LOAD_TIMEOUT = 10
+
+# How often an idle `incidents` stream comes back round to re-check the clock.
+# Not how often it queries - see the rebuild floors below.
+LIVE_POLL_INTERVAL = 2
+HISTORICAL_POLL_INTERVAL = 20
+
+# The longest an `incidents` stream may go without re-reading Mongo, and the
+# guarantee the boards actually rest on: a wake-up is an optimisation, this is
+# the correctness bound. Two values because what the floor has to cover
+# differs by an order of magnitude:
+#
+#   WATCHED   - `libs.events` is tailing a change stream, so every write in
+#               the cluster already arrives as a wake within milliseconds.
+#               The floor is then only catching a dropped cursor, and can be
+#               loose enough that an idle board costs two queries a minute.
+#   UNWATCHED - no change stream (a standalone mongod in development, or a
+#               replica set mid-election). Polling is the *only* thing that
+#               can carry another replica's write to this connection, so the
+#               floor becomes the refresh rate the operator actually sees.
+#
+# `build_summary` is a 30-branch `$facet` plus a full-month scan, which is why
+# the watched case is not simply "rebuild every tick" the way the much
+# cheaper flood-case listing can afford to be.
+WATCHED_REBUILD_FLOOR = 30
+UNWATCHED_REBUILD_FLOOR = 5
 
 
 async def _load_lookups_forever() -> None:
@@ -103,8 +129,17 @@ async def lifespan(app: FastAPI):
     # Always backgrounded, never awaited - see `_load_flood_areas_forever`.
     flood_task = asyncio.create_task(_load_flood_areas_forever())
 
+    # Carries writes made on the *other* replicas into this one's open SSE
+    # connections. Started unconditionally: it costs one idle cursor, and
+    # without it a dashboard only ever sees the saves that happened to be
+    # routed to the same process it is connected to.
+    events.start_watcher(asyncio.get_running_loop())
+
     yield
 
+    # Joins a thread that may be parked inside the driver for up to a second;
+    # off the loop so shutdown does not stall every other close alongside it.
+    await run_in_threadpool(events.stop_watcher)
     flood_task.cancel()
     if retry_task is not None:
         retry_task.cancel()
@@ -176,6 +211,11 @@ def health():
     return {
         "status": "ok" if upstream["ok"] else "degraded",
         "database": "connected",
+        # Whether this replica is receiving writes made on the others. False
+        # is not an outage - the boards fall back to the tighter rebuild
+        # floor - but it is the first thing to check when a save made on one
+        # screen is slow to appear on another.
+        "incident_watch": events.watching(),
         "upstream": upstream,
     }
 
@@ -284,6 +324,14 @@ def _sse_data(payload: dict) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
+def _rebuild_floor() -> int:
+    """Read per tick, never captured once: the change stream can drop and
+    re-establish under a long-lived connection, and a board that started
+    while the cursor was down must tighten up when it comes back rather than
+    keep polling on the loose floor for the rest of its session."""
+    return WATCHED_REBUILD_FLOOR if events.watching() else UNWATCHED_REBUILD_FLOOR
+
+
 def _payload_signature(payload: dict) -> str:
     # `server_now` ticks on every resolution and carries no information the
     # client needs to react to - hashing it in would mean the signature
@@ -301,13 +349,23 @@ async def stream_summary(
     shift: Optional[str] = Query(None),
 ):
     """Server-sent events: re-pushes the dashboard summary only when it
-    actually changes - either because an incident was written (near-instant,
-    see libs.events) or because the operational_day/shift rolled over while
-    idle (nothing writes at the exact moment a shift boundary passes, so
-    that transition can only be caught by re-checking the clock). The
-    periodic re-check itself is nearly free: it's pure datetime math with no
-    Mongo query unless one of those two things actually happened, so an idle
-    connection does not hit the database every tick."""
+    actually changes.
+
+    Three things can trigger a rebuild, and the third is what makes this
+    correct rather than merely fast:
+
+    1. A write on this process (`POST /api/incidents` notifies directly).
+    2. A write anywhere in the cluster, carried in by the change stream in
+       `libs.events` - production runs several replicas, so most saves an
+       operator needs to see were made on a different one.
+    3. The rebuild floor. Both wake-ups above are optimisations that can be
+       missed; this bounds how stale a board can get regardless, and also
+       catches the operational_day/shift rolling over while idle - nothing
+       writes at the exact moment a shift boundary passes, so that
+       transition can only be found by re-checking the clock.
+
+    An idle connection still does not query per tick: between floors the
+    loop is pure datetime math."""
     _require_lookups()
     requested_shift = _parse_shift(shift)
 
@@ -315,6 +373,7 @@ async def stream_summary(
         last_signature: Optional[str] = None
         last_ctx_key: Optional[tuple] = None
         last_is_current = True
+        last_build = 0.0
         wake_queue = events.subscribe()
         try:
             first = True
@@ -324,12 +383,12 @@ async def stream_summary(
 
                 woken_by_write = False
                 if not first:
-                    poll_interval = 2 if last_is_current else 20
+                    poll_interval = LIVE_POLL_INTERVAL if last_is_current else HISTORICAL_POLL_INTERVAL
                     try:
-                        # Woken immediately by a same-process write (see
-                        # libs.events); the timeout is the fallback that
-                        # catches shift-boundary rollovers and covers a
-                        # missed/cross-process wake-up.
+                        # Woken by a write on this process or, through the
+                        # change stream, on any other. The timeout is what
+                        # keeps the loop coming back to check the floor and
+                        # the clock.
                         await asyncio.wait_for(wake_queue.get(), timeout=poll_interval)
                         woken_by_write = True
                     except asyncio.TimeoutError:
@@ -338,14 +397,16 @@ async def stream_summary(
                 ctx = resolve_context(date, requested_shift)
                 ctx_key = (ctx.operational_day, ctx.shift)
                 last_is_current = ctx.is_current
+                stale = time.monotonic() - last_build >= _rebuild_floor()
 
-                if first or woken_by_write or ctx_key != last_ctx_key:
+                if first or woken_by_write or ctx_key != last_ctx_key or stale:
                     # pymongo is synchronous, so calling it straight from this
                     # `async def` generator blocked the whole event loop for the
                     # duration of the query - every other connection, and the
                     # response to the POST that triggered this rebuild, waited
                     # behind it. The threadpool keeps the loop free.
                     payload = await run_in_threadpool(aggregations.build_summary, ctx)
+                    last_build = time.monotonic()
                     signature = _payload_signature(payload)
 
                     if signature != last_signature:
@@ -500,6 +561,7 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
         last_signature: Optional[str] = None
         last_day: Optional[date_cls] = None
         last_is_current = True
+        last_build = 0.0
         wake_queue = events.subscribe()
         try:
             first = True
@@ -509,7 +571,7 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
 
                 woken_by_write = False
                 if not first:
-                    poll_interval = 2 if last_is_current else 20
+                    poll_interval = LIVE_POLL_INTERVAL if last_is_current else HISTORICAL_POLL_INTERVAL
                     try:
                         await asyncio.wait_for(wake_queue.get(), timeout=poll_interval)
                         woken_by_write = True
@@ -518,11 +580,13 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
 
                 ctx = resolve_day_context(date)
                 last_is_current = ctx.is_current
+                stale = time.monotonic() - last_build >= _rebuild_floor()
 
-                if first or woken_by_write or ctx.operational_day != last_day:
+                if first or woken_by_write or ctx.operational_day != last_day or stale:
                     payload = await run_in_threadpool(
                         aggregations.build_incident_history, ctx.operational_day, ctx.is_current, ctx.server_now
                     )
+                    last_build = time.monotonic()
                     signature = _payload_signature(payload)
 
                     if signature != last_signature:

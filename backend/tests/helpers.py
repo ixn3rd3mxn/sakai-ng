@@ -96,6 +96,19 @@ def reset_call_log(module) -> None:
         setattr(module, name, func)
 
 
+def reset_events(module) -> None:
+    """Stop any change-stream watcher and drop every subscriber.
+
+    A watcher left running holds a thread that goes on calling
+    `notify_incidents_changed` into the *previous* test's event loop, which
+    surfaces much later as an unrelated suite waking up for no reason.
+    """
+    module.stop_watcher()
+    module._subscribers.clear()
+    module._stopping.clear()
+    module._watching.clear()
+
+
 def reset_all() -> None:
     """Restore both modules to a pristine state.
 
@@ -103,11 +116,12 @@ def reset_all() -> None:
     each test remembering to reset - which is how the live suite ended up
     asserting against stubs the offline suite had left installed.
     """
-    from libs import agents as _agents, call_log as _call_log, call_stats as _call_stats
+    from libs import agents as _agents, call_log as _call_log, call_stats as _call_stats, events as _events
 
     reset_call_stats(_call_stats)
     reset_agents(_agents)
     reset_call_log(_call_log)
+    reset_events(_events)
 
 
 def stub_call_stats(module, *, rollup=None, live=None, times=None) -> None:
