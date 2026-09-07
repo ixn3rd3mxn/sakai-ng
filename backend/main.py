@@ -663,11 +663,19 @@ def get_flood_lookups():
 
     try:
         roster = [
-            {"agent_name": doc["agent_name"], "agent_extension": str(doc.get("agent_extension") or "")}
-            for doc in db.agents.find({}, {"agent_name": 1, "agent_extension": 1, "_id": 0})
+            {
+                "agent_id": str(doc.get("agent_id") or ""),
+                "agent_name": doc["agent_name"],
+                "agent_extension": str(doc.get("agent_extension") or ""),
+            }
+            for doc in db.agents.find({}, {"agent_id": 1, "agent_name": 1, "agent_extension": 1, "_id": 0})
             if doc.get("agent_name")
         ]
-        roster.sort(key=lambda a: a["agent_name"])
+        # Roster order, which is what the staff list is ordered by - not
+        # alphabetical. `agent_id` is stored as a string, so sorting it as text
+        # would run 1, 10, 11, ... 2; it is compared as a number, with any
+        # non-numeric id sorted last rather than raising.
+        roster.sort(key=lambda a: (not a["agent_id"].isdigit(), int(a["agent_id"]) if a["agent_id"].isdigit() else 0, a["agent_name"]))
     except PyMongoError:
         # The roster is a convenience - the field is free text on the form
         # anyway - so losing it must not cost the operator the area lists.

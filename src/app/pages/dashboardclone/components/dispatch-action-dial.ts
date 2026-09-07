@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, ElementRef, OnDestroy, ViewChild, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, OnInit } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -13,12 +13,13 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { CallTypeCode, IncidentCreateRequest, SHIFT_CODE_TO_LABEL, SHIFT_LABEL_TO_CODE, SelectOption, TimePeriod } from '../dispatch.types';
 import { DispatchApiService } from '../services/dispatch-api.service';
 import { DispatchDataService } from '../services/dispatch-data.service';
-import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from '../services/date-utils';
+import { parseIsoDate } from '../services/date-utils';
+import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
 
 @Component({
     standalone: true,
     selector: 'app-dispatch-action-dial',
-    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule],
+    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule, BuddhistYearDirective],
     template: `<p-toast />
     <p-confirmdialog />
     <!-- zIndex matches incident-history-date-dial. Without it the dial sits at
@@ -34,7 +35,7 @@ import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from 
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">เลือกวัน</div>
                 <p-datepicker
-                    #datePicker
+                    buddhistYear
                     [(ngModel)]="tempSelectedDate"
                     [minDate]="minDate"
                     [maxDate]="maxDate"
@@ -43,8 +44,6 @@ import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from 
                     placeholder="เลือกวัน"
                     class="w-full"
                     appendTo="body"
-                    (onShow)="onDatePanelShow($event)"
-                    (onClose)="onDatePanelClose()"
                 />
             </div>
         </div>
@@ -118,15 +117,11 @@ import { BUDDHIST_ERA_OFFSET, parseIsoDate, shiftDisplayedYearToBuddhist } from 
     </p-dialog>`,
     providers: [MessageService, ConfirmationService]
 })
-export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
+export class DispatchActionDial implements OnInit {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
     private api = inject(DispatchApiService);
     private dataService = inject(DispatchDataService);
-
-    @ViewChild('datePicker', { read: ElementRef }) private datePickerEl?: ElementRef<HTMLElement>;
-
-    private readonly beOffset = BUDDHIST_ERA_OFFSET;
 
     items: MenuItem[] | null = null;
 
@@ -137,20 +132,9 @@ export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
     minDate: Date | undefined;
     maxDate: Date | undefined;
 
-    // The datepicker component has no Buddhist-calendar support (it formats
-    // years straight off Date.getFullYear()), so the visible input text is
-    // overwritten here every check, and the popup's year texts - which have
-    // no template hook - are patched live via MutationObserver while open.
-    // The bound Date value driving selection/min/max/backend stays Gregorian throughout.
-    private yearPanelObserver: MutationObserver | null = null;
-    // Remembers the exact BE text last written to each patched node, so a
-    // rescan triggered by an unrelated mutation (e.g. switching from date-view
-    // to month-view, which leaves the header's year button untouched) can tell
-    // "already patched, unchanged" apart from "genuinely new CE text" instead
-    // of blindly re-shifting an already-BE value (2569 -> 3112).
-    private readonly patchedYearNodes = new WeakMap<Text, string>();
-    private static readonly YEAR_TEXT_SELECTOR = '.p-datepicker-select-year, .p-datepicker-year-view .p-datepicker-year';
-    private static readonly DECADE_RANGE_SELECTOR = '.p-datepicker-decade';
+    // Buddhist-era rendering (and keeping the popup one size across its
+    // day/month/year views) lives in BuddhistYearDirective - see the
+    // `buddhistYear` attribute on the picker above.
 
     timeOptions: TimePeriod[] = [
         { name: 'เช้า' },
@@ -457,76 +441,6 @@ export class DispatchActionDial implements OnInit, AfterViewChecked, OnDestroy {
                 detail: 'โปรดเลือกวันที่และเวลา'
             });
         }
-    }
-
-    ngAfterViewChecked(): void {
-        this.ensureInputValuePatched();
-    }
-
-    ngOnDestroy(): void {
-        this.yearPanelObserver?.disconnect();
-    }
-
-    // Zoneless change detection means there's no reliable "after PrimeNG wrote
-    // the CE text" moment to hook via lifecycle callbacks - PrimeNG can rewrite
-    // input.value (e.g. on focus) between our checks with nothing to re-trigger
-    // ours. Overriding the value property on this one <input> intercepts every
-    // write at the source instead, so it's correct regardless of CD timing.
-    private ensureInputValuePatched(): void {
-        const input = this.datePickerEl?.nativeElement.querySelector('input');
-        if (!input || (input as any).__beValuePatched) return;
-        (input as any).__beValuePatched = true;
-
-        const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!;
-        Object.defineProperty(input, 'value', {
-            configurable: true,
-            enumerable: true,
-            get(): string {
-                return native.get!.call(input);
-            },
-            set(raw: string): void {
-                native.set!.call(input, shiftDisplayedYearToBuddhist(raw));
-            }
-        });
-
-        input.value = native.get!.call(input);
-    }
-
-    onDatePanelShow(panel: HTMLElement): void {
-        this.yearPanelObserver = new MutationObserver(() => this.patchPanelYears(panel));
-        this.patchPanelYears(panel);
-    }
-
-    onDatePanelClose(): void {
-        this.yearPanelObserver?.disconnect();
-        this.yearPanelObserver = null;
-    }
-
-    private patchPanelYears(panel: HTMLElement): void {
-        this.yearPanelObserver?.disconnect();
-
-        panel.querySelectorAll<HTMLElement>(DispatchActionDial.YEAR_TEXT_SELECTOR).forEach((node) => {
-            const textNode = Array.from(node.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined;
-            const raw = textNode?.textContent?.trim();
-            if (!textNode || !raw || !/^\d{4}$/.test(raw) || this.patchedYearNodes.get(textNode) === raw) return;
-
-            const shifted = String(Number(raw) + this.beOffset);
-            textNode.textContent = shifted;
-            this.patchedYearNodes.set(textNode, shifted);
-        });
-
-        // Decade header, e.g. "2020 - 2029" - shift both years in place.
-        panel.querySelectorAll<HTMLElement>(DispatchActionDial.DECADE_RANGE_SELECTOR).forEach((node) => {
-            const textNode = Array.from(node.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined;
-            const raw = textNode?.textContent;
-            if (!textNode || !raw || !/^\s*\d{4}\s*-\s*\d{4}\s*$/.test(raw) || this.patchedYearNodes.get(textNode) === raw) return;
-
-            const shifted = raw.replace(/\d{4}/g, (year) => String(Number(year) + this.beOffset));
-            textNode.textContent = shifted;
-            this.patchedYearNodes.set(textNode, shifted);
-        });
-
-        this.yearPanelObserver?.observe(panel, { childList: true, characterData: true, subtree: true });
     }
 
     setupDateBoundaries() {

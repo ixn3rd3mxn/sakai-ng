@@ -21,6 +21,7 @@ import { FloodCaseFormDrawer } from './components/flood-case-form-drawer';
 import { FloodCase, FloodTab } from './flood-intake.types';
 import { FloodApiService } from './services/flood-api.service';
 import { FloodDataService } from './services/flood-data.service';
+import { BuddhistYearDirective } from '../../shared/buddhist-year.directive';
 import { FloodDraftService } from './services/flood-draft.service';
 
 interface TabDefinition {
@@ -50,6 +51,7 @@ const OUTBOX_RETRY_MS = 20_000;
         DatePickerModule,
         ToastModule,
         TooltipModule,
+        BuddhistYearDirective,
         FloodCaseFormDrawer
     ],
     providers: [FloodDataService, FloodDraftService, MessageService, ConfirmationService],
@@ -180,6 +182,7 @@ const OUTBOX_RETRY_MS = 20_000;
                 </p-iconfield>
 
                 <p-datepicker
+                    buddhistYear
                     [ngModel]="dateRange()"
                     (ngModelChange)="onDateRange($event)"
                     selectionMode="range"
@@ -199,6 +202,7 @@ const OUTBOX_RETRY_MS = 20_000;
                     placeholder="อำเภอ"
                     [showClear]="true"
                     [filter]="true"
+                    [resetFilterOnHide]="true"
                     filterBy="label"
                     styleClass="w-40"
                 />
@@ -223,6 +227,7 @@ const OUTBOX_RETRY_MS = 20_000;
                     placeholder="เจ้าหน้าที่รับแจ้ง"
                     [showClear]="true"
                     [filter]="true"
+                    [resetFilterOnHide]="true"
                     filterBy="agent_name"
                     styleClass="w-52"
                 />

@@ -12,16 +12,17 @@ import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { TextareaModule } from 'primeng/textarea';
 import { formatDateParam } from '../../dashboardclone/services/date-utils';
-import { FloodCase, FloodCaseInput, FloodDuplicate, FloodShift } from '../flood-intake.types';
+import { FloodAgent, FloodCase, FloodCaseInput, FloodDuplicate, FloodShift } from '../flood-intake.types';
 import { FloodApiService } from '../services/flood-api.service';
 import { FloodDataService } from '../services/flood-data.service';
+import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
 import { FloodDraftService } from '../services/flood-draft.service';
 import { FloodDuplicateWarning } from './flood-duplicate-warning';
 
 interface FormModel {
     reported_date: Date | null;
     reported_time: Date | null;
-    shift: FloodShift | null;
+    shift: FloodShift;
     agent_name: string | null;
     channel: string | null;
     reporter: string;
@@ -40,10 +41,14 @@ interface FormModel {
 }
 
 function emptyForm(): FormModel {
+    const now = new Date();
     return {
-        reported_date: new Date(),
-        reported_time: new Date(),
-        shift: null,
+        reported_date: now,
+        reported_time: now,
+        // Pre-selected from the clock rather than left blank: there is no
+        // separate "auto" option any more, so the correct shift has to already
+        // be sitting in the field when the drawer opens.
+        shift: shiftForTime(now),
         agent_name: null,
         channel: null,
         reporter: '',
@@ -60,6 +65,45 @@ function emptyForm(): FormModel {
         assistance: '',
         remarks: ''
     };
+}
+
+// Mirrors libs/shift.py's get_shift exactly:
+//   เช้า  08:30:00 - 16:29:59
+//   บ่าย  16:30:00 - 00:29:59
+//   ดึก   00:30:00 - 08:29:59
+// This only decides what the operator sees pre-selected: the form always
+// sends a concrete shift and the server validates it, so a drift here would
+// show up in the field before it could reach a record.
+const MORNING_START_MINUTES = 8 * 60 + 30;
+const AFTERNOON_START_MINUTES = 16 * 60 + 30;
+const NIGHT_START_MINUTES = 30;
+
+const SHIFTS: readonly FloodShift[] = ['morning', 'afternoon', 'night'];
+
+function isShift(value: unknown): value is FloodShift {
+    return SHIFTS.includes(value as FloodShift);
+}
+
+function shiftForTime(at: Date | null): FloodShift {
+    if (!at) return 'morning';
+    const minutes = at.getHours() * 60 + at.getMinutes();
+    if (minutes >= MORNING_START_MINUTES && minutes < AFTERNOON_START_MINUTES) return 'morning';
+    if (minutes >= AFTERNOON_START_MINUTES || minutes < NIGHT_START_MINUTES) return 'afternoon';
+    return 'night';
+}
+
+// The three long dropdowns all read the same way: the handful of values this
+// console actually uses on top, the full list underneath. Recents are resolved
+// against the live list rather than trusted from storage, so an amphoe, tambon
+// or agent that is no longer offered stops appearing without a migration - and
+// a tambon remembered under another amphoe simply is not in the narrowed list.
+//
+// Recents stay in the full list as well: a name that jumps between two sections
+// depending on who used the browser last is harder to find, not easier.
+function groupByRecent<T>(all: T[], recent: string[], valueOf: (item: T) => string): { label: string; items: T[] }[] {
+    const shortlist = recent.map((value) => all.find((item) => valueOf(item) === value)).filter((item): item is T => !!item);
+    const everything = { label: 'ทั้งหมด', items: all };
+    return shortlist.length ? [{ label: 'ใช้ล่าสุด', items: shortlist }, everything] : [everything];
 }
 
 const AUTOSAVE_INTERVAL_MS = 12_000;
@@ -80,6 +124,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
         DatePickerModule,
         AutoCompleteModule,
         ConfirmDialogModule,
+        BuddhistYearDirective,
         FloodDuplicateWarning
     ],
     styles: [
@@ -189,6 +234,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                     <div class="col-span-12 md:col-span-4">
                         <label class="field-label">วันที่</label>
                         <p-datepicker
+                            buddhistYear
                             [(ngModel)]="form.reported_date"
                             (ngModelChange)="onChanged()"
                             dateFormat="dd/mm/yy"
@@ -201,7 +247,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                         <label class="field-label">เวลารับแจ้ง</label>
                         <p-datepicker
                             [(ngModel)]="form.reported_time"
-                            (ngModelChange)="onChanged()"
+                            (ngModelChange)="onTimeChanged()"
                             [timeOnly]="true"
                             hourFormat="24"
                             styleClass="w-full"
@@ -210,14 +256,17 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                     </div>
                     <div class="col-span-12 md:col-span-4">
                         <label class="field-label">เวร</label>
+                        <!-- Pre-selected from the report time above, which is
+                             what nearly every case wants, and it keeps
+                             following the time until the operator picks a
+                             shift: a call landing at 16:28 is regularly
+                             written up by the incoming team. -->
                         <p-select
                             [(ngModel)]="form.shift"
-                            (ngModelChange)="onChanged()"
+                            (ngModelChange)="onShiftChanged()"
                             [options]="dataService.shifts()"
                             optionLabel="label"
                             optionValue="code"
-                            placeholder="ตามเวลารับแจ้ง"
-                            [showClear]="true"
                             styleClass="w-full"
                             appendTo="body"
                         />
@@ -225,15 +274,24 @@ const DUPLICATE_DEBOUNCE_MS = 500;
 
                     <div class="col-span-12 md:col-span-6">
                         <label class="field-label">เจ้าหน้าที่รับแจ้ง</label>
+                        <!-- The roster is ordered by roster number, which is
+                             the right order to read but a slow one to pick
+                             from: whoever is on this console picked their own
+                             name on the last call too, so the last three sit
+                             on top. Per browser, never sent anywhere. -->
                         <p-select
                             [(ngModel)]="form.agent_name"
-                            (ngModelChange)="onChanged()"
-                            [options]="dataService.agents()"
+                            (ngModelChange)="onAgentChanged()"
+                            [options]="agentGroups()"
+                            [group]="true"
+                            optionGroupLabel="label"
+                            optionGroupChildren="items"
                             optionLabel="agent_name"
                             optionValue="agent_name"
                             placeholder="เลือกเจ้าหน้าที่"
                             [showClear]="true"
                             [filter]="true"
+                            [resetFilterOnHide]="true"
                             filterBy="agent_name"
                             styleClass="w-full"
                             appendTo="body"
@@ -315,11 +373,15 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                         <p-select
                             [(ngModel)]="form.district_code"
                             (ngModelChange)="onDistrictChanged($event)"
-                            [options]="dataService.districtOptions()"
+                            [options]="districtGroups()"
+                            [group]="true"
+                            optionGroupLabel="label"
+                            optionGroupChildren="items"
                             optionLabel="label"
                             optionValue="value"
                             placeholder="เลือกอำเภอ"
                             [filter]="true"
+                            [resetFilterOnHide]="true"
                             filterBy="label"
                             styleClass="w-full"
                             appendTo="body"
@@ -327,19 +389,24 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                     </div>
                     <div class="col-span-12 md:col-span-6">
                         <label class="field-label required">ตำบล</label>
-                        <!-- Narrowed by the chosen amphoe, and disabled until
-                             one is chosen, so a tambon from the wrong amphoe
-                             cannot be picked in the first place. The server
-                             rejects the pair anyway. -->
+                        <!-- Narrowed by the chosen amphoe once there is one,
+                             so a tambon from the wrong amphoe cannot be picked;
+                             with none chosen it lists every tambon and fills
+                             the amphoe in from whatever is picked. Either way
+                             the pair that reaches the server is consistent -
+                             it rejects a mismatched one anyway. -->
                         <p-select
                             [(ngModel)]="form.subdistrict_code"
-                            (ngModelChange)="onChanged()"
-                            [options]="subdistrictOptions()"
+                            (ngModelChange)="onSubdistrictChanged()"
+                            [options]="subdistrictGroups()"
+                            [group]="true"
+                            optionGroupLabel="label"
+                            optionGroupChildren="items"
                             optionLabel="label"
                             optionValue="value"
-                            [placeholder]="form.district_code ? 'เลือกตำบล' : 'เลือกอำเภอก่อน'"
-                            [disabled]="!form.district_code"
+                            placeholder="เลือกตำบล"
                             [filter]="true"
+                            [resetFilterOnHide]="true"
                             filterBy="label"
                             styleClass="w-full"
                             appendTo="body"
@@ -575,8 +642,24 @@ export class FloodCaseFormDrawer {
     // "No results found".
     private readonly districtCodeSignal = signal<string | null>(null);
     private readonly locationNoteSignal = signal<string>('');
+    // What the old "อัตโนมัติ" option used to be, without costing a fourth
+    // entry in the list: while this is true the shift tracks the report time,
+    // and picking a shift by hand turns it off for the rest of the drawer.
+    private readonly shiftFollowsTime = signal(true);
 
     readonly subdistrictOptions = computed(() => this.dataService.subdistrictOptionsFor(this.districtCodeSignal()));
+
+    readonly agentGroups = computed(() =>
+        groupByRecent<FloodAgent>(this.dataService.agents(), this.drafts.recentOf('agent'), (a) => a.agent_name)
+    );
+
+    readonly districtGroups = computed(() =>
+        groupByRecent(this.dataService.districtOptions(), this.drafts.recentOf('district'), (o) => o.value)
+    );
+
+    readonly subdistrictGroups = computed(() =>
+        groupByRecent(this.subdistrictOptions(), this.drafts.recentOf('subdistrict'), (o) => o.value)
+    );
 
     // Only when the operator actually pasted coordinates or a maps link -
     // the column is called "พิกัด" but almost every real value is a landmark,
@@ -615,6 +698,7 @@ export class FloodCaseFormDrawer {
 
         if (id === 'new') {
             this.loaded.set(null);
+            this.shiftFollowsTime.set(true);
             this.form = emptyForm();
             this.syncDerived();
             // Collapsed: none of it can be answered while the call is live.
@@ -625,6 +709,9 @@ export class FloodCaseFormDrawer {
             this.api.getCase(id).subscribe({
                 next: ({ case: found }) => {
                     this.loaded.set(found);
+                    // A saved case already has a shift somebody stands behind;
+                    // correcting its time must not quietly move it.
+                    this.shiftFollowsTime.set(false);
                     this.form = this.toForm(found);
                     this.syncDerived();
                     // Open, and scrolled to: this is what the operator came
@@ -646,14 +733,21 @@ export class FloodCaseFormDrawer {
         const draft = this.drafts.readDraft(key);
         if (!draft) return;
         const restored = draft.form as Record<string, unknown>;
+        const restoredTime = restored['reported_time'] ? new Date(restored['reported_time'] as string) : this.form.reported_time;
         this.form = {
             ...this.form,
             ...(restored as unknown as FormModel),
             // Dates survive JSON as strings and have to come back as Dates or
             // the pickers render blank.
             reported_date: restored['reported_date'] ? new Date(restored['reported_date'] as string) : this.form.reported_date,
-            reported_time: restored['reported_time'] ? new Date(restored['reported_time'] as string) : this.form.reported_time
+            reported_time: restoredTime,
+            // Drafts predate this field's current shape - older ones stored
+            // null or 'auto' for it, which now match no option and would leave
+            // the select blank. Anything unrecognised falls back to the report
+            // time, the same as a fresh form.
+            shift: isShift(restored['shift']) ? restored['shift'] : shiftForTime(restoredTime)
         };
+        if (isShift(restored['shift'])) this.shiftFollowsTime.set(false);
         this.syncDerived();
         this.restoredDraft.set(true);
         this.dirty.set(true);
@@ -698,8 +792,30 @@ export class FloodCaseFormDrawer {
         this.locationNoteSignal.set(this.form.location_note ?? '');
     }
 
+    onTimeChanged(): void {
+        // Retype the time and the shift follows it - unless the operator has
+        // already overridden the shift, in which case their choice stands.
+        if (this.shiftFollowsTime()) {
+            this.form.shift = shiftForTime(this.form.reported_time);
+        }
+        this.onChanged();
+    }
+
+    onShiftChanged(): void {
+        this.shiftFollowsTime.set(false);
+        this.onChanged();
+    }
+
     onChanged(): void {
         this.dirty.set(true);
+    }
+
+    onAgentChanged(): void {
+        // Recorded on the pick, not on save: the operator who clears the field
+        // or abandons the call still picked that name, and the list is only a
+        // shortcut - nothing downstream reads it.
+        if (this.form.agent_name) this.drafts.remember('agent', this.form.agent_name);
+        this.onChanged();
     }
 
     setReporter(value: string): void {
@@ -718,10 +834,39 @@ export class FloodCaseFormDrawer {
         this.scheduleDuplicateCheck();
     }
 
+    onSubdistrictChanged(): void {
+        const code = this.form.subdistrict_code;
+        if (code) {
+            this.drafts.remember('subdistrict', code);
+            // The caller names the tambon far more often than the amphoe, so
+            // the amphoe is derived from it rather than demanded first. Every
+            // tambon carries its amphoe, which is what makes this safe: the
+            // pair can only be the one on the tambon's own record.
+            const subdistrict = this.dataService.subdistrictByCode(code);
+            if (subdistrict && subdistrict.district_code !== this.form.district_code) {
+                this.form.district_code = subdistrict.district_code;
+                this.drafts.remember('district', subdistrict.district_code);
+                this.applyDistrict(subdistrict.district_code);
+            }
+        }
+        this.onChanged();
+        // The tambon is half of what the duplicate check matches on.
+        this.scheduleDuplicateCheck();
+    }
+
     onDistrictChanged(districtCode: string | null): void {
+        if (districtCode) this.drafts.remember('district', districtCode);
         // Clearing the tambon is the point of the dependency: keeping the old
-        // one would leave a pair from two different amphoe on screen.
+        // one would leave a pair from two different amphoe on screen. Only an
+        // amphoe the operator picked does this - one filled in from a tambon
+        // must obviously not clear the tambon that filled it.
         this.form.subdistrict_code = null;
+        this.applyDistrict(districtCode);
+        this.onChanged();
+        this.scheduleDuplicateCheck();
+    }
+
+    private applyDistrict(districtCode: string | null): void {
         this.districtCodeSignal.set(districtCode);
         const district = this.dataService.districtByCode(districtCode);
         const suggestion = district ? `ประสานงานทีมปภ.อำเภอ${district.district_name}` : '';
@@ -730,8 +875,6 @@ export class FloodCaseFormDrawer {
         if (!this.form.ddpm_coordination || this.form.ddpm_coordination.startsWith('ประสานงานทีมปภ.อำเภอ')) {
             this.form.ddpm_coordination = suggestion;
         }
-        this.onChanged();
-        this.scheduleDuplicateCheck();
     }
 
     searchUnits(event: { query: string }): void {
@@ -787,7 +930,9 @@ export class FloodCaseFormDrawer {
         return {
             reported_date: at,
             reported_time: at,
-            shift: (item.shift || null) as FloodShift | null,
+            // Every saved case has a concrete shift; a record written before
+            // the field existed falls back to its own report time.
+            shift: item.shift || shiftForTime(at),
             agent_name: item.agent_name || null,
             channel: item.channel || null,
             reporter: item.reporter ?? '',

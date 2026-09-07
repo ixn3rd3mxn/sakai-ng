@@ -90,6 +90,9 @@ export interface FloodSubdistrict {
 }
 
 export interface FloodAgent {
+    // Roster number. The list arrives ordered by it, not alphabetically, so
+    // the dropdown reads the way the staff list on the wall does.
+    agent_id: string;
     agent_name: string;
     agent_extension: string;
 }

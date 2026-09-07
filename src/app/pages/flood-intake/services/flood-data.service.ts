@@ -59,8 +59,23 @@ export class FloodDataService implements OnDestroy {
         this.districts().map((d) => ({ label: d.district_name, value: d.district_code }))
     );
 
+    private readonly allSubdistrictOptions = computed(() => {
+        const districtNames = new Map(this.districts().map((d) => [d.district_code, d.district_name]));
+        return this.subdistricts().map((s) => {
+            const district = districtNames.get(s.district_code);
+            return {
+                label: district ? `${s.subdistrict_name} · ${district}` : s.subdistrict_name,
+                value: s.subdistrict_code
+            };
+        });
+    });
+
     subdistrictOptionsFor(districtCode: string | null | undefined) {
-        if (!districtCode) return [];
+        // No amphoe chosen yet: offer every tambon rather than nothing, so an
+        // operator who was told the tambon but not the amphoe can start there.
+        // Tambon names repeat across amphoe, so the amphoe rides along in the
+        // label - it is the only thing telling two "บ้านใหม่" apart.
+        if (!districtCode) return this.allSubdistrictOptions();
         return this.subdistricts()
             .filter((s) => s.district_code === districtCode)
             .map((s) => ({ label: s.subdistrict_name, value: s.subdistrict_code }));
