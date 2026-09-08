@@ -66,6 +66,17 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
             margin-bottom: 0;
         }
 
+        /* Each card sets its own --card-tint; the strength is shared, so it is
+           stated here rather than built into a string in the template.
+
+           55%, matching the stat cards above and /report/dashboard - it was
+           40%, which read as washed out beside them. That is the ceiling: at
+           55% the labels and names hold 8.4:1 in light mode and 5.3:1 in dark,
+           and by 65% the amber cards are down to 4.25:1, under the minimum. */
+        .tinted-card {
+            background: color-mix(in srgb, var(--card-tint) 55%, var(--surface-card));
+        }
+
         /* Applied to สายเรียกเข้า alone - see STATUS above.
 
            Pulses the tint only, not opacity.
@@ -75,9 +86,20 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
            read. This animates just how much of the status colour is mixed
            into the surface, so the text stays at full contrast throughout.
 
-           A CSS animation outranks an inline style in the cascade, so it
-           overrides [style.background] rather than fighting it; the colour
-           itself arrives as --card-tint so one keyframe serves every status. */
+           A CSS animation outranks a normal declaration in the cascade, so it
+           overrides .tinted-card rather than fighting it; the colour itself
+           arrives as --card-tint so one keyframe serves every status.
+
+           It ebbs from the resting tint rather than swelling past it, and that
+           is a contrast decision rather than a stylistic one. Mixing *more* of
+           the status colour into the surface moves the card toward mid-tone in
+           both themes, which is the direction that costs legibility: the old
+           70% peak put amber - and สายเรียกเข้า is the only status that pulses,
+           so amber is the only colour this keyframe ever draws - at 3.81:1
+           against white in dark mode, under the 4.5 minimum, on the one card
+           that most needs reading. Ebbing toward the surface can only raise
+           contrast, in either theme, so the swing stays a full 30 points wide
+           without ever dimming the text. */
         .pulse-card {
             animation: card-tint-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
@@ -85,10 +107,10 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
         @keyframes card-tint-pulse {
             0%,
             100% {
-                background: color-mix(in srgb, var(--card-tint) 40%, var(--surface-card));
+                background: color-mix(in srgb, var(--card-tint) 55%, var(--surface-card));
             }
             50% {
-                background: color-mix(in srgb, var(--card-tint) 70%, var(--surface-card));
+                background: color-mix(in srgb, var(--card-tint) 25%, var(--surface-card));
             }
         }
 
@@ -159,10 +181,9 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
             }
                 @for (agent of agents(); track agent.extension) {
                     <div
-                        class="card mb-0 h-full"
+                        class="card tinted-card mb-0 h-full"
                         [class.pulse-card]="agent.status === 'ringing'"
                         [style.--card-tint]="'var(--p-' + style(agent).color + '-500)'"
-                        [style.background]="'color-mix(in srgb, var(--p-' + style(agent).color + '-500) 40%, var(--surface-card))'"
                     >
                         <div class="flex items-center gap-2 mb-3">
                             <span class="inline-block w-2.5 h-2.5 rounded-full" [class]="style(agent).dot"></span>
