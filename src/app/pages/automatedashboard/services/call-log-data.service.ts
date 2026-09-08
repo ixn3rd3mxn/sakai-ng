@@ -4,7 +4,7 @@ import { Observable, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { CallLogSummary } from '../call-log.types';
 import { feedHealthMessage } from '../format-utils';
-import { serverBuildListener } from '@/app/core/sse-server-build';
+import { deploySignalListener } from '@/app/core/sse-deploy-signals';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -13,9 +13,9 @@ const API_BASE_URL = environment.apiBaseUrl;
 @Injectable()
 export class CallLogDataService implements OnDestroy {
     private readonly http = inject(HttpClient);
-    // One line per stream, so a redeploy of the backend is noticed on
+    // One line per stream, so a deploy of either half is noticed on
     // whichever board happens to be open.
-    private readonly watchServerBuild = serverBuildListener();
+    private readonly watchDeploySignals = deploySignalListener();
     private readonly subscription: Subscription;
 
     private readonly _summary = signal<CallLogSummary | null>(null);
@@ -56,7 +56,7 @@ export class CallLogDataService implements OnDestroy {
     private stream(): Observable<CallLogSummary> {
         return new Observable<CallLogSummary>((subscriber) => {
             const source = new EventSource(`${API_BASE_URL}/call-log/stream`);
-            this.watchServerBuild(source);
+            this.watchDeploySignals(source);
             source.addEventListener('call-log', (event: MessageEvent<string>) => {
                 try {
                     subscriber.next(JSON.parse(event.data) as CallLogSummary);

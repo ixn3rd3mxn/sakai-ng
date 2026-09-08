@@ -16,8 +16,21 @@ const MIN_CHECK_GAP_MS = 60_000;
 
 const SNOOZE_MS = 30 * 60_000;
 
+// A deploy hint is allowed past the one-a-minute floor, so it gets a floor of
+// its own: a page holds several SSE streams and every one of them reports the
+// same deploy, and only the first should cost a request.
+const HINT_MIN_GAP_MS = 5_000;
+
+// A hint says the *build* finished, which is a few seconds before the CDN is
+// serving it on the domain. Checking once on the hint would often read the old
+// file and conclude nothing had changed, so the hint schedules a short ladder
+// of re-checks and stops as soon as one of them sees the new build.
+const PROPAGATION_RECHECKS_MS = [5_000, 15_000, 40_000];
+
 interface VersionFile {
     build?: unknown;
+    /** Last frontend build the backend was told about; `server` frames only. */
+    client?: unknown;
 }
 
 /**
@@ -30,15 +43,22 @@ interface VersionFile {
  * and `blockedReason()` lets a screen with unfinished work say why reloading
  * now would be worse than running one version behind for another minute.
  *
- * Two independent signals feed it:
+ * Three signals feed it, and only the first of them is ever believed:
  *
- *   frontend - `version.json`, written at build time by
- *              scripts/write-version.mjs. The bundle in this tab came from one
- *              Vercel deployment; this file always comes from the current one.
- *              This is the one that catches "the dev just pushed".
- *   backend  - the `server` frame the SSE endpoints open with. Separate
- *              because the two deploy separately: a backend contract change
- *              can strand a frontend that is otherwise perfectly current.
+ *   version.json - written at build time by scripts/write-version.mjs. The
+ *                  bundle in this tab came from one Vercel deployment; this
+ *                  file always comes from the current one, so a difference
+ *                  means the dev has shipped. The sole authority on whether
+ *                  the frontend moved, because it is the only thing served by
+ *                  the deployment the browser would actually reload onto.
+ *   `deploy`     - pushed down the SSE streams when the Vercel build reports
+ *                  in (backend/libs/deploys.py). Pure latency: it turns a
+ *                  five-minute wait into a few seconds by forcing the check
+ *                  above to happen now. It never raises the banner itself.
+ *   `server`     - the frame every SSE stream opens with, naming the backend
+ *                  deployment. Separate from the other two because the two
+ *                  halves deploy separately: a backend contract change can
+ *                  strand a frontend that is otherwise perfectly current.
  */
 @Injectable({ providedIn: 'root' })
 export class AppUpdateService {
@@ -52,8 +72,10 @@ export class AppUpdateService {
     private readonly snoozed = signal(false);
 
     private lastCheckedAt = 0;
+    private lastHintAt = 0;
     private checking = false;
     private snoozeTimer: ReturnType<typeof setTimeout> | null = null;
+    private hintTimers: ReturnType<typeof setTimeout>[] = [];
     private readonly blockers = new Set<() => string | null>();
 
     private readonly frontendChanged = computed(() => {
@@ -107,6 +129,7 @@ export class AppUpdateService {
             window.removeEventListener('focus', onVisible);
             clearInterval(timer);
             if (this.snoozeTimer) clearTimeout(this.snoozeTimer);
+            this.clearHintTimers();
         });
     }
 
@@ -117,9 +140,9 @@ export class AppUpdateService {
      * connection drops, and "cannot reach the CDN" says nothing at all about
      * whether a deploy happened.
      */
-    async check(): Promise<void> {
+    async check(force = false): Promise<void> {
         if (this.checking) return;
-        if (Date.now() - this.lastCheckedAt < MIN_CHECK_GAP_MS) return;
+        if (!force && Date.now() - this.lastCheckedAt < MIN_CHECK_GAP_MS) return;
         this.checking = true;
         this.lastCheckedAt = Date.now();
         try {
@@ -152,16 +175,54 @@ export class AppUpdateService {
      * for nothing.
      */
     reportServerBuild(raw: string): void {
-        let build: string | null = null;
+        let parsed: VersionFile;
         try {
-            const parsed = JSON.parse(raw) as VersionFile;
-            build = typeof parsed.build === 'string' && parsed.build ? parsed.build : null;
+            parsed = JSON.parse(raw) as VersionFile;
         } catch {
             return;
         }
+
+        // A backend that names a frontend build has been told about a deploy
+        // since it started. Worth a look even on a fresh connection: this tab
+        // may have been open across it and reconnected afterwards.
+        if (typeof parsed.client === 'string' && parsed.client) this.onDeployAnnounced();
+
+        const build = typeof parsed.build === 'string' && parsed.build ? parsed.build : null;
         if (!build) return;
         if (this.bootServerBuild() === null) this.bootServerBuild.set(build);
         this.latestServerBuild.set(build);
+    }
+
+    /**
+     * Called with the `deploy` frame the backend pushes when the frontend has
+     * been redeployed - the whole reason a notice arrives in seconds rather
+     * than on the next poll.
+     *
+     * The frame is treated as a nudge, never as the answer. It says a build
+     * finished; it cannot say the CDN is serving it yet, and a client that
+     * believed it outright could offer a reload that lands straight back on
+     * the old bundle. So this only forces the same `version.json` check that
+     * would have happened later anyway, and the file stays the authority -
+     * which also means a spoofed, replayed or duplicated frame costs one
+     * conditional GET and can never raise a banner on its own.
+     */
+    onDeployAnnounced(): void {
+        if (Date.now() - this.lastHintAt < HINT_MIN_GAP_MS) return;
+        this.lastHintAt = Date.now();
+        this.clearHintTimers();
+        void this.check(true);
+        for (const delay of PROPAGATION_RECHECKS_MS) {
+            this.hintTimers.push(
+                setTimeout(() => {
+                    if (!this.frontendChanged()) void this.check(true);
+                }, delay)
+            );
+        }
+    }
+
+    private clearHintTimers(): void {
+        for (const timer of this.hintTimers) clearTimeout(timer);
+        this.hintTimers = [];
     }
 
     /**

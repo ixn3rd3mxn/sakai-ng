@@ -3,16 +3,16 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { DashboardSummary, IncidentCreateRequest, IncidentCreateResponse, OperationalContext, ShiftCode } from '../dispatch.types';
-import { serverBuildListener } from '@/app/core/sse-server-build';
+import { deploySignalListener } from '@/app/core/sse-deploy-signals';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
 @Injectable({ providedIn: 'root' })
 export class DispatchApiService {
     private http = inject(HttpClient);
-    // One line per stream, so a redeploy of the backend is noticed on
+    // One line per stream, so a deploy of either half is noticed on
     // whichever board happens to be open.
-    private readonly watchServerBuild = serverBuildListener();
+    private readonly watchDeploySignals = deploySignalListener();
 
     private buildParams(date?: string, shift?: ShiftCode): HttpParams {
         let params = new HttpParams();
@@ -38,7 +38,7 @@ export class DispatchApiService {
             const query = this.buildParams(date, shift).toString();
             const url = query ? `${API_BASE_URL}/dashboard/stream?${query}` : `${API_BASE_URL}/dashboard/stream`;
             const source = new EventSource(url);
-            this.watchServerBuild(source);
+            this.watchDeploySignals(source);
 
             source.addEventListener('dashboard', (event: MessageEvent<string>) => {
                 try {

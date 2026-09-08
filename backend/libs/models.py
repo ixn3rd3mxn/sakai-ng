@@ -3,9 +3,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 CallCode = Literal["NY", "RM", "LDN", "IST", "PRS"]
+
+
+class DeploymentAnnounceIn(BaseModel):
+    """Body for POST /api/deployments.
+
+    Sent by the frontend build itself (scripts/announce-build.mjs) so the
+    boards can be told to re-check immediately. `build` is whatever
+    version.json was stamped with for that deploy - the commit sha in
+    practice - and is only ever compared for equality, never parsed, so the
+    bound is about refusing junk rather than about the format.
+    """
+
+    build: str = Field(min_length=1, max_length=200)
 
 
 class IncidentCreateIn(BaseModel):

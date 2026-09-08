@@ -28,3 +28,10 @@ CORS_ORIGINS = [
 # half of the update notice. Set it to the deployed commit (the platform
 # usually exposes one) to turn that half on.
 APP_BUILD = os.environ.get("APP_BUILD", "").strip() or None
+
+# Shared secret the frontend build presents to POST /api/deployments, which is
+# what turns a Vercel deploy into an immediate notice on every open board.
+# Unset disables the endpoint outright (503) rather than leaving it open: the
+# announcement is low-consequence, but an endpoint that fans out to every
+# connected client should not be reachable by accident.
+DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "").strip() or None

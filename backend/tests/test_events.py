@@ -38,7 +38,7 @@ from pymongo.errors import PyMongoError
 from tests import helpers  # noqa: F401  (path + dummy MONGO_URI, must precede libs)
 
 import main
-from libs import aggregations, events
+from libs import aggregations, deploys, events
 
 DAY = date(2026, 9, 7)
 NOW = datetime(2026, 9, 7, 10, 0, 0)
@@ -268,6 +268,76 @@ def test_every_stream_opens_by_naming_the_deployment():
         assert first["event"] == "server"
         assert "build" in json.loads(first["data"])
         await gen.aclose()
+
+    _run(scenario())
+
+
+def test_the_announce_endpoint_refuses_anything_but_the_configured_token():
+    """The one endpoint here that is reachable from outside and fans out to
+    every connected client, so the two ways it can be wrong are worth
+    pinning: unset config must fail loudly rather than accept anything, and a
+    wrong token must not be treated as no token.
+    """
+    from fastapi.testclient import TestClient
+
+    original = main.DEPLOY_TOKEN
+    deploys.reset()
+    try:
+        client = TestClient(main.app)
+
+        main.DEPLOY_TOKEN = None
+        assert client.post("/api/deployments", json={"build": "a"}).status_code == 503
+
+        main.DEPLOY_TOKEN = "s3cret"
+        assert client.post("/api/deployments", json={"build": "a"}).status_code == 401
+        assert (
+            client.post("/api/deployments", json={"build": "a"}, headers={"x-deploy-token": "wrong"}).status_code == 401
+        )
+        assert deploys.current() is None  # nothing announced by a rejected call
+
+        ok = client.post("/api/deployments", json={"build": "a"}, headers={"x-deploy-token": "s3cret"})
+        assert ok.status_code == 200
+        assert ok.json() == {"ok": True, "build": "a", "announced": True}
+        assert deploys.current() == "a"
+
+        # An empty build id is junk, not a deploy.
+        assert (
+            client.post("/api/deployments", json={"build": ""}, headers={"x-deploy-token": "s3cret"}).status_code == 422
+        )
+    finally:
+        main.DEPLOY_TOKEN = original
+        deploys.reset()
+
+
+def test_a_frontend_deploy_reaches_a_board_that_is_sitting_idle():
+    """The point of pushing deploys down the SSE connection at all.
+
+    An idle board is the normal state - a quiet night produces no dashboard
+    frames for minutes at a time - so the announcement has to arrive on its
+    own rather than behind the next data frame. If this ever regresses, the
+    notice silently degrades back to whenever the client next polls, which is
+    exactly the delay this was built to remove.
+    """
+
+    async def scenario():
+        deploys.reset()
+        _install(_StubSummary(), floor=0, poll=0.05)
+        gen = (await main.stream_summary(_FakeRequest(), None, None)).body_iterator
+
+        assert (await asyncio.wait_for(gen.__anext__(), 3.0))["event"] == "server"
+        assert (await _frame(gen))["total"] == 1  # the stream then goes quiet
+
+        assert deploys.announce("deadbeef") is True
+        event = await asyncio.wait_for(gen.__anext__(), 3.0)
+        assert event["event"] == "deploy"
+        assert json.loads(event["data"])["build"] == "deadbeef"
+
+        # The build script retries a POST that timed out waking the backend;
+        # the retry must not send every board off to re-check a second time.
+        assert deploys.announce("deadbeef") is False
+
+        await gen.aclose()
+        deploys.reset()
 
     _run(scenario())
 

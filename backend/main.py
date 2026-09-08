@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import time
@@ -11,16 +12,17 @@ from datetime import date as date_cls
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import agents, aggregations, call_log, call_stats, events, feed_health, lookups, relay
+from libs import agents, aggregations, call_log, call_stats, deploys, events, feed_health, lookups, relay
 from libs import flood_cases, flood_events, flood_lookups
-from libs.configs import APP_BUILD, CORS_ORIGINS, db
+from libs.configs import APP_BUILD, CORS_ORIGINS, DEPLOY_TOKEN, db
 from libs.models import (
+    DeploymentAnnounceIn,
     FloodCaseBulkStatusIn,
     FloodCaseCreateIn,
     FloodCaseStatusIn,
@@ -280,6 +282,41 @@ async def health_upstreams():
     }
 
 
+@app.post("/api/deployments")
+async def announce_deployment(body: DeploymentAnnounceIn, x_deploy_token: Optional[str] = Header(None)):
+    """The frontend build telling this process what it just shipped.
+
+    Called from the Vercel build (`postbuild`), not by a browser. Everything
+    it does is hand the build id to `libs.deploys`, which pushes it down the
+    SSE connections the open boards already hold - so a deploy reaches a
+    console in about the time this request takes, rather than whenever that
+    console next gets round to polling `version.json`.
+
+    The token is a shared secret rather than a signature because of what the
+    endpoint can actually do: at worst, an attacker who guessed it could make
+    every open board re-fetch one small static file and, if it had genuinely
+    changed, offer a reload the operator still has to accept. There is no
+    write and nothing to forge - so a constant-time compare against one env
+    var is proportionate, and 503 when it is unset keeps an unconfigured
+    deploy loud in the build log instead of silently doing nothing.
+
+    `async` on purpose: the announcement puts to asyncio queues owned by this
+    loop, and a sync endpoint would run it on a worker thread where that is
+    not safe.
+    """
+    if not DEPLOY_TOKEN:
+        raise HTTPException(status_code=503, detail="deploy announcements are not configured")
+    if not x_deploy_token or not hmac.compare_digest(x_deploy_token, DEPLOY_TOKEN):
+        raise HTTPException(status_code=401, detail="bad deploy token")
+
+    announced = deploys.announce(body.build)
+    # `announced: false` means this build was already the current one - a
+    # retry that landed after the first attempt in fact got through. The build
+    # script treats it as success either way; it is here to be readable in the
+    # deploy log.
+    return {"ok": True, "build": body.build, "announced": announced}
+
+
 @app.get("/api/context")
 def get_context(date: Optional[date_cls] = Query(None), shift: Optional[str] = Query(None)):
     """Resolves operational_day/shift/team for the given (or current) date+shift.
@@ -325,29 +362,80 @@ def _sse_data(payload: dict) -> str:
 
 
 def _sse(event_generator) -> EventSourceResponse:
-    """Open every stream with a `server` frame naming this deployment.
+    """Wrap a stream generator with the two frames that are about the software
+    rather than about the data.
 
-    The boards are left open for a whole shift, so the frontend has to be able
-    to notice that what it is talking to has been replaced under it. It cannot
-    learn that from its own `version.json`, which is served by Vercel and says
-    nothing about this process - and it must not learn it from a reconnect,
-    because on a free tier the process cold-starts constantly without anything
-    having been deployed.
+    `server` opens every connection and names this deployment. The boards stay
+    open for a whole shift, so the frontend has to be able to notice that what
+    it is talking to has been replaced under it. It cannot learn that from its
+    own `version.json`, which is served by Vercel and says nothing about this
+    process - and it must not infer it from a reconnect, because on a free
+    tier the process cold-starts constantly without anything having been
+    deployed. So the build id is stated outright, and only ever changes when a
+    deploy changes it. `APP_BUILD` unset sends null, which the client reads as
+    "no claim" rather than as a change.
 
-    So the build id is stated explicitly, and only ever changes when a deploy
-    changes it. `APP_BUILD` unset sends null, which the client treats as "no
-    claim" rather than as a change.
+    `deploy` arrives mid-stream when the *frontend* is redeployed (see
+    `libs.deploys`). This is the only reason any of this rides the SSE
+    connection: the boards already hold one, so a deploy reaches them in the
+    time a POST takes instead of the minutes their own polling would need.
 
-    Costs one short frame per connection, and rides the connection the client
-    already has - nothing here polls.
+    Both cost a few dozen bytes on a connection that already exists, and
+    neither adds a poll.
     """
 
-    async def with_hello():
-        yield {"event": "server", "data": _sse_data({"build": APP_BUILD})}
-        async for frame in event_generator:
-            yield frame
+    async def framed():
+        yield {"event": "server", "data": _sse_data({"build": APP_BUILD, "client": deploys.current()})}
 
-    return EventSourceResponse(with_hello())
+        # The inner stream and the announcement queue are pulled concurrently:
+        # a deploy has to reach an idle board, and these streams are idle most
+        # of the time by design - waiting for the next dashboard frame before
+        # looking at the queue would hold a hint until the data happened to
+        # change, which on a quiet night is a long time.
+        inner = event_generator.__aiter__()
+        queue = deploys.subscribe()
+        pull = None
+        hint = None
+        try:
+            while True:
+                if pull is None:
+                    pull = asyncio.ensure_future(inner.__anext__())
+                if hint is None:
+                    hint = asyncio.ensure_future(queue.get())
+
+                done, _ = await asyncio.wait({pull, hint}, return_when=asyncio.FIRST_COMPLETED)
+
+                if hint in done:
+                    build = hint.result()
+                    hint = None
+                    yield {"event": "deploy", "data": _sse_data({"build": build})}
+
+                if pull in done:
+                    try:
+                        frame = pull.result()
+                    except StopAsyncIteration:
+                        pull = None
+                        break
+                    pull = None
+                    yield frame
+        finally:
+            deploys.unsubscribe(queue)
+            # The cancellation has to be awaited before `aclose`: until the
+            # throw has landed the inner generator is still executing, and
+            # closing it there raises "asynchronous generator is already
+            # running" - the same trap the stream tests document in
+            # `tests/test_events._abandon`.
+            for task in (pull, hint):
+                if task is None:
+                    continue
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, StopAsyncIteration):
+                    pass
+            await inner.aclose()
+
+    return EventSourceResponse(framed())
 
 
 def _rebuild_floor() -> int:
