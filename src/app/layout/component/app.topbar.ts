@@ -32,7 +32,8 @@ import { AppUpdateService } from '@/app/core/app-update.service';
                 @if (updates.updateSnoozed()) {
                     <button type="button" class="layout-topbar-action relative" title="มีเวอร์ชันใหม่ของระบบ" aria-label="มีเวอร์ชันใหม่ของระบบ" (click)="updates.unsnooze()">
                         <i class="pi pi-sparkles"></i>
-                        <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary"></span>
+                        <!-- block! because the topbar theme hides every span inside an action button. -->
+                        <span class="block! absolute top-1 right-1 w-2 h-2 rounded-full bg-primary"></span>
                     </button>
                 }
                 <button type="button" class="layout-topbar-action" (click)="toggleDarkMode()">
