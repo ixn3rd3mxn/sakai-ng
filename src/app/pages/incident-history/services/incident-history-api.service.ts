@@ -3,12 +3,16 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
+import { serverBuildListener } from '@/app/core/sse-server-build';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
 @Injectable({ providedIn: 'root' })
 export class IncidentHistoryApiService {
     private http = inject(HttpClient);
+    // One line per stream, so a redeploy of the backend is noticed on
+    // whichever board happens to be open.
+    private readonly watchServerBuild = serverBuildListener();
 
     private buildParams(date?: string): HttpParams {
         let params = new HttpParams();
@@ -32,6 +36,7 @@ export class IncidentHistoryApiService {
             const query = this.buildParams(date).toString();
             const url = query ? `${API_BASE_URL}/incident-history/stream?${query}` : `${API_BASE_URL}/incident-history/stream`;
             const source = new EventSource(url);
+            this.watchServerBuild(source);
 
             source.addEventListener('incident-history', (event: MessageEvent<string>) => {
                 try {

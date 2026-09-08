@@ -171,8 +171,18 @@ def _run(coro):
 
 
 async def _frame(gen, timeout=3.0) -> dict:
-    event = await asyncio.wait_for(gen.__anext__(), timeout)
-    return json.loads(event["data"])
+    """The next *data* frame, skipping the `server` handshake.
+
+    Every stream opens by naming the running deployment (main._sse) so an
+    open board can notice it was redeployed under. That frame carries no
+    dashboard data, and no test here is about it - see
+    test_every_stream_opens_by_naming_the_deployment for the one that is.
+    """
+    while True:
+        event = await asyncio.wait_for(gen.__anext__(), timeout)
+        if event.get("event") == "server":
+            continue
+        return json.loads(event["data"])
 
 
 async def _abandon(task, gen) -> None:
@@ -238,6 +248,28 @@ def test_a_database_without_change_streams_is_not_an_outage():
 # --------------------------------------------------------------------------
 # the streams
 # --------------------------------------------------------------------------
+
+
+def test_every_stream_opens_by_naming_the_deployment():
+    """The frontend cannot tell a redeploy from a cold start on its own.
+
+    Both look identical from the client - the SSE connection drops and comes
+    back - and on a free tier the second happens all day. So the build id is
+    stated outright on connect, and only ever changes when a deploy changes
+    it. Unset (the default) sends null, which the client reads as no claim
+    rather than as a change.
+    """
+
+    async def scenario():
+        _install(_StubSummary(), floor=0, poll=0.05)
+        response = await main.stream_summary(_FakeRequest(), None, None)
+        gen = response.body_iterator
+        first = await asyncio.wait_for(gen.__anext__(), 3.0)
+        assert first["event"] == "server"
+        assert "build" in json.loads(first["data"])
+        await gen.aclose()
+
+    _run(scenario())
 
 
 def test_dashboard_stream_refreshes_with_no_wake_up_at_all():

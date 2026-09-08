@@ -63,6 +63,18 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
             --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
         }
 
+        /* Each card sets its own --card-hue; the strength is shared, which is
+           why it is stated once here rather than twice in the template.
+
+           55%, matching /report/dashboard's cards - it was 40%, which read as
+           washed out beside them. This is as far as it goes: the labels and
+           numbers stay at 8.4:1 in light mode and 5.3:1 in dark (the amber
+           duration cards are the floor), and past 55% the dark theme drops
+           under the 4.5:1 minimum. */
+        .tinted-card {
+            background: color-mix(in srgb, var(--card-hue) 55%, var(--surface-card));
+        }
+
         /* The card labels, sized off a variable rather than a Tailwind step.
            1rem is text-base, the size these were tuned to for a desk monitor at
            150% zoom; the scale only ever grows it.
@@ -163,7 +175,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                      tallest. These are grid items and stretch already; without
                      it the card inside only grows to its own content, so one
                      label wrapping to a second line left the row ragged. -->
-                <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
+                <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + card.color + '-500)'">
                     <div class="flex justify-between mb-4">
                         <div>
                             <!-- stat-label, base 1rem: at 150% zoom with the
@@ -199,7 +211,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
         }
         @for (card of timeCards(); track card.label) {
             <div class="col-span-6 xl:col-span-3">
-                <div class="card mb-0 h-full" [style.background]="'color-mix(in srgb, var(--p-' + card.color + '-500) 40%, var(--surface-card))'">
+                <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + card.color + '-500)'">
                     <div class="flex justify-between mb-4">
                         <div>
                             <!-- Same scaled label as the counter row above:

@@ -10,6 +10,7 @@ import {
     FloodFilterState,
     FloodLookupsResponse
 } from '../flood-intake.types';
+import { serverBuildListener } from '@/app/core/sse-server-build';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -19,6 +20,9 @@ const API_BASE_URL = environment.apiBaseUrl;
 @Injectable({ providedIn: 'root' })
 export class FloodApiService {
     private http = inject(HttpClient);
+    // One line per stream, so a redeploy of the backend is noticed on
+    // whichever board happens to be open.
+    private readonly watchServerBuild = serverBuildListener();
 
     // Built in one place so the table, the SSE stream and the export all
     // describe the same set of rows. An export that quietly covered more than
@@ -50,6 +54,7 @@ export class FloodApiService {
         return new Observable<FloodCasesResponse>((subscriber) => {
             const query = this.buildParams(filters).toString();
             const source = new EventSource(`${API_BASE_URL}/flood-cases/stream?${query}`);
+            this.watchServerBuild(source);
 
             source.addEventListener('flood-cases', (event: MessageEvent<string>) => {
                 try {

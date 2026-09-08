@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { AutoCompleteModule } from 'primeng/autocomplete';
@@ -18,6 +18,7 @@ import { FloodDataService } from '../services/flood-data.service';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
 import { FloodDraftService } from '../services/flood-draft.service';
 import { FloodDuplicateWarning } from './flood-duplicate-warning';
+import { AppUpdateService } from '../../../core/app-update.service';
 
 interface FormModel {
     reported_date: Date | null;
@@ -675,7 +676,18 @@ export class FloodCaseFormDrawer {
     private duplicateTimer: ReturnType<typeof setTimeout> | null = null;
     private lastInitialised: string | null = null;
 
+    private readonly updates = inject(AppUpdateService);
+
     constructor() {
+        // The update banner asks before it reloads. Autosave puts the form in
+        // localStorage every few seconds and it is restored on the way back,
+        // so this is not "your work will be lost" - it is the seconds since
+        // the last autosave, on the one screen where those seconds are
+        // somebody dictating an address down a phone line.
+        inject(DestroyRef).onDestroy(
+            this.updates.addReloadBlocker(() => (this.dirty() ? 'กำลังกรอกเคสที่ยังไม่ได้บันทึก' : null))
+        );
+
         effect(() => {
             const id = this.caseId();
             if (id === this.lastInitialised) return;

@@ -41,9 +41,27 @@ import { DispatchDataService } from './services/dispatch-data.service';
         <app-dispatch-action-dial />
     `,
     styles: [`
+        /* Third of the three floating controls in this corner, sized and placed
+           to match the save button and menu dial in DispatchActionDial: 50px,
+           with a 20px icon. The right offset has to clear the save button that
+           sits in the corner beside it, and pairs with the menu dial's bottom
+           offset over there - keep the two in step.
+
+           !important because PrimeNG sets the position inline on the element. */
         :host ::ng-deep .p-scrolltop {
-            right: 4.2rem !important;
+            right: 5rem !important;
             bottom: 1rem !important;
+            width: 50px !important;
+            height: 50px !important;
+        }
+
+        /* The icon does not follow the button's size, so it needs saying too -
+           the same 20px the save button and menu dial use. */
+        :host ::ng-deep .p-scrolltop .p-scrolltop-icon {
+            font-size: 20px;
+            width: 20px;
+            height: 20px;
+            line-height: 20px;
         }
     `],
 })

@@ -4,6 +4,7 @@ import { Observable, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { AgentsSummary } from '../agents.types';
 import { feedHealthMessage } from '../format-utils';
+import { serverBuildListener } from '@/app/core/sse-server-build';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -12,6 +13,9 @@ const API_BASE_URL = environment.apiBaseUrl;
 @Injectable()
 export class AgentsDataService implements OnDestroy {
     private readonly http = inject(HttpClient);
+    // One line per stream, so a redeploy of the backend is noticed on
+    // whichever board happens to be open.
+    private readonly watchServerBuild = serverBuildListener();
     private readonly subscription: Subscription;
 
     private readonly _summary = signal<AgentsSummary | null>(null);
@@ -55,6 +59,7 @@ export class AgentsDataService implements OnDestroy {
     private stream(): Observable<AgentsSummary> {
         return new Observable<AgentsSummary>((subscriber) => {
             const source = new EventSource(`${API_BASE_URL}/agents/stream`);
+            this.watchServerBuild(source);
             source.addEventListener('agents', (event: MessageEvent<string>) => {
                 try {
                     subscriber.next(JSON.parse(event.data) as AgentsSummary);

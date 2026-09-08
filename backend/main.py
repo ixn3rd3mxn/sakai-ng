@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from libs import agents, aggregations, call_log, call_stats, events, feed_health, lookups, relay
 from libs import flood_cases, flood_events, flood_lookups
-from libs.configs import CORS_ORIGINS, db
+from libs.configs import APP_BUILD, CORS_ORIGINS, db
 from libs.models import (
     FloodCaseBulkStatusIn,
     FloodCaseCreateIn,
@@ -324,6 +324,32 @@ def _sse_data(payload: dict) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
+def _sse(event_generator) -> EventSourceResponse:
+    """Open every stream with a `server` frame naming this deployment.
+
+    The boards are left open for a whole shift, so the frontend has to be able
+    to notice that what it is talking to has been replaced under it. It cannot
+    learn that from its own `version.json`, which is served by Vercel and says
+    nothing about this process - and it must not learn it from a reconnect,
+    because on a free tier the process cold-starts constantly without anything
+    having been deployed.
+
+    So the build id is stated explicitly, and only ever changes when a deploy
+    changes it. `APP_BUILD` unset sends null, which the client treats as "no
+    claim" rather than as a change.
+
+    Costs one short frame per connection, and rides the connection the client
+    already has - nothing here polls.
+    """
+
+    async def with_hello():
+        yield {"event": "server", "data": _sse_data({"build": APP_BUILD})}
+        async for frame in event_generator:
+            yield frame
+
+    return EventSourceResponse(with_hello())
+
+
 def _rebuild_floor() -> int:
     """Read per tick, never captured once: the change stream can drop and
     re-establish under a long-lived connection, and a board that started
@@ -419,7 +445,7 @@ async def stream_summary(
         finally:
             events.unsubscribe(wake_queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.get("/api/call-stats/summary")
@@ -464,7 +490,7 @@ async def stream_call_stats(request: Request):
         finally:
             call_stats.unsubscribe(queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.get("/api/agents")
@@ -501,7 +527,7 @@ async def stream_agents(request: Request):
         finally:
             agents.unsubscribe(queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.get("/api/call-log")
@@ -538,7 +564,7 @@ async def stream_call_log(request: Request):
         finally:
             call_log.unsubscribe(queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.get("/api/incident-history")
@@ -599,7 +625,7 @@ async def stream_incident_history(request: Request, date: Optional[date_cls] = Q
         finally:
             events.unsubscribe(wake_queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.post("/api/incidents")
@@ -842,7 +868,7 @@ async def stream_flood_cases(
         finally:
             flood_events.unsubscribe(wake_queue)
 
-    return EventSourceResponse(event_generator())
+    return _sse(event_generator())
 
 
 @app.get("/api/flood-cases/export")

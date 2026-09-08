@@ -9,6 +9,10 @@ interface StatCard {
     label: string;
     count: number;
     diff: number;
+    /** A PrimeNG palette name - the card tints with `--p-{color}-500`. */
+    color: string;
+    /** How much of that colour is mixed into the surface, as a percentage. */
+    mix: number;
 }
 
 // Remembered per browser, so the machine driving the wall monitor is set once
@@ -36,6 +40,28 @@ const LARGE_SCREEN = '(min-width: 1024px)';
         '[style.--label-scale]': 'appliedScale()'
     },
     styles: `
+        /* Every card in the row below is tinted - a share of a status colour
+           mixed into the surface - and the default skeleton is a 6% white wash
+           tuned for a neutral background, which all but disappears on them.
+           Tinting with the text colour instead keeps it legible on all five
+           card colours and follows the theme, since --text-color flips in dark
+           mode. Custom properties inherit, so setting them on .card reaches the
+           skeletons without a descendant selector.
+
+           Ordered before .summary-card deliberately: that card carries both
+           classes, and equal specificity means the later rule wins - which is
+           what lets it keep its own contrast-based override below. */
+        .card {
+            --p-skeleton-background: color-mix(in srgb, var(--text-color) 12%, transparent);
+            --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
+        }
+
+        /* Each card supplies its own --card-hue and --card-mix; the fill is a
+           flat mix of that hue into the surface, in both themes. */
+        .tinted-card {
+            background: color-mix(in srgb, var(--card-hue) var(--card-mix), var(--surface-card));
+        }
+
         .summary-card {
             background: var(--primary-color);
             color: var(--primary-contrast-color);
@@ -170,10 +196,19 @@ const LARGE_SCREEN = '(min-width: 1024px)';
             </div>
         </div>
         <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-            <div class="card summary-card mb-0">
+            <!-- h-full so every card in the row is the height of the tallest.
+                 These are grid items and stretch already; without it the card
+                 inside only grows to its own content, so one label wrapping to a
+                 second line leaves the row ragged - which the tints below make
+                 obvious in a way six white cards never did. -->
+            <div class="card summary-card mb-0 h-full">
                 <div class="flex justify-between mb-4">
                     <div>
-                        <span class="block opacity-80 font-medium mb-4 stat-label">ผลรวมทั้งหมด</span>
+                        <!-- Full-strength contrast colour, not opacity-80: these
+                             are read from across the room, and the 7xl number
+                             below already carries the hierarchy the fade was
+                             doing. Matches the labels on the automate board. -->
+                        <span class="block font-medium mb-4 stat-label">ผลรวมทั้งหมด</span>
                         @if (loading()) {
                             <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                         } @else {
@@ -184,17 +219,26 @@ const LARGE_SCREEN = '(min-width: 1024px)';
                 @if (loading()) {
                     <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                 } @else {
-                    <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
-                    <span class="opacity-80"> เทียบกับเมื่อวาน</span>
+                    <div class="text-sm">
+                        <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
+                        <span> เทียบกับเมื่อวาน</span>
+                    </div>
                 }
             </div>
         </div>
         @for (card of cards(); track card.label) {
             <div class="col-span-6 lg:col-span-4 xl:col-span-2">
-                <div class="card mb-0">
+                <!-- Only the hue and its strength are per-card; the fill itself
+                     lives in .tinted-card. -->
+                <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + card.color + '-500)'" [style.--card-mix]="card.mix + '%'">
                     <div class="flex justify-between mb-4">
                         <div>
-                            <span class="block text-muted-color font-medium mb-4 stat-label">{{ card.label }}</span>
+                            <!-- Full text colour, not text-muted-color: muted is
+                                 a 500-weight grey tuned for a plain surface, and
+                                 on a tinted card it goes soft exactly where this
+                                 board is read from furthest away. The automate
+                                 board's labels carry no muted class either. -->
+                            <span class="block font-medium mb-4 stat-label">{{ card.label }}</span>
                             @if (loading()) {
                                 <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                             } @else {
@@ -205,8 +249,12 @@ const LARGE_SCREEN = '(min-width: 1024px)';
                     @if (loading()) {
                         <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                     } @else {
-                        <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
-                        <span class="text-muted-color"> เทียบกับเมื่อวาน</span>
+                        <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
+                             line gets, and at base size it wrapped. -->
+                        <div class="text-sm">
+                            <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
+                            <span> เทียบกับเมื่อวาน</span>
+                        </div>
                     }
                 </div>
             </div>
@@ -309,22 +357,66 @@ export class IncidentTypeStatsWidget {
     totalCount = computed(() => this.stats()?.total.count ?? 0);
     totalDiff = computed(() => this.stats()?.total.diff ?? 0);
 
+    // Label, colour, and how strong a tint each card carries - the one place
+    // the five call types are bound to what is on screen. The label doubles as
+    // the lookup key into `byName`, which is how it worked before the colours
+    // arrived.
+    //
+    // Assigned by what a call costs the centre, not by giving five categories
+    // five hues:
+    //
+    //   สายหลุด (red)    - the one outcome that may mean nobody was helped.
+    //   ก่อกวน (amber)   - real time spent on a call that was never an emergency.
+    //   ปรึกษา (violet)  - genuinely other; violet carries no verdict, and the
+    //                      automate board uses it for โทรออก for the same reason.
+    //   แจ้งเหตุ +        - one hue at two strengths, because a repeat report is
+    //   แจ้งซ้ำเหตุเดิม    a report: the colour says "same family" rather than
+    //   (teal 40/20)      distinguishing them. Teal, not green, on purpose -
+    //                     these two are the centre's core demand, and green
+    //                     would call a busy shift a good one. The automate board
+    //                     keeps call volume neutral for exactly this reason.
+    //
+    // Teal also stays clear of the solid --primary-color on the total card,
+    // which defaults to blue (see LayoutService).
+    // 55% is as strong as these tints can go. Past it dark mode gives out:
+    // at 70% an amber card leaves its white text at 3.8:1 and teal at 4.3:1,
+    // both under the 4.5:1 minimum. At 55% the worst case on either theme is
+    // 5.3:1, against 13:1 at the 40% this started from - so this is the most
+    // colour the row can carry and still be read from across the room.
+    private static readonly CARDS: { label: string; color: string; mix: number }[] = [
+        { label: 'แจ้งเหตุ', color: 'teal', mix: 55 },
+        { label: 'แจ้งซ้ำเหตุเดิม', color: 'teal', mix: 25 },
+        { label: 'ปรึกษา', color: 'violet', mix: 55 },
+        { label: 'สายหลุด', color: 'red', mix: 55 },
+        { label: 'ก่อกวน', color: 'amber', mix: 55 }
+    ];
+
     cards = computed<StatCard[]>(() => {
         const map = this.byName();
-        const pick = (label: string) => map.get(label) ?? { count: 0, diff: 0 };
-        return [
-            { label: 'แจ้งเหตุ', ...pick('แจ้งเหตุ') },
-            { label: 'แจ้งซ้ำเหตุเดิม', ...pick('แจ้งซ้ำเหตุเดิม') },
-            { label: 'ปรึกษา', ...pick('ปรึกษา') },
-            { label: 'สายหลุด', ...pick('สายหลุด') },
-            { label: 'ก่อกวน', ...pick('ก่อกวน') }
-        ];
+        return IncidentTypeStatsWidget.CARDS.map(({ label, color, mix }) => ({
+            label,
+            color,
+            mix,
+            ...(map.get(label) ?? { count: 0, diff: 0 })
+        }));
     });
 
+    // No colour on this number, only weight - and that is a legibility fix, not
+    // a style choice.
+    //
+    // Red and green text stopped working the moment the cards were tinted,
+    // because a red card is exactly where a red number lands: text-red-500 came
+    // out at 2.26:1 on the teal card and 1.02:1 on the solid blue total, which
+    // is invisible. No shade of red rescues it either - red-800, the darkest
+    // that still reads as red, peaks at 3.90:1 against the red สายหลุด card,
+    // still under the 4.5:1 floor. Red on red has nowhere to go.
+    //
+    // So direction is carried by the sign that is already printed, and the
+    // number takes the card's own text colour: 8.4:1 at worst in light mode,
+    // 7.5:1 in dark. The categorical meaning lives in the card colour now,
+    // which is where this board puts it.
     diffClass(diff: number): string {
-        if (diff > 0) return 'text-green-500 font-medium';
-        if (diff < 0) return 'text-red-500 font-medium';
-        return 'text-gray-500 font-medium';
+        return diff === 0 ? 'font-medium' : 'font-black';
     }
 
     diffText(diff: number): string {

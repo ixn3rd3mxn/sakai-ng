@@ -55,3 +55,5 @@ Thumbs.db
 !versel.json
 
 /relay/relay.php 
+# Generated at build time by scripts/write-version.mjs
+/public/version.json
