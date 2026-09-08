@@ -101,7 +101,7 @@ const LARGE_SCREEN = '(min-width: 1024px)';
                      baseline: it answers "which shift" for the row it heads, and
                      is not a second heading. -->
                 <div class="flex flex-wrap items-baseline gap-x-2">
-                    <span class="font-semibold text-xl">สถิติการให้บริการต่อเวร</span>
+                    <span class="font-semibold text-xl">สถิติการให้บริการต่อเวร (Manual)</span>
                     @if (historical()) {
                         <!-- The same line, saying more: on a back-dated board the
                              day is not just context, it is the thing that is easy

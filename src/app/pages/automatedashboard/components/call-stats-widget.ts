@@ -90,7 +90,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
     template: `
         <div class="col-span-12">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-                <div class="font-semibold text-xl">สถิติการให้บริการต่อวัน</div>
+                <div class="font-semibold text-xl">สถิติการให้บริการต่อวัน (EMS Agent)</div>
                 <div class="flex items-center gap-3 text-sm text-surface-500 dark:text-surface-400">
                     @if (loading()) {
                         <p-progress-spinner [style]="{ width: '1rem', height: '1rem' }" strokeWidth="8" ariaLabel="กำลังโหลด" />
