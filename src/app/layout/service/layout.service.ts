@@ -24,6 +24,21 @@ function getStoredLayoutConfig(platformId: object): Partial<LayoutConfig> | null
     }
 }
 
+const MENU_STATE_STORAGE_KEY = 'layoutMenuState';
+
+function getStoredStaticMenuDesktopInactive(platformId: object): boolean {
+    if (!isPlatformBrowser(platformId)) {
+        return false;
+    }
+
+    try {
+        const raw = localStorage.getItem(MENU_STATE_STORAGE_KEY);
+        return raw ? JSON.parse(raw)?.staticMenuDesktopInactive === true : false;
+    } catch {
+        return false;
+    }
+}
+
 function getInitialLayoutConfig(platformId: object): LayoutConfig {
     const stored = getStoredLayoutConfig(platformId);
 
@@ -62,7 +77,7 @@ export class LayoutService {
     layoutConfig = signal<LayoutConfig>(getInitialLayoutConfig(this.platformId));
 
     layoutState = signal<LayoutState>({
-        staticMenuDesktopInactive: false,
+        staticMenuDesktopInactive: getStoredStaticMenuDesktopInactive(this.platformId),
         overlayMenuActive: false,
         configSidebarVisible: false,
         mobileMenuActive: false,
@@ -104,6 +119,14 @@ export class LayoutService {
 
             if (isPlatformBrowser(this.platformId)) {
                 localStorage.setItem(LAYOUT_CONFIG_STORAGE_KEY, JSON.stringify(config));
+            }
+        });
+
+        effect(() => {
+            const staticMenuDesktopInactive = this.layoutState().staticMenuDesktopInactive;
+
+            if (isPlatformBrowser(this.platformId)) {
+                localStorage.setItem(MENU_STATE_STORAGE_KEY, JSON.stringify({ staticMenuDesktopInactive }));
             }
         });
     }
