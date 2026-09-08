@@ -90,8 +90,21 @@ export class AppUpdateService {
         return boot !== null && latest !== null && boot !== latest;
     });
 
+    /** A newer build exists, whether or not the operator has snoozed it. */
+    readonly updatePending = computed(() => this.frontendChanged() || this.backendChanged());
+
     /** True once a newer build exists and the operator has not snoozed it. */
-    readonly updateAvailable = computed(() => !this.snoozed() && (this.frontendChanged() || this.backendChanged()));
+    readonly updateAvailable = computed(() => !this.snoozed() && this.updatePending());
+
+    /**
+     * An update is waiting but the bar is hidden.
+     *
+     * The topbar shows a marker on this, so snoozing quietens the notice
+     * without erasing it. Thirty minutes is a long time on a console that
+     * changes hands at shift end, and an update nobody can see is one nobody
+     * can act on.
+     */
+    readonly updateSnoozed = computed(() => this.snoozed() && this.updatePending());
 
     /** Which side moved - the banner wording differs, the action does not. */
     readonly scope = computed<'frontend' | 'backend' | null>(() => {
@@ -250,6 +263,13 @@ export class AppUpdateService {
         this.snoozed.set(true);
         if (this.snoozeTimer) clearTimeout(this.snoozeTimer);
         this.snoozeTimer = setTimeout(() => this.snoozed.set(false), SNOOZE_MS);
+    }
+
+    /** Bring the banner back, from the topbar marker. */
+    unsnooze(): void {
+        if (this.snoozeTimer) clearTimeout(this.snoozeTimer);
+        this.snoozeTimer = null;
+        this.snoozed.set(false);
     }
 
     /**

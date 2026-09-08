@@ -5,6 +5,7 @@ import { CommonModule } from '@angular/common';
 import { StyleClassModule } from 'primeng/styleclass';
 import { AppConfigurator } from './app.configurator';
 import { LayoutService } from '@/app/layout/service/layout.service';
+import { AppUpdateService } from '@/app/core/app-update.service';
 
 @Component({
     selector: 'app-topbar',
@@ -24,6 +25,16 @@ import { LayoutService } from '@/app/layout/service/layout.service';
 
         <div class="layout-topbar-actions">
             <div class="layout-config-menu">
+                <!-- Only while an update is waiting behind a snooze. Thirty
+                     minutes is a long time on a console that changes hands at
+                     shift end, and an update nobody can see is one nobody can
+                     act on - so "ไว้ก่อน" quietens the bar without erasing it. -->
+                @if (updates.updateSnoozed()) {
+                    <button type="button" class="layout-topbar-action relative" title="มีเวอร์ชันใหม่ของระบบ" aria-label="มีเวอร์ชันใหม่ของระบบ" (click)="updates.unsnooze()">
+                        <i class="pi pi-sparkles"></i>
+                        <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary"></span>
+                    </button>
+                }
                 <button type="button" class="layout-topbar-action" (click)="toggleDarkMode()">
                     <i [ngClass]="{ 'pi ': true, 'pi-moon': layoutService.isDarkTheme(), 'pi-sun': !layoutService.isDarkTheme() }"></i>
                 </button>
@@ -73,6 +84,7 @@ export class AppTopbar {
     items!: MenuItem[];
 
     layoutService = inject(LayoutService);
+    readonly updates = inject(AppUpdateService);
 
     isFullscreen = signal(false);
 
