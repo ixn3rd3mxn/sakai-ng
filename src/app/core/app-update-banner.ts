@@ -46,7 +46,7 @@ import { AppUpdateService } from './app-update.service';
                             </div>
                         }
                     </div>
-                    <div class="flex items-center gap-1 shrink-0">
+                    <div class="flex items-center gap-1 shrink-0 self-center">
                         <button pButton type="button" label="ไว้ก่อน" class="p-button-sm p-button-text" (click)="dismiss()"></button>
                         <button pButton type="button" [label]="blockedReason() ? 'รีเฟรชอยู่ดี' : 'รีเฟรช'" [severity]="blockedReason() ? 'warn' : 'primary'" class="p-button-sm" (click)="onReload()"></button>
                     </div>
