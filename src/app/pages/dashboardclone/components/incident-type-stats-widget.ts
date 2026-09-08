@@ -16,7 +16,7 @@ interface StatCard {
 }
 
 // Remembered per browser, so the machine driving the wall monitor is set once
-// instead of on every page load. Its own key, not the automate board's: the two
+// instead of on every page load. its own key, not the automate board's: the two
 // dashboards are separate screens, and a size set on one has no business
 // following the viewer to the other.
 const SCALE_KEY = 'dispatch-dashboard.label-scale';
