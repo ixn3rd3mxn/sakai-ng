@@ -2,7 +2,7 @@ import { Component, DestroyRef, computed, inject, input, output, signal } from '
 import { ButtonModule } from 'primeng/button';
 import { SkeletonModule } from 'primeng/skeleton';
 import { TooltipModule } from 'primeng/tooltip';
-import { IncidentTypeStats } from '../dispatch.types';
+import { IncidentBreakdowns, IncidentTypeStats } from '../dispatch.types';
 import { formatThaiLongDate, formatThaiShortDate } from '../services/date-utils';
 
 interface StatCard {
@@ -26,6 +26,28 @@ const SCALE_KEY = 'dispatch-dashboard.label-scale';
 // fraction of the width to live in and wraps into a mess. Scaling is a
 // wall-display affordance; a phone is not one, and neither is a narrow window.
 const LARGE_SCREEN = '(min-width: 1024px)';
+
+// แจ้งเหตุ's fill, defined once. The breakdown row borrows it verbatim so those
+// five cards read as belonging to that card rather than as a group of their
+// own - which is the only thing marking the relationship now that the row
+// carries no heading. Stated here rather than repeated in the template so the
+// two cannot drift apart: recolour แจ้งเหตุ and the breakdown follows.
+// emerald, matching รับสาย on the manual board. Both boards mix at 55%, so the
+// two used to differ only in hue - teal here against emerald there - which read
+// as an accident rather than a distinction.
+const FEATURE_TINT = { color: 'emerald', mix: 55 };
+
+// Font Awesome class per breakdown row, keyed on the lowercased name the
+// backend sends. A name with no entry - a reporting channel added to the lookup
+// table later - renders without an icon rather than breaking the card, which is
+// why this is a lookup with a fallback and not a required field.
+const BREAKDOWN_ICONS: Record<string, string> = {
+    '1669': 'fa-solid fa-headset',
+    '2nd': 'fa-solid fa-phone',
+    วิทยุ: 'fa-solid fa-walkie-talkie',
+    trauma: 'fa-solid fa-user-injured',
+    'non-trauma': 'fa-solid fa-heart-crack'
+};
 
 @Component({
     standalone: true,
@@ -54,6 +76,20 @@ const LARGE_SCREEN = '(min-width: 1024px)';
         .card {
             --p-skeleton-background: color-mix(in srgb, var(--text-color) 12%, transparent);
             --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
+
+            /* Kills .card's margin-bottom: 2rem.
+
+               The Tailwind mb-0 in the template never applied: .card is
+               unlayered while utilities live in @layer utilities, and unlayered
+               author styles outrank layered ones no matter the source order. So
+               every card except a grid's :last-child - which .card:last-child
+               exempts - carried 32px of bottom margin, which is the gap under
+               each row here. Component styles are unlayered too and Angular's
+               scoping attribute adds specificity, so this wins cleanly without
+               !important. Spacing comes from the grid gap instead.
+
+               Same fix as agent-status-widget on the automate board. */
+            margin-bottom: 0;
         }
 
         /* Each card supplies its own --card-hue and --card-mix; the fill is a
@@ -85,8 +121,78 @@ const LARGE_SCREEN = '(min-width: 1024px)';
            label rows cramped as the text grows - Tailwind's text-base carries a
            fixed 1.5rem line-height that does not follow a calc(). */
         .stat-label {
-            font-size: calc(1rem * var(--label-scale, 1));
+            font-size: calc(var(--label-base, 1rem) * var(--label-scale, 1));
             line-height: 1.4;
+        }
+
+        /* Row 2 one step down: 0.875rem is text-sm against the row above's
+           text-base. Only the base moves - the +/- control still multiplies
+           both rows by the same --label-scale, so the two stay a step apart at
+           every setting instead of the gap widening as the wall size goes up.
+
+           Applied alongside .stat-label rather than replacing it, so the shared
+           line-height stays in one place. */
+        .stat-label-sm {
+            --label-base: 0.875rem;
+        }
+
+        /* The backdrop glyph on the breakdown cards.
+
+           isolation: isolate is the load-bearing part. It makes the card a
+           stacking context, which is what lets the icon's z-index: -1 land
+           *behind the card's text but in front of the card's own background*.
+           Without it the negative index would drop the icon behind that
+           background and it would simply not be visible. */
+        .icon-card {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+
+            /* Makes the card its own sizing reference, so the glyph below can be
+               measured against this card's width rather than the root font. */
+            container-type: inline-size;
+        }
+
+        .stat-icon {
+            position: absolute;
+
+            /* -1, not 0. Painting order inside this card's stacking context runs
+               card background, then negative z-index children, then the static
+               text, then positioned children at 0/auto - so at 0 the glyph lands
+               *on top of* the number. -1 puts it behind the text and in front of
+               the fill, which is the whole reason .icon-card isolates. */
+            z-index: -1;
+            right: -0.15rem;
+            top: 50%;
+            transform: translateY(-50%);
+
+            /* Sized against the card, not the root font. A fixed 5rem is 80px
+               whatever happens, so at 150% display scaling - or on a phone - the
+               card narrows while the glyph does not, and it starts crowding the
+               digits. 34cqw is 34% of this card's own width, so it tracks the
+               card at every zoom level and breakpoint; the clamp stops it
+               vanishing on a very narrow card or dwarfing a very wide one. */
+            font-size: clamp(2rem, 34cqw, 5rem);
+
+            /* Inherits the card's text colour, so it follows the theme rather
+               than needing a light and a dark value, and sits low enough to stay
+               clear of the contrast floor where text and glyph overlap. */
+            opacity: 0.1;
+            pointer-events: none;
+        }
+
+        /* Gone below Tailwind's sm. There the breakdown grids drop to two and
+           three across on a phone, so each card is a couple of inches wide and
+           holding a label, a number and a backdrop glyph - the glyph is the only
+           one of the three that is decoration, so it is the one that goes.
+
+           639.98px rather than 640px: the sm utilities take effect at 640px
+           exactly, and a whole-pixel max-width would leave both rules matching
+           on a 640px-wide viewport. */
+        @media (max-width: 639.98px) {
+            .stat-icon {
+                display: none;
+            }
         }
     `,
     template: `
@@ -258,7 +364,66 @@ const LARGE_SCREEN = '(min-width: 1024px)';
                     }
                 </div>
             </div>
-        }`
+        }
+
+        <!-- The แจ้งเหตุ count cut two ways: by how the call reached the centre,
+             and by type of illness. Each group sums to the แจ้งเหตุ card above -
+             the backend records a channel and a case for that call type only,
+             and requires both when it does.
+
+             Wearing แจ้งเหตุ's own fill, and set a size down from it, so the two
+             read as one group without a heading saying so.
+
+             The two columns below are siblings in the page's twelve-column
+             grid, so they stretch to a common height on their own - the right
+             column needs no explicit row-span to line up with the left.
+
+             The panels themselves arrive by projection rather than being
+             rendered here. That keeps this widget the owner of the section's
+             layout, which is a fair criticism of it - but it is what lets the
+             breakdown cards sit inside the left column *above* a panel the page
+             supplies, and it keeps them inside this component's DOM, where
+             --label-scale still reaches them from the host. Rendered as a
+             separate component elsewhere in the tree they would stop scaling
+             with the +/- control. -->
+
+        <div class="col-span-12 xl:col-span-6 flex flex-col gap-1">
+            <div class="grid grid-cols-3 gap-1">
+                @for (row of channelRows(); track row.name) {
+                    <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                        @if (icon(row.name); as glyph) {
+                            <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
+                        }
+                        <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
+                        @if (loading()) {
+                            <p-skeleton width="min(5rem, 100%)" height="2.5rem" />
+                        } @else {
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">{{ row.count }}</div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="grid grid-cols-2 gap-1">
+                @for (row of caseRows(); track row.name) {
+                    <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                        @if (icon(row.name); as glyph) {
+                            <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
+                        }
+                        <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
+                        @if (loading()) {
+                            <p-skeleton width="min(5rem, 100%)" height="2.5rem" />
+                        } @else {
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">{{ row.count }}</div>
+                        }
+                    </div>
+                }
+            </div>
+            <ng-content select="[leftPanel]" />
+        </div>
+
+        <div class="col-span-12 xl:col-span-6">
+            <ng-content select="[rightPanel]" />
+        </div>`
 })
 export class IncidentTypeStatsWidget {
     stats = input<IncidentTypeStats | null>(null);
@@ -266,6 +431,27 @@ export class IncidentTypeStatsWidget {
     // Without this the cards render `?? 0`, which is indistinguishable
     // from a shift that genuinely had no incidents.
     loading = input<boolean>(false);
+
+    // The แจ้งเหตุ count cut by channel and by case type. Null until the first
+    // payload lands, same as `stats`.
+    breakdowns = input<IncidentBreakdowns | null>(null);
+
+    /** แจ้งเหตุ's own fill, which the whole breakdown row wears. */
+    protected readonly featureTint = FEATURE_TINT;
+
+    /** Font Awesome classes for a breakdown card's backdrop glyph, or '' when
+     *  the name has no entry - which renders no icon rather than an empty box.
+     *  Matched case-insensitively: the dialog's options are lower case while
+     *  the lookup table returns "Trauma" and "Non-Trauma". */
+    protected icon(name: string): string {
+        return BREAKDOWN_ICONS[name.trim().toLowerCase()] ?? '';
+    }
+
+    // Straight through from the payload - the backend already emits every entry
+    // in the lookup, at zero when nothing was recorded, so the row keeps its
+    // shape through a shift instead of reshuffling as counts arrive.
+    protected readonly channelRows = computed(() => this.breakdowns()?.reporting_channel ?? []);
+    protected readonly caseRows = computed(() => this.breakdowns()?.case_type ?? []);
 
     // Which shift and day these counts cover, shown beside the heading.
     shift = input<string | null>(null);
@@ -371,20 +557,20 @@ export class IncidentTypeStatsWidget {
     //                      automate board uses it for โทรออก for the same reason.
     //   แจ้งเหตุ +        - one hue at two strengths, because a repeat report is
     //   แจ้งซ้ำเหตุเดิม    a report: the colour says "same family" rather than
-    //   (teal 40/20)      distinguishing them. Teal, not green, on purpose -
-    //                     these two are the centre's core demand, and green
-    //                     would call a busy shift a good one. The automate board
-    //                     keeps call volume neutral for exactly this reason.
+    //   (emerald 55/25)   distinguishing them.
     //
-    // Teal also stays clear of the solid --primary-color on the total card,
-    // which defaults to blue (see LayoutService).
+    // This pair was teal, chosen so a green would not read as "a busy shift is
+    // a good shift". It is emerald now to match รับสาย on the manual board,
+    // which is the same green and also a neutral-polarity count - so that board
+    // had already settled the question the other way, and two boards agreeing
+    // is worth more than the distinction was.
     // 55% is as strong as these tints can go. Past it dark mode gives out:
     // at 70% an amber card leaves its white text at 3.8:1 and teal at 4.3:1,
     // both under the 4.5:1 minimum. At 55% the worst case on either theme is
     // 5.3:1, against 13:1 at the 40% this started from - so this is the most
     // colour the row can carry and still be read from across the room.
     private static readonly CARDS: { label: string; color: string; mix: number }[] = [
-        { label: 'แจ้งเหตุ', color: 'teal', mix: 55 },
+        { label: 'แจ้งเหตุ', color: FEATURE_TINT.color, mix: FEATURE_TINT.mix },
         { label: 'แจ้งซ้ำเหตุเดิม', color: 'teal', mix: 25 },
         { label: 'ปรึกษา', color: 'violet', mix: 55 },
         { label: 'สายหลุด', color: 'red', mix: 55 },

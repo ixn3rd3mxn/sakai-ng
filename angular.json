@@ -30,7 +30,8 @@
                         ],
                         "styles": [
                             "src/assets/styles.scss",
-                            "src/assets/tailwind.css"
+                            "src/assets/tailwind.css",
+                            "node_modules/@fortawesome/fontawesome-free/css/all.min.css"
                         ],
                         "scripts": []
                     },
@@ -39,7 +40,7 @@
                             "budgets": [
                                 {
                                     "type": "initial",
-                                    "maximumWarning": "1mb",
+                                    "maximumWarning": "1.2mb",
                                     "maximumError": "5mb"
                                 },
                                 {

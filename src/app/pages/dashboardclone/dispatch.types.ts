@@ -52,6 +52,20 @@ export interface IncidentTypeStats {
     items: IncidentTypeItem[];
 }
 
+export interface BreakdownItem {
+    id: number;
+    name: string;
+    count: number;
+}
+
+/** The แจ้งเหตุ count cut two ways. Each list sums to the แจ้งเหตุ entry in
+ *  IncidentTypeStats.items - the backend only records a case or channel for
+ *  that call type, and requires both when it does. */
+export interface IncidentBreakdowns {
+    case_type: BreakdownItem[];
+    reporting_channel: BreakdownItem[];
+}
+
 export interface DailySummary {
     morning: number;
     afternoon: number;
@@ -82,6 +96,7 @@ export interface RecentIncidentItem {
 export interface DashboardSummary {
     context: OperationalContext;
     incident_type_stats: IncidentTypeStats;
+    incident_breakdowns: IncidentBreakdowns;
     daily_summary: DailySummary;
     severity_stats: SeverityItem[];
     frequent_cbd: CbdItem[];

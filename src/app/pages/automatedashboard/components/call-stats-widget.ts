@@ -19,6 +19,9 @@ interface StatCard {
     /** null when there is no comparison to show - see CallStatsSummary.diff. */
     diff: number | null;
     polarity: Polarity;
+    /** Painted with the solid theme primary rather than a tint - the "total"
+     *  card, matching ผลรวมทั้งหมด on /report/dashboard. */
+    solid?: boolean;
 }
 
 // Remembered per browser, so the machine driving the wall monitor is set once
@@ -75,6 +78,74 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
             background: color-mix(in srgb, var(--card-hue) 55%, var(--surface-card));
         }
 
+        /* The total card, solid rather than tinted - the same treatment
+           ผลรวมทั้งหมด gets on /report/dashboard, so both boards say "the total
+           is the solid one" as a rule rather than by coincidence.
+
+           --primary-color, not --p-blue-500. The theme primary is configurable
+           (LayoutService defaults it to blue), so hardcoding blue would hold
+           only until somebody changed it, and the two boards would then drift
+           apart again - which is the whole thing this is fixing.
+
+           Ordered after .card so its skeleton overrides win: the shared ones
+           above tint with --text-color, which is near-invisible on a saturated
+           fill, so this card tints with its own contrast colour instead. */
+        .summary-card {
+            background: var(--primary-color);
+            color: var(--primary-contrast-color);
+
+            --p-skeleton-background: color-mix(in srgb, var(--primary-contrast-color) 22%, transparent);
+            --p-skeleton-animation-background: color-mix(in srgb, var(--primary-contrast-color) 40%, transparent);
+        }
+
+        /* Everything inside takes the contrast colour too. The value carries
+           text-surface-900 dark:text-surface-0, which is tuned for a pale
+           surface and unreadable on a saturated one. Component styles are
+           unlayered and beat Tailwind's @layer utilities, so this needs no
+           !important.
+
+           Wholesale is safe *for this card*: สายเข้าทั้งหมด is neutral-polarity,
+           so diffClass gives it weight only and there is no green or red here
+           to override. Make a solid card down-good and this would swallow its
+           polarity colour - it would need a .diff-better/.diff-worse exemption
+           at that point. */
+        .summary-card * {
+            color: var(--primary-contrast-color);
+        }
+
+        /* Polarity colour on the comparison number: green when the change is
+           an improvement, red when it is not, and nothing at all when a rise is
+           neither good nor bad - the four neutral metrics keep the plain
+           weighted number rather than a grey one.
+
+           These are deep 900s in light mode and pale 100s in dark, not the 500s
+           this started with. Colour only ever lands on the down-good cards -
+           the two red counters and the two amber durations - so the text is
+           always fighting a mid-tone tint of a similar hue. At 500 that measured
+           1.07:1 for green and 1.77:1 for red, which is invisible; these sit
+           between 4.28:1 and 4.81:1.
+
+           That is a shade under the 4.5:1 minimum in two of the four
+           combinations (green-900 on the amber card, 4.28; red-100 on it in
+           dark, 4.32). Going further - 950 or 50 - does clear it, but at those
+           extremes the colour stops reading as green or red at all, which
+           defeats the point. An opaque chip is the only way to have both. */
+        .diff-better {
+            color: var(--p-green-900);
+        }
+
+        .diff-worse {
+            color: var(--p-red-900);
+        }
+
+        :host-context(.app-dark) .diff-better {
+            color: var(--p-green-100);
+        }
+
+        :host-context(.app-dark) .diff-worse {
+            color: var(--p-red-100);
+        }
+
         /* The card labels, sized off a variable rather than a Tailwind step.
            1rem is text-base, the size these were tuned to for a desk monitor at
            150% zoom; the scale only ever grows it.
@@ -85,6 +156,46 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
         .stat-label {
             font-size: calc(1rem * var(--label-scale, 1));
             line-height: 1.4;
+        }
+
+        /* A step down below Tailwind's sm. On a phone the counter cards are
+           half-width and the duration cards the same, so the longest of these -
+           "ไม่ได้รับสาย คิวเต็ม" - has a couple of inches to sit in and wraps at
+           1rem.
+
+           A flat value rather than a scaled one, and nothing is lost by that:
+           appliedScale already clamps to 1 below lg, so --label-scale is 1
+           everywhere this rule applies.
+
+           639.98px rather than 640px so this and the sm utilities, which take
+           effect at 640px exactly, cannot both match on a 640px viewport. */
+        @media (max-width: 639.98px) {
+            .stat-label {
+                font-size: 0.9375rem;
+            }
+
+            /* The duration cards go a step smaller again. Their labels are the
+               longest on the board - "เวลาที่ตอบรับนานที่สุด" and
+               "ค่าเฉลี่ยเวลาคุยสาย" - and on a phone they share the same
+               half-width card as the counters, so what fits the six does not
+               fit these four. */
+            .stat-label-time {
+                font-size: 0.8125rem;
+            }
+
+            /* And their comparison line smaller still. It is the longest string
+               on any card - "+00:00:04 เทียบกับเมื่อวาน", a duration rather than
+               the counters' two or three digits - so it is the first thing to
+               wrap on a phone.
+
+               This overrides the text-xs already on the element. Component
+               styles are unlayered while Tailwind utilities sit in
+               @layer utilities, and unlayered author styles win over layered
+               ones regardless of order - the same rule that makes .card's
+               margin reset work. */
+            .diff-line-time {
+                font-size: 0.625rem;
+            }
         }
     `,
     template: `
@@ -175,7 +286,12 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                      tallest. These are grid items and stretch already; without
                      it the card inside only grows to its own content, so one
                      label wrapping to a second line left the row ragged. -->
-                <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + card.color + '-500)'">
+                <div
+                    class="card mb-0 h-full"
+                    [class.summary-card]="card.solid"
+                    [class.tinted-card]="!card.solid"
+                    [style.--card-hue]="'var(--p-' + card.color + '-500)'"
+                >
                     <div class="flex justify-between mb-4">
                         <div>
                             <!-- stat-label, base 1rem: at 150% zoom with the
@@ -218,14 +334,14 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                                  these four are the longest on the board and sit
                                  in quarter-width cards, so text-xl wrapped at
                                  150% browser zoom. -->
-                            <span class="block font-medium mb-4 stat-label">{{ card.label }}</span>
+                            <span class="block font-medium mb-4 stat-label stat-label-time">{{ card.label }}</span>
                             <!-- Smaller below sm: these cards are half-width on a
                                  phone and HH:MM:SS is eight characters, so 5xl
                                  overflows where the counters' 2-3 digits do not. -->
                             @if (loading()) {
                                 <p-skeleton width="min(9rem, 100%)" height="3rem" />
                             } @else {
-                                <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl sm:text-5xl">{{ card.value }}</div>
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl sm:text-5xl">{{ card.value }}</div>
                             }
                         </div>
                     </div>
@@ -235,7 +351,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                         <!-- Same xs/sm split as the counter row. This line is
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
                              is the one that wrapped first on mobile. -->
-                        <div class="text-xs sm:text-sm">
+                        <div class="text-xs sm:text-sm diff-line-time">
                             <span [class]="diffClass(card.diff, card.polarity)">{{ durationDiffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>
@@ -319,11 +435,11 @@ export class CallStatsWidget {
     // upstream field names are bound to what is on screen. Keyed on
     // CallStatsDiff rather than CallStatsSummary so a card can only ever name
     // one of the six counters, never `day` or `stale`.
-    private static readonly CARDS: { label: string; color: string; field: keyof CallStatsDiff; polarity: Polarity }[] = [
+    private static readonly CARDS: { label: string; color: string; field: keyof CallStatsDiff; polarity: Polarity; solid?: boolean }[] = [
         // incoming and outgoing are neutral on purpose: call volume is demand,
         // not performance. Painting a busy day red would pass judgement on
         // something the centre does not control.
-        { label: 'สายเข้าทั้งหมด', color: 'blue', field: 'incoming', polarity: 'neutral' },
+        { label: 'สายเข้าทั้งหมด', color: 'blue', field: 'incoming', polarity: 'neutral', solid: true },
         { label: 'รับสาย', color: 'emerald', field: 'answer', polarity: 'neutral' },
         { label: 'รับสาย SLA', color: 'emerald', field: 'sla', polarity: 'neutral' },
         { label: 'ไม่ได้รับสาย', color: 'red', field: 'abandon', polarity: 'down-good' },
@@ -345,10 +461,11 @@ export class CallStatsWidget {
         // dropped whenever the counters themselves are a dash.
         const diff = hasNumbers ? summary!.diff : null;
 
-        return CallStatsWidget.CARDS.map(({ label, color, field, polarity }) => ({
+        return CallStatsWidget.CARDS.map(({ label, color, field, polarity, solid }) => ({
             label,
             color,
             polarity,
+            solid,
             value: hasNumbers ? (summary![field] as number).toLocaleString('en-US') : '—',
             diff: diff ? diff[field] : null
         }));
@@ -425,21 +542,18 @@ export class CallStatsWidget {
         return summary.fetched_at?.slice(11, 16) ?? '';
     }
 
-    // Green means better, red means worse, grey means neither - the one rule
-    // on this board, and the convention every mainstream analytics tool uses.
+    // Polarity, carried by colour: green when a change is an improvement, red
+    // when it is not. A metric where a rise is neither - call volume is demand,
+    // not performance - gets no colour, just weight, rather than a grey that
+    // would read as a third verdict.
     //
-    // It replaces colouring by arithmetic sign, which duplicated the +/- that
-    // is already printed and painted "12 more missed calls" green. The sign
-    // still carries direction, so "-5" in green reads unambiguously as five
-    // fewer and that being an improvement.
-    //
-    // Note /report/dashboard's incident-type-stats-widget still colours by
-    // direction. Aligning it is a follow-up; its counts are mostly neutral, so
-    // most of them would simply turn grey.
+    // The shades live in .diff-better / .diff-worse rather than as Tailwind
+    // classes here, because they have to flip between light and dark mode; see
+    // the styles block for the contrast measurements behind the choice.
     diffClass(diff: number, polarity: Polarity): string {
-        if (diff === 0 || polarity === 'neutral') return 'text-gray-500 font-medium';
+        if (diff === 0 || polarity === 'neutral') return 'font-medium';
         const better = polarity === 'up-good' ? diff > 0 : diff < 0;
-        return better ? 'text-green-500 font-black' : 'text-red-500 font-black';
+        return better ? 'diff-better font-black' : 'diff-worse font-black';
     }
 
     diffText(diff: number): string {

@@ -69,6 +69,20 @@ def _shift_facet(ctx: OperationalContext, cbd_limit: int = 10, recent_limit: int
                     {"$sort": {"count": -1, "_id": 1}},
                     {"$limit": cbd_limit},
                 ],
+                # Both of these are แจ้งเหตุ-only without having to say so: the
+                # create endpoint leaves case_id/channel_id null for every other
+                # call type, and rejects a แจ้งเหตุ that cannot resolve all four
+                # of its fields. So "$ne": None selects exactly the แจ้งเหตุ
+                # rows, and each of these two groupings partitions that same
+                # population - see _incident_breakdowns.
+                "case_type": [
+                    {"$match": {**cur_match, "case_id": {"$ne": None}}},
+                    {"$group": {"_id": "$case_id", "count": {"$sum": 1}}},
+                ],
+                "reporting_channel": [
+                    {"$match": {**cur_match, "channel_id": {"$ne": None}}},
+                    {"$group": {"_id": "$channel_id", "count": {"$sum": 1}}},
+                ],
                 "recent": [{"$match": cur_match}, {"$sort": {"timestamp": -1}}, {"$limit": recent_limit}],
             }
         },
@@ -98,6 +112,28 @@ def _incident_type_stats(facet: dict) -> dict:
     return {
         "total": {"count": total, "diff": total - prev_total},
         "items": items,
+    }
+
+
+def _incident_breakdowns(facet: dict) -> dict:
+    """The แจ้งเหตุ count cut two ways: by type of illness, and by how the call
+    reached the centre.
+
+    Each list sums to the แจ้งเหตุ counter in incident_type_stats, and that is
+    guaranteed by the write path rather than by convention (see the facet
+    branches above). Every entry in the lookup is emitted even at zero, so the
+    row does not reshuffle as counts come and go through a shift.
+    """
+
+    def rows(counts: dict[int, int], names: dict[int, str]) -> list[dict]:
+        return [
+            {"id": item_id, "name": name, "count": counts.get(item_id, 0)}
+            for item_id, name in sorted(names.items())
+        ]
+
+    return {
+        "case_type": rows(_facet_grouped(facet.get("case_type", [])), lookups.case_types()),
+        "reporting_channel": rows(_facet_grouped(facet.get("reporting_channel", [])), lookups.reporting_channels()),
     }
 
 
@@ -165,6 +201,7 @@ def build_summary(ctx: OperationalContext) -> dict:
     return {
         "context": ctx.to_dict(),
         "incident_type_stats": _incident_type_stats(facet),
+        "incident_breakdowns": _incident_breakdowns(facet),
         "daily_summary": _daily_summary(ctx),
         "severity_stats": _severity_stats(facet),
         "frequent_cbd": _frequent_cbd(facet),

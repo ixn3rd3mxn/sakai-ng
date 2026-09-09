@@ -21,21 +21,27 @@ import { DispatchDataService } from './services/dispatch-data.service';
                  the same, it just sits next to the numbers it qualifies. -->
             <app-incident-type-stats
                 [stats]="summary()?.incident_type_stats ?? null"
+                [breakdowns]="summary()?.incident_breakdowns ?? null"
                 [loading]="dataService.loading()"
                 [shift]="selectedTimePeriod().name"
                 [selectedDate]="dataService.selectedDate()"
                 [historical]="!dataService.isCurrent()"
                 (resetToCurrent)="dataService.selectCurrent()"
                 class="contents"
-            />
-            <div class="col-span-12 xl:col-span-6">
-                <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
-                <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
-            </div>
-            <div class="col-span-12 xl:col-span-6">
-                <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
-                <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
-            </div>
+            >
+                <!-- Projected into the widget's two columns rather than placed
+                     as grid items here, because the left column has to hold the
+                     แจ้งเหตุ breakdown cards *above* these panels - and those
+                     cards live in the widget, which owns their data. -->
+                <div leftPanel>
+                    <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
+                    <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
+                </div>
+                <div rightPanel>
+                    <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
+                    <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
+                </div>
+            </app-incident-type-stats>
         </div>
         <p-scrolltop />
         <app-dispatch-action-dial />
