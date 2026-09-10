@@ -34,12 +34,12 @@ import { DispatchDataService } from './services/dispatch-data.service';
                      แจ้งเหตุ breakdown cards *above* these panels - and those
                      cards live in the widget, which owns their data. -->
                 <div leftPanel>
-                    <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
-                    <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
-                </div>
-                <div rightPanel>
                     <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
                     <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
+                </div>
+                <div rightPanel>
+                    <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
+                    <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
                 </div>
             </app-incident-type-stats>
         </div>

@@ -167,14 +167,22 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
                      while connecting, instead of the whole page jumping down
                      when the roster lands. -->
                 @for (placeholder of PLACEHOLDERS; track placeholder) {
+                    <!-- Sized to the real card to the pixel, or the row shifts
+                         when the roster lands and the placeholder has only
+                         moved the jump rather than removed it. A real card
+                         measures 120px: 32 of .card padding, a 20px status row
+                         (text-sm's line box, not its 14px font size - the 10px
+                         dot beside it is shorter and does not set the height),
+                         12 of mb-3, a 32px text-2xl name, mt-1, and another
+                         20px line for the role. -->
                     <div class="card mb-0 h-full">
                         <div class="flex items-center gap-2 mb-3">
                             <p-skeleton shape="circle" size="0.625rem" />
-                            <p-skeleton width="5rem" height="0.875rem" />
+                            <p-skeleton width="5rem" height="1.25rem" />
                         </div>
                         <p-skeleton width="min(8rem, 100%)" height="2rem" />
-                        <div class="mt-2">
-                            <p-skeleton width="6rem" height="0.875rem" />
+                        <div class="mt-1">
+                            <p-skeleton width="6rem" height="1.25rem" />
                         </div>
                     </div>
                 }

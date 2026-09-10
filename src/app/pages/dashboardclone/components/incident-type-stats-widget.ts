@@ -162,7 +162,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                *on top of* the number. -1 puts it behind the text and in front of
                the fill, which is the whole reason .icon-card isolates. */
             z-index: -1;
-            right: -0.15rem;
+            right: 0.5rem;
             top: 50%;
             transform: translateY(-50%);
 
@@ -177,7 +177,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
             /* Inherits the card's text colour, so it follows the theme rather
                than needing a light and a dark value, and sits low enough to stay
                clear of the contrast floor where text and glyph overlap. */
-            opacity: 0.1;
+            opacity: 0.3;
             pointer-events: none;
         }
 
@@ -387,41 +387,89 @@ const BREAKDOWN_ICONS: Record<string, string> = {
              separate component elsewhere in the tree they would stop scaling
              with the +/- control. -->
 
-        <div class="col-span-12 xl:col-span-6 flex flex-col gap-1">
+        <!-- min-w-0 is load-bearing, not tidying. A grid item defaults to
+             min-width:auto, so it cannot shrink below its content's min-content
+             width - and this column holds the บันทึกล่าสุด table, whose four
+             min-width:7rem headers add up to 28rem. That pushed the column
+             wider than its share, and worse, the width *moved* when the
+             skeleton rows became real text and the paginator appeared. The
+             CBD chart below mounts at exactly that moment, and it sets
+             maintainAspectRatio:false, so it takes its canvas size straight
+             from the column: the width change fired a resize, chart.js
+             answered with update('resize'), and that transition is duration:0
+             - so the bars snapped to full height and the entry animation was
+             lost. Letting the column shrink pins its width, and the table
+             scrolls inside it (responsiveLayout="scroll") as intended. -->
+        <div class="col-span-12 xl:col-span-6 min-w-0 flex flex-col gap-1">
+            <!-- Placeholders while connecting, then the real rows.
+
+                 These loops run over the payload, not over a static table like
+                 the row above - so before the first snapshot arrives there are
+                 no rows, the loop body never runs, and the cards simply are not
+                 there. That left this block empty while loading and the page
+                 jumped as it filled in. The counts here are the shape the
+                 lookup tables have today: three channels, two case types.
+
+                 The placeholder boxes have to match the real card to the pixel
+                 or the jump comes back smaller instead of going away. A real
+                 card measures 99.6px: 32 of .card padding, a 19.6 label line
+                 box (0.875rem at line-height 1.4), 8 of mb-2, and a 40px
+                 text-4xl line box.
+
+                 So the label skeleton is wrapped in the same stat-label-sm span
+                 the real label uses and sized 1.4em - its own line height,
+                 expressed in em so it tracks the +/- control rather than
+                 needing a fixed value that would drift at 200%. The value
+                 skeleton is 2.5rem, which is text-4xl's line box. -->
+
             <div class="grid grid-cols-3 gap-1">
-                @for (row of channelRows(); track row.name) {
-                    <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
-                        @if (icon(row.name); as glyph) {
-                            <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
-                        }
-                        <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
-                        @if (loading()) {
-                            <p-skeleton width="min(5rem, 100%)" height="2.5rem" />
-                        } @else {
+                @if (loading()) {
+                    @for (placeholder of CHANNEL_PLACEHOLDERS; track placeholder) {
+                        <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(4rem, 100%)" height="1.4em" /></span>
+                            <p-skeleton width="min(3rem, 100%)" height="2.5rem" />
+                        </div>
+                    }
+                } @else {
+                    @for (row of channelRows(); track row.name) {
+                        <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            @if (icon(row.name); as glyph) {
+                                <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
+                            }
+                            <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
                             <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">{{ row.count }}</div>
-                        }
-                    </div>
+                        </div>
+                    }
                 }
             </div>
             <div class="grid grid-cols-2 gap-1">
-                @for (row of caseRows(); track row.name) {
-                    <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
-                        @if (icon(row.name); as glyph) {
-                            <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
-                        }
-                        <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
-                        @if (loading()) {
-                            <p-skeleton width="min(5rem, 100%)" height="2.5rem" />
-                        } @else {
+                @if (loading()) {
+                    @for (placeholder of CASE_PLACEHOLDERS; track placeholder) {
+                        <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(6rem, 100%)" height="1.4em" /></span>
+                            <p-skeleton width="min(3rem, 100%)" height="2.5rem" />
+                        </div>
+                    }
+                } @else {
+                    @for (row of caseRows(); track row.name) {
+                        <div class="card tinted-card icon-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            @if (icon(row.name); as glyph) {
+                                <i [class]="'stat-icon ' + glyph" aria-hidden="true"></i>
+                            }
+                            <span class="block font-medium mb-2 stat-label stat-label-sm">{{ row.name }}</span>
                             <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">{{ row.count }}</div>
-                        }
-                    </div>
+                        </div>
+                    }
                 }
             </div>
             <ng-content select="[leftPanel]" />
         </div>
 
-        <div class="col-span-12 xl:col-span-6">
+        <!-- Same treatment as the left column. Nothing in here pushes on the
+             width today, so this is insurance rather than a fix - but the two
+             columns should not differ in whether they can be widened by their
+             contents. -->
+        <div class="col-span-12 xl:col-span-6 min-w-0">
             <ng-content select="[rightPanel]" />
         </div>`
 })
@@ -438,6 +486,14 @@ export class IncidentTypeStatsWidget {
 
     /** แจ้งเหตุ's own fill, which the whole breakdown row wears. */
     protected readonly featureTint = FEATURE_TINT;
+
+    /** Placeholder cards for the breakdown grids while the first payload is in
+     *  flight - the values are never read, only the counts matter. Three and
+     *  two, matching the lookup tables as they stand; if a channel is added the
+     *  row will be one skeleton short for the second it takes to connect, which
+     *  is a far smaller problem than the row not being there at all. */
+    protected readonly CHANNEL_PLACEHOLDERS = [0, 1, 2];
+    protected readonly CASE_PLACEHOLDERS = [0, 1];
 
     /** Font Awesome classes for a breakdown card's backdrop glyph, or '' when
      *  the name has no entry - which renders no icon rather than an empty box.

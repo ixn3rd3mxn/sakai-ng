@@ -1,8 +1,20 @@
-import { afterNextRender, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
-import { ChartModule } from 'primeng/chart';
+import { afterNextRender, Component, DestroyRef, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { DailySummary } from '../dispatch.types';
+
+/** True when two payloads describe the same three shift counts.
+ *
+ *  Only the three numbers the doughnut draws are compared - object identity
+ *  never is, because every frame off the stream is freshly parsed JSON and so
+ *  always a new object.
+ */
+function sameSummary(a: DailySummary | null, b: DailySummary | null): boolean {
+    if (a === b) return true;
+    if (a === null || b === null) return false;
+    return a.morning === b.morning && a.afternoon === b.afternoon && a.night === b.night;
+}
 
 @Component({
     standalone: true,
@@ -38,6 +50,21 @@ export class DailyIncidentSummaryWidget {
     // snapshot for the current selection.
     loading = input<boolean>(false);
 
+    // Compared by value, not by reference.
+    //
+    // The dashboard passes `summary()?.daily_summary ?? null` straight off the
+    // SSE stream, so a push that only changed some *other* corner of the board
+    // - one new incident in the recent table - still hands this widget a brand
+    // new object holding the same three numbers. Read by reference that is a
+    // change, which fired the data effect, which called chartData.set(), which
+    // had PrimeNG destroy and rebuild the chart: the doughnut resweeping from
+    // nothing for a day whose counts had not moved.
+    //
+    // Fixing it here rather than upstream: the stream is doing its job, and a
+    // widget should not repaint for a payload whose contents it has already
+    // drawn.
+    private readonly counts = computed(() => this.summary(), { equal: sameSummary });
+
     // The chart is only shown once `initChart` has actually run against
     // delivered data - the first build happens before anything has
     // arrived and would otherwise paint a chart full of zeros.
@@ -53,6 +80,12 @@ export class DailyIncidentSummaryWidget {
     chartData = signal<any>(null);
 
     chartOptions = signal<any>(null);
+
+    // The rendered chart, so a data change can be pushed into the existing
+    // chart.js instance instead of replacing the component's `data` input.
+    // Undefined whenever the canvas is not on screen - while loading, and in
+    // the empty state - which is why every use of it is guarded.
+    private readonly chartRef = viewChild(UIChart);
 
     private chartTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -92,7 +125,7 @@ export class DailyIncidentSummaryWidget {
 
         let isFirstDataRun = true;
         effect(() => {
-            this.summary();
+            this.counts();
             if (isFirstDataRun) {
                 isFirstDataRun = false;
                 return;
@@ -117,31 +150,46 @@ export class DailyIncidentSummaryWidget {
 
     initChart(withOptions = true) {
         const documentStyle = getComputedStyle(document.documentElement);
-        const textColor = documentStyle.getPropertyValue('--text-color');
+        const textMutedColor = documentStyle.getPropertyValue('--text-color-secondary');
 
-        const summary = this.summary();
+        const summary = this.counts();
         const data = [summary?.morning ?? 0, summary?.afternoon ?? 0, summary?.night ?? 0];
 
-        this.chartReady.set(!this.loading());
+        this.chartReady.set(!this.loading() && summary !== null);
         this.isEmpty.set(data.every((value) => value === 0));
+
+        // Grow the arc that changed, rather than resweeping all three from
+        // nothing.
+        //
+        // PrimeNG's `data` setter calls reinit(), which is destroy() + new
+        // Chart() - and a brand new chart has no previous state to animate
+        // from, so every update replayed the whole entry animation. Chart.js
+        // will tween from what is on screen to the new values, but only if the
+        // same instance is updated instead of replaced.
+        //
+        // So on a data-only change the dataset array is swapped inside the
+        // live chart and refresh() (chart.update()) is called, leaving the
+        // component's `data` input pointing at the same object so the setter
+        // never fires. Labels and both colour arrays are fixed at three
+        // theme-derived entries, so nothing else has to move.
+        //
+        // Options changes still go the long way: a theme swap has to rebuild
+        // the colours, and it is rare enough that a full replay is fine there.
+        const chartComponent = this.chartRef();
+        const live = chartComponent?.chart;
+        if (!withOptions && live && live.data?.datasets?.length === 1) {
+            live.data.datasets[0].data = data;
+            chartComponent.refresh();
+            return;
+        }
 
         this.chartData.set({
             labels: ['เช้า', 'บ่าย', 'ดึก'],
             datasets: [
                 {
                     data,
-                    backgroundColor: [
-
-                        documentStyle.getPropertyValue('--p-primary-600'),
-                        documentStyle.getPropertyValue('--p-primary-500'),
-                        documentStyle.getPropertyValue('--p-primary-300')
-                    ],
-                    hoverBackgroundColor: [
-
-                        documentStyle.getPropertyValue('--p-primary-500'),
-                        documentStyle.getPropertyValue('--p-primary-400'),
-                        documentStyle.getPropertyValue('--p-primary-200')
-                    ]
+                    backgroundColor: [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-300')],
+                    hoverBackgroundColor: [documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-200')]
                 }
             ]
         });
@@ -153,12 +201,25 @@ export class DailyIncidentSummaryWidget {
         this.chartOptions.set({
             plugins: {
                 legend: {
+                    // Under the ring, keyed with the same rounded swatches and
+                    // muted label colour the hourly chart uses, so a legend
+                    // reads the same on every card of the board.
+                    position: 'bottom',
                     labels: {
+                        color: textMutedColor,
                         usePointStyle: true,
-                        color: textColor,
+                        pointStyle: 'rectRounded',
+                        padding: 16,
                         font: {
                             size: 15 // ปรับขนาดตัวเลขตามที่ต้องการ เช่น 16, 18, 20
                         }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        // The total is the one number the ring does not state
+                        // outright, and it is the headline for the day.
+                        footer: (items: any[]) => `รวมทั้งหมด ${((items[0]?.dataset?.data ?? []) as number[]).reduce((sum, value) => sum + (value ?? 0), 0)}`
                     }
                 }
             }

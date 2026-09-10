@@ -68,19 +68,34 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
                 class="shrink-0"
             ></a> -->
         </div>
-        @if (!chartReady()) {
-            <p-skeleton width="100%" height="22rem" />
-        } @else if (isEmpty()) {
-            <!-- Chart.js draws axes but no bars for an all-zero stack, which
-                 reads as a broken canvas. A quiet day - or the first hour of
-                 one - says so in words instead. -->
-            <div class="h-88 flex flex-col items-center justify-center gap-3 text-muted-color">
-                <i class="pi pi-chart-bar text-5xl opacity-30"></i>
-                <span>ยังไม่มีการบันทึกข้อมูล</span>
-            </div>
-        } @else {
-            <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="h-88" />
-        }
+        <!-- The 22rem box lives out here, on a plain block div, rather than on
+             whichever branch happens to be showing.
+             Chart.js measures its container the moment the canvas is created
+             and, because this chart sets maintainAspectRatio:false, takes the
+             height from that box verbatim. If the box is not already its final
+             height at that instant, the ResizeObserver fires straight after
+             with the real one and chart.js answers it with update('resize') -
+             whose transition is duration:0, so every bar snaps to full height
+             and the entry animation is lost. Sizing the wrapper instead of the
+             chart means the height is settled before p-chart even exists. -->
+        <div class="h-88">
+            @if (!chartReady()) {
+                <p-skeleton width="100%" height="100%" />
+            } @else if (isEmpty()) {
+                <!-- Chart.js draws axes but no bars for an all-zero stack, which
+                     reads as a broken canvas. A quiet day - or the first hour of
+                     one - says so in words instead. -->
+                <div class="h-full flex flex-col items-center justify-center gap-3 text-muted-color">
+                    <i class="pi pi-chart-bar text-5xl opacity-30"></i>
+                    <span>ยังไม่มีการบันทึกข้อมูล</span>
+                </div>
+            } @else {
+                <!-- "block" explicitly: PrimeNG sets display:block through a
+                     host binding, and h-full is meaningless on an inline box
+                     until that lands. -->
+                <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="block h-full" />
+            }
+        </div>
     </div>`
 })
 export class HourlyChartWidget {
@@ -240,6 +255,17 @@ export class HourlyChartWidget {
 
         this.chartOptions.set({
             maintainAspectRatio: false,
+            // Chart.js resizes with transitions.resize.animation.duration = 0,
+            // i.e. it teleports elements to their final geometry. A chart that
+            // is measured twice as it attaches - which happens when its width
+            // resolves to a fractional pixel - therefore loses its entry
+            // animation entirely: the second pass snaps every bar to full
+            // height microseconds after the first started growing them. This
+            // chart's width lands on a whole number today and it animates, but
+            // that is the layout's doing, not ours. Giving the resize
+            // transition a real duration makes the growth survive either way,
+            // and makes genuine window resizes glide rather than jump.
+            transitions: { resize: { animation: { duration: 400, easing: 'easeOutQuart' } } },
             // Hovering anywhere in the column reports the whole hour, so the
             // tooltip answers "what happened at 14:00" rather than requiring a
             // hit on one four-pixel segment.
