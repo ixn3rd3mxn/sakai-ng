@@ -90,8 +90,26 @@ export class RecentPicksStore<K extends string> {
 //
 // Recents stay in the full list as well: a name that jumps between two sections
 // depending on who used the browser last is harder to find, not easier.
-export function groupByRecent<T>(all: T[], recent: string[], valueOf: (item: T) => string): { label: string; items: T[] }[] {
+export interface OptionGroup<T> {
+    label: string;
+    items: T[];
+}
+
+export function groupByRecent<T>(all: T[], recent: string[], valueOf: (item: T) => string): OptionGroup<T>[] {
+    return prependRecent([{ label: 'ทั้งหมด', items: all }], recent, valueOf);
+}
+
+// Every group header gets the same leading bullet, so a header reads as a
+// section label and not as one more option in the list.
+const HEADER_BULLET = '• ';
+
+/**
+ * Same shortlist, on top of a list that already has its own groups. Headers
+ * of the given groups are bulleted here too, so callers pass plain labels.
+ */
+export function prependRecent<T>(groups: OptionGroup<T>[], recent: string[], valueOf: (item: T) => string): OptionGroup<T>[] {
+    const all = groups.flatMap((group) => group.items);
     const shortlist = recent.map((value) => all.find((item) => valueOf(item) === value)).filter((item): item is T => !!item);
-    const everything = { label: 'ทั้งหมด', items: all };
-    return shortlist.length ? [{ label: 'ใช้ล่าสุด', items: shortlist }, everything] : [everything];
+    const headed = groups.map((group) => ({ ...group, label: `${HEADER_BULLET}${group.label}` }));
+    return shortlist.length ? [{ label: `${HEADER_BULLET}ใช้ล่าสุด`, items: shortlist }, ...headed] : headed;
 }

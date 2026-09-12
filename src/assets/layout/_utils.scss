@@ -61,3 +61,28 @@
         white-space: nowrap;
     }
 }
+
+/* A box with the vertical metrics of a p-tag but no tag: the incident tables
+   put a `-` (no severity) or a loading skeleton in one so that every row is
+   as tall as a row with a badge, and the table never jumps as pages, days
+   or the data itself change.
+
+   Not `.p-tag` itself: PrimeNG loads a component's styles the first time
+   that component renders, so until a real tag is on the page the class is
+   just a name - the skeleton rows came out 10px taller for exactly that
+   reason. The values mirror Aura's tag tokens (font 0.875rem, padding
+   0.25rem 0.5rem); keep them in step if the theme's are changed.
+
+   The ::after character: a box holding only a skeleton has no text and so
+   no line box, and would be the skeleton's 1rem tall rather than the tag's
+   text line. Zero-width, so it adds nothing to a box that has text. */
+.tag-box {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.875rem;
+    padding-block: 0.25rem;
+
+    &::after {
+        content: '\200B';
+    }
+}

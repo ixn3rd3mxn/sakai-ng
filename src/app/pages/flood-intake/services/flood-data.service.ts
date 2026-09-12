@@ -10,6 +10,7 @@ import {
     FloodShift,
     FloodTab
 } from '../flood-intake.types';
+import { OptionGroup } from '../../../shared/recent-picks';
 import { FloodApiService } from './flood-api.service';
 
 // Owns the filter selection and the live snapshot it resolves to.
@@ -59,26 +60,22 @@ export class FloodDataService implements OnDestroy {
         this.districts().map((d) => ({ label: d.district_name, value: d.district_code }))
     );
 
-    private readonly allSubdistrictOptions = computed(() => {
-        const districtNames = new Map(this.districts().map((d) => [d.district_code, d.district_name]));
-        return this.subdistricts().map((s) => {
-            const district = districtNames.get(s.district_code);
-            return {
-                label: district ? `${s.subdistrict_name} · ${district}` : s.subdistrict_name,
-                value: s.subdistrict_code
-            };
-        });
+    // Tambon, one group per amphoe in the amphoe list's order. Tambon names
+    // repeat across amphoe, so the group header is what tells two "บ้านใหม่"
+    // apart when the whole province is listed.
+    private readonly subdistrictGroups = computed(() => {
+        const byDistrict = new Map(this.districts().map((d) => [d.district_code, { label: d.district_name, items: [] as { label: string; value: string }[] }]));
+        for (const s of this.subdistricts()) {
+            byDistrict.get(s.district_code)?.items.push({ label: s.subdistrict_name, value: s.subdistrict_code });
+        }
+        return [...byDistrict.entries()].filter(([, group]) => group.items.length).map(([code, group]) => ({ code, ...group }));
     });
 
-    subdistrictOptionsFor(districtCode: string | null | undefined) {
+    subdistrictGroupsFor(districtCode: string | null | undefined): OptionGroup<{ label: string; value: string }>[] {
         // No amphoe chosen yet: offer every tambon rather than nothing, so an
         // operator who was told the tambon but not the amphoe can start there.
-        // Tambon names repeat across amphoe, so the amphoe rides along in the
-        // label - it is the only thing telling two "บ้านใหม่" apart.
-        if (!districtCode) return this.allSubdistrictOptions();
-        return this.subdistricts()
-            .filter((s) => s.district_code === districtCode)
-            .map((s) => ({ label: s.subdistrict_name, value: s.subdistrict_code }));
+        const groups = this.subdistrictGroups();
+        return districtCode ? groups.filter((g) => g.code === districtCode) : groups;
     }
 
     subdistrictByCode(code: string | null | undefined) {

@@ -23,7 +23,12 @@ import { DestroyRef, Injectable, inject } from '@angular/core';
 // DOM: the class, and the scrollbar width PrimeNG measured the first time,
 // when the scrollbar was actually there to measure. Nothing is decided
 // here - the values are PrimeNG's own, re-asserted. When the last mask
-// goes, PrimeNG's normal teardown runs and this stands aside.
+// goes, PrimeNG's normal teardown runs and this stands aside - unless the
+// last mask belongs to something that never locked, in which case there is
+// no teardown coming and the lock this re-asserted is released here. The
+// flood intake drawer is that case: it does not block scroll, so PrimeNG
+// unlocks when the confirm inside it closes, this re-locks because the
+// drawer's mask is still up, and nothing would ever unlock again.
 //
 // Masks rather than the class, because the class is the thing that goes
 // wrong. .p-overlay-mask is the class every modal mask shares - dialog,
@@ -42,6 +47,10 @@ export class ModalScrollLock {
 
     // The width PrimeNG measured on the first lock; null while unlocked.
     private width: string | null = null;
+    // Whether the lock currently on the body was put there by this class
+    // after PrimeNG had taken it off. Only such a lock is released here;
+    // one PrimeNG still owns is left for its own teardown.
+    private reasserted = false;
 
     constructor() {
         // The observer sees this class's own writes too, a callback later;
@@ -56,7 +65,12 @@ export class ModalScrollLock {
         const open = document.querySelector(ModalScrollLock.MASK_SELECTOR) !== null;
 
         if (!open) {
+            if (this.reasserted) {
+                body.classList.remove(ModalScrollLock.LOCK_CLASS);
+                body.style.removeProperty(ModalScrollLock.WIDTH_VAR);
+            }
             this.width = null;
+            this.reasserted = false;
             return;
         }
 
@@ -75,5 +89,6 @@ export class ModalScrollLock {
 
         body.classList.add(ModalScrollLock.LOCK_CLASS);
         body.style.setProperty(ModalScrollLock.WIDTH_VAR, this.width);
+        this.reasserted = true;
     }
 }

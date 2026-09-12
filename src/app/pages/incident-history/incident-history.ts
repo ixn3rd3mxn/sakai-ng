@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, viewChild } from '@angular/core';
 import { ScrollTopModule } from 'primeng/scrolltop';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { Table, TableModule } from 'primeng/table';
@@ -12,6 +12,7 @@ import { IncidentHistoryDataService } from './services/incident-history-data.ser
 import { IncidentHistoryDateDial } from './components/incident-history-date-dial';
 import { TooltipModule } from 'primeng/tooltip';
 import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashboardclone/services/date-utils';
+import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboardclone/services/page-filler';
 
 @Component({
     selector: 'app-incident-history',
@@ -65,13 +66,14 @@ import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashbo
             </div>
             <p-table
                 #incidentTable
-                [value]="dataService.loading() ? skeletonIncidentRows : (dataService.history()?.incidents ?? [])"
+                [value]="incidentRows()"
                 stripedRows
                 dataKey="incident_id"
-                [rows]="10"
+                [rows]="PAGE_SIZE"
                 [rowHover]="true"
                 [paginator]="true"
                 responsiveLayout="scroll"
+                (onFilter)="padFilteredRows(incidentTable)"
             >
                 <ng-template #header>
                     <tr>
@@ -219,7 +221,21 @@ import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashbo
                             <td><p-skeleton width="min(5rem, 80%)" /></td>
                             <td><p-skeleton width="min(6rem, 80%)" /></td>
                             <td><p-skeleton width="min(9rem, 90%)" /></td>
-                            <td><p-skeleton width="min(4rem, 80%)" /></td>
+                            <!-- In a tag-sized box (.tag-box, _utils.scss) so a
+                                 loading row is as tall as a loaded one. -->
+                            <td><span class="tag-box"><p-skeleton width="min(4rem, 80%)" /></span></td>
+                        </tr>
+                    } @else if (isPageFiller(incident)) {
+                        <!-- Pads a short page to PAGE_SIZE rows so the paginator
+                             does not move; see page-filler.ts. Same tag-sized box
+                             in the last cell as a real row without a badge. -->
+                        <tr>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td><span class="tag-box">-</span></td>
                         </tr>
                     } @else {
                     <tr>
@@ -235,7 +251,11 @@ import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashbo
                         <td><span class="cbd-label" [title]="dataService.cbdLabel(incident.cbd)">{{ dataService.cbdLabel(incident.cbd) }}</span></td>
                         <td>
                             @if (incident.severity === '-') {
-                                -
+                                <!-- The dash sits in a tag-sized box (.tag-box,
+                                     _utils.scss) so a row without a badge is exactly
+                                     as tall as one with - otherwise the table jumps
+                                     by a few px as rows page in and out. -->
+                                <span class="tag-box">-</span>
                             } @else {
                                 <p-tag [value]="incident.severity" [severity]="getSeverity(incident.severity)"></p-tag>
                             }
@@ -541,6 +561,12 @@ import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashbo
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            /* Thai below-vowels (สระอุ/อู) and tone marks reach past the
+               line box, and overflow: hidden clips them. Pad the box so
+               they fit, and pull the margin back in by the same amount
+               so the row does not get any taller. */
+            padding-block: 0.25em;
+            margin-block: -0.25em;
         }
 
         .p-datatable-frozen-tbody {
@@ -576,7 +602,27 @@ export class IncidentHistoryComponent implements OnInit {
         return Array.from({ length: count }, () => ({}) as T);
     }
 
-    protected readonly skeletonIncidentRows = IncidentHistoryComponent.placeholders<IncidentHistoryItem>(10); // [rows]="10"
+    protected readonly PAGE_SIZE = 10;
+    protected readonly isPageFiller = isPageFiller;
+    protected readonly skeletonIncidentRows = IncidentHistoryComponent.placeholders<IncidentHistoryItem>(this.PAGE_SIZE);
+
+    // Padded to whole pages so a short last page does not move the paginator
+    // (see page-filler.ts). Only the unfiltered value can be padded here: the
+    // column filters run inside the table and drop fillers, whose fields
+    // match nothing, so a filtered result is padded in padFilteredRows.
+    protected readonly incidentRows = computed<(IncidentHistoryItem | PageFillerRow)[]>(() =>
+        this.dataService.loading() ? this.skeletonIncidentRows : padToPage(this.dataService.history()?.incidents ?? [], this.PAGE_SIZE)
+    );
+
+    // Runs after the table has filtered but before it renders (onFilter is
+    // emitted at the end of the filter pass). `filteredValue` is the array the
+    // table renders from, so fillers pushed onto it complete the last page.
+    // Null means no filter is active and the padded value is in use. An empty
+    // result stays empty: "no match" is worth more there than a page of dashes.
+    padFilteredRows(table: Table): void {
+        const filtered = table.filteredValue as (IncidentHistoryItem | PageFillerRow)[] | null;
+        if (filtered?.length) filtered.push(...pageFillers(filtered.length, this.PAGE_SIZE));
+    }
     protected readonly skeletonDayRows = IncidentHistoryComponent.placeholders<TopDayItem>(5); // top_days limit
     protected readonly skeletonCallTypeRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(6); // 5 call types + total
     protected readonly skeletonChannelRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(3);
@@ -585,6 +631,19 @@ export class IncidentHistoryComponent implements OnInit {
     protected readonly skeletonCbdRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(25);
 
     hourOptions: { label: string; value: string }[] = [];
+
+    private readonly incidentTable = viewChild.required<Table>('incidentTable');
+
+    constructor() {
+        // Back to page 1 whenever a new day is requested. The table keeps its
+        // page across value changes, so a user on page 9 who switches to a day
+        // with 8 pages would otherwise land on an empty page 9. Keyed on
+        // loading rather than on the incidents themselves because the snapshot
+        // is a live stream - a tick must not throw the user back to page 1.
+        effect(() => {
+            if (this.dataService.loading()) this.incidentTable().first = 0;
+        });
+    }
 
     ngOnInit() {
         this.hourOptions = Array.from({ length: 24 }, (_, i) => ({

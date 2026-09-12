@@ -16,7 +16,7 @@ import { FloodAgent, FloodCase, FloodCaseInput, FloodDuplicate, FloodShift } fro
 import { FloodApiService } from '../services/flood-api.service';
 import { FloodDataService } from '../services/flood-data.service';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
-import { groupByRecent } from '../../../shared/recent-picks';
+import { groupByRecent, prependRecent } from '../../../shared/recent-picks';
 import { FloodDraftService } from '../services/flood-draft.service';
 import { FloodDuplicateWarning } from './flood-duplicate-warning';
 import { AppUpdateService } from '../../../core/app-update.service';
@@ -635,8 +635,6 @@ export class FloodCaseFormDrawer {
     // and picking a shift by hand turns it off for the rest of the drawer.
     private readonly shiftFollowsTime = signal(true);
 
-    readonly subdistrictOptions = computed(() => this.dataService.subdistrictOptionsFor(this.districtCodeSignal()));
-
     readonly agentGroups = computed(() =>
         groupByRecent<FloodAgent>(this.dataService.agents(), this.drafts.recentOf('agent'), (a) => a.agent_name)
     );
@@ -645,8 +643,11 @@ export class FloodCaseFormDrawer {
         groupByRecent(this.dataService.districtOptions(), this.drafts.recentOf('district'), (o) => o.value)
     );
 
+    // Grouped by amphoe rather than under one "ทั้งหมด": with no amphoe
+    // chosen the whole province is listed, and the amphoe header is the only
+    // thing telling two tambon of the same name apart.
     readonly subdistrictGroups = computed(() =>
-        groupByRecent(this.subdistrictOptions(), this.drafts.recentOf('subdistrict'), (o) => o.value)
+        prependRecent(this.dataService.subdistrictGroupsFor(this.districtCodeSignal()), this.drafts.recentOf('subdistrict'), (o) => o.value)
     );
 
     // Only when the operator actually pasted coordinates or a maps link -
