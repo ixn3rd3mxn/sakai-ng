@@ -1,22 +1,15 @@
 import { Injectable, signal } from '@angular/core';
 import { FloodCaseInput } from '../flood-intake.types';
+import { RecentPicksStore } from '../../../shared/recent-picks';
 
 const DRAFT_PREFIX = 'flood-intake:draft:';
 const OUTBOX_KEY = 'flood-intake:outbox';
 const RECENT_PICKS_KEY = 'flood-intake:recent-picks';
 
-// Three is what fits above a list without pushing it off screen. These lists
-// are shortcuts for the handful of values one console actually uses - a shift
-// works one or two amphoe and is manned by one or two people - so a longer one
-// would just be the full list again in a different order.
-const RECENT_PICKS_LIMIT = 3;
-
 /** The dropdowns that keep a per-device shortlist. */
 export type RecentPickKind = 'agent' | 'district' | 'subdistrict';
 
 const RECENT_PICK_KINDS: readonly RecentPickKind[] = ['agent', 'district', 'subdistrict'];
-
-export type RecentPicks = Partial<Record<RecentPickKind, string[]>>;
 
 export interface FloodDraft {
     savedAt: number;
@@ -49,12 +42,13 @@ export class FloodDraftService {
     // an operator believing a case was saved when it was not.
     readonly pending = signal<OutboxEntry[]>([]);
 
-    /** Values most recently picked on this device, newest first per dropdown. */
-    readonly recentPicks = signal<RecentPicks>({});
+    // The shortlists themselves live in shared/recent-picks, which the
+    // dispatch dashboard's CBD dropdown uses too; this page's are under its
+    // own key.
+    private readonly recents = new RecentPicksStore<RecentPickKind>(RECENT_PICKS_KEY, RECENT_PICK_KINDS);
 
     constructor() {
         this.pending.set(this.readOutbox());
-        this.recentPicks.set(this.readRecentPicks());
     }
 
     private safeGet(key: string): string | null {
@@ -155,43 +149,13 @@ export class FloodDraftService {
 
     // --- recent picks -------------------------------------------------------
 
-    private readRecentPicks(): RecentPicks {
-        const raw = this.safeGet(RECENT_PICKS_KEY);
-        if (!raw) return {};
-        try {
-            const parsed = JSON.parse(raw) as Record<string, unknown>;
-            if (!parsed || typeof parsed !== 'object') return {};
-            const picks: RecentPicks = {};
-            // Read defensively: this is the one store a stale tab or a hand-
-            // edited localStorage can put anything into, and a bad entry must
-            // cost a shortcut, not the dropdown.
-            for (const kind of RECENT_PICK_KINDS) {
-                const values = parsed[kind];
-                if (!Array.isArray(values)) continue;
-                picks[kind] = values.filter((v): v is string => typeof v === 'string' && !!v).slice(0, RECENT_PICKS_LIMIT);
-            }
-            return picks;
-        } catch {
-            return {};
-        }
-    }
-
     /** This device's shortlist for one dropdown, newest first. */
     recentOf(kind: RecentPickKind): string[] {
-        return this.recentPicks()[kind] ?? [];
+        return this.recents.recentOf(kind);
     }
 
     /** Move a value to the front of this device's shortlist for `kind`. */
     remember(kind: RecentPickKind, value: string): void {
-        const picked = value?.trim();
-        if (!picked) return;
-        const current = this.recentOf(kind);
-        const next = [picked, ...current.filter((v) => v !== picked)].slice(0, RECENT_PICKS_LIMIT);
-        // Re-picking the value already at the front changes nothing, and these
-        // dropdowns are reopened all day - skip the write and the signal churn.
-        if (next.length === current.length && next.every((v, i) => v === current[i])) return;
-        const picks = { ...this.recentPicks(), [kind]: next };
-        this.safeSet(RECENT_PICKS_KEY, JSON.stringify(picks));
-        this.recentPicks.set(picks);
+        this.recents.remember(kind, value);
     }
 }

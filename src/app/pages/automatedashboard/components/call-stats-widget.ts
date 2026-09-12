@@ -160,7 +160,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 
         /* A step down below Tailwind's sm. On a phone the counter cards are
            half-width and the duration cards the same, so the longest of these -
-           "ไม่ได้รับสาย คิวเต็ม" - has a couple of inches to sit in and wraps at
+           "คิวเต็ม" - has a couple of inches to sit in and wraps at
            1rem.
 
            A flat value rather than a scaled one, and nothing is lost by that:
@@ -296,7 +296,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                         <div>
                             <!-- stat-label, base 1rem: at 150% zoom with the
                                  sidebar open these are one-sixth-width, and
-                                 "ไม่ได้รับสาย คิวเต็ม" - the longest of the six,
+                                 "คิวเต็ม" - the longest of the six,
                                  with a space to break on - wrapped at text-xl.
                                  That size suits a desk; the +/- control scales
                                  it up for a wall monitor without changing it
@@ -367,7 +367,7 @@ export class CallStatsWidget {
     // 1 is text-base, the size the labels were tuned to for a desk monitor at
     // 150% zoom, so the default is exactly today's board. The ceiling is 2x:
     // past that a label out-sizes the number it belongs to, and the six-column
-    // row starts wrapping "ไม่ได้รับสาย คิวเต็ม" onto three lines.
+    // row starts wrapping "คิวเต็ม" onto three lines.
     protected readonly MIN_SCALE = 1;
     protected readonly MAX_SCALE = 2;
     private static readonly STEP = 0.25;
@@ -443,7 +443,7 @@ export class CallStatsWidget {
         { label: 'รับสาย', color: 'emerald', field: 'answer', polarity: 'neutral' },
         { label: 'รับสาย SLA', color: 'emerald', field: 'sla', polarity: 'neutral' },
         { label: 'ไม่ได้รับสาย', color: 'red', field: 'abandon', polarity: 'down-good' },
-        { label: 'ไม่ได้รับสาย คิวเต็ม', color: 'red', field: 'queue_full_abandon', polarity: 'down-good' },
+        { label: 'คิวเต็ม', color: 'red', field: 'queue_full_abandon', polarity: 'down-good' },
         { label: 'โทรออก', color: 'violet', field: 'outgoing', polarity: 'neutral' }
     ];
 

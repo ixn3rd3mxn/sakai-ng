@@ -43,6 +43,14 @@ export class IncidentHistoryDataService implements OnDestroy {
     readonly caseTypeOptions = computed(() => (this._lookups()?.case_types ?? []).map((item) => item.name).sort());
     // Already ordered CBD1 -> CBD25 by the backend (sorted by cbd_id).
     readonly cbdOptions = computed(() => (this._lookups()?.cbd_categories ?? []).map((item) => item.name));
+    // Code -> "CBD7 <description>", for display. Incidents carry the bare code
+    // (it is what the CBD filter matches on), so the table looks the label up
+    // here rather than the backend sending both. Falls back to the code for
+    // anything the lookups do not know, "-" included.
+    private readonly cbdLabels = computed(() => new Map((this._lookups()?.cbd_categories ?? []).map((item) => [item.name, `${item.name} ${item.des ?? ''}`.trim()])));
+    cbdLabel(code: string): string {
+        return this.cbdLabels().get(code) ?? code;
+    }
     readonly severityOptions = computed(() => (this._lookups()?.severity_levels ?? []).map((item) => item.name).sort());
 
     constructor() {

@@ -17,7 +17,7 @@ import { formatDuration } from '../format-utils';
 const STATUS_TAG: Record<CallStatus, { label: string; severity: 'success' | 'danger' | 'warn' | 'secondary' }> = {
     answered: { label: 'รับสาย', severity: 'success' },
     abandoned: { label: 'ไม่ได้รับสาย', severity: 'danger' },
-    queue_full: { label: 'ไม่ได้รับสาย คิวเต็ม', severity: 'danger' },
+    queue_full: { label: 'คิวเต็ม', severity: 'danger' },
     no_answer: { label: 'เจ้าหน้าที่ปฏิเสธสาย', severity: 'warn' },
     unknown: { label: 'ไม่ทราบสถานะ', severity: 'secondary' }
 };
@@ -84,7 +84,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
                          only what is certain. -->
                     <th style="min-width: 8rem;">ช่วงเวลาการโทร</th>
                     <th class="text-right" style="min-width: 6rem;">รวมเวลา</th>
-                    <!-- 10rem because "ไม่ได้รับสาย คิวเต็ม" is the widest tag and
+                    <!-- 10rem because "คิวเต็ม" is the widest tag and
                          a wrapped tag reads as two tags. -->
                     <th style="min-width: 10rem;">สถานะ</th>
                 </tr>

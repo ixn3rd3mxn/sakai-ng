@@ -94,7 +94,7 @@ MAX_PAGES = int(os.environ.get("CALL_LOG_MAX_PAGES", "4"))
 STATUSES: dict[str, str] = {
     "HANGUP": "answered",              # รับสาย
     "ABANDON": "abandoned",            # ไม่ได้รับสาย - the caller gave up
-    "QUEUE_FULL_ABANDON": "queue_full",  # ไม่ได้รับสาย คิวเต็ม - never reached a desk
+    "QUEUE_FULL_ABANDON": "queue_full",  # คิวเต็ม - never reached a desk
     "NO_ANSWER": "no_answer",          # เจ้าหน้าที่ไม่รับสาย - rang, nobody picked up
 }
 

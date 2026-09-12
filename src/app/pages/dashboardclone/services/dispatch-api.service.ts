@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { DashboardSummary, IncidentCreateRequest, IncidentCreateResponse, OperationalContext, ShiftCode } from '../dispatch.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -33,25 +34,33 @@ export class DispatchApiService {
     // payload actually changes (see backend/main.py:stream_summary), so the
     // frontend only ever has to render whatever arrives - no client-side
     // polling or refresh logic needed.
+    //
+    // Reconnection, though, is not left to the browser. EventSource retries a
+    // dropped socket on its own, but gives up permanently on a response that
+    // is not a stream - and a backend cold-start hands it exactly that, an
+    // edge error page with no CORS header. The wall monitor froze on a stale
+    // total for a whole night that way. `resilientEventSource` treats that
+    // terminal state as one more thing to retry; see its comment for the
+    // console trace that led here.
     streamSummary(date?: string, shift?: ShiftCode): Observable<DashboardSummary> {
         return new Observable<DashboardSummary>((subscriber) => {
             const query = this.buildParams(date, shift).toString();
             const url = query ? `${API_BASE_URL}/dashboard/stream?${query}` : `${API_BASE_URL}/dashboard/stream`;
-            const source = new EventSource(url);
-            this.watchDeploySignals(source);
 
-            source.addEventListener('dashboard', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as DashboardSummary);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners, so the deploy
+            // signals and the data handler have to be attached again each
+            // time.
+            return resilientEventSource(url, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('dashboard', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as DashboardSummary);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-
-            // EventSource retries the connection on its own; nothing to do here.
-            source.onerror = () => {};
-
-            return () => source.close();
         });
     }
 

@@ -10,8 +10,8 @@ import { TagModule } from 'primeng/tag';
 import { IncidentHistoryItem, IncidentStatItem, TopDayItem } from './incident-history.types';
 import { IncidentHistoryDataService } from './services/incident-history-data.service';
 import { IncidentHistoryDateDial } from './components/incident-history-date-dial';
-import { IncidentHistoryDateBanner } from './components/incident-history-date-banner';
-import { parseIsoDate } from '../dashboardclone/services/date-utils';
+import { TooltipModule } from 'primeng/tooltip';
+import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashboardclone/services/date-utils';
 
 @Component({
     selector: 'app-incident-history',
@@ -24,17 +24,43 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
         FormsModule,
         ButtonModule,
         IncidentHistoryDateDial,
-        IncidentHistoryDateBanner,
+        TooltipModule,
         ScrollTopModule,
         SkeletonModule
     ],
     providers: [IncidentHistoryDataService],
     template: `
-        <app-incident-history-date-banner [historical]="!dataService.isCurrent()" [selectedDate]="dataService.selectedDate()" />
+        <!-- Same header row the dashboard puts above its grid (see
+             incident-type-stats-widget.ts): the day being shown, and the
+             back-dated warning when it is one, on a line of its own above the
+             cards - not inside the first card. No shift here - this page is
+             day-scoped (see incident-history-date-dial.ts). -->
+        <div class="flex flex-wrap items-baseline gap-x-2 mb-4">
+            <span class="font-semibold text-xl">สรุปผลทั้งหมด</span>
+            @if (!dataService.isCurrent()) {
+                <span class="text-amber-600 dark:text-amber-400 font-medium">
+                    <span class="hidden lg:inline"> กำลังดูประวัติวันที่ {{ longDate() }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน</span>
+                    <span class="lg:hidden"> กำลังดูข้อมูลย้อนหลัง: {{ shortDate() }}</span>
+                </span>
+                <p-button
+                    icon="pi pi-refresh"
+                    severity="warn"
+                    [text]="true"
+                    [rounded]="true"
+                    size="small"
+                    pTooltip="กลับไปวันปัจจุบัน"
+                    tooltipPosition="bottom"
+                    ariaLabel="กลับไปวันปัจจุบัน"
+                    (onClick)="dataService.selectCurrent()"
+                />
+            } @else {
+                <span class="text-muted-color whitespace-nowrap">{{ longDate() }}</span>
+            }
+        </div>
 
         <div class="card" style="margin-bottom: 0.25rem">
             <div class="flex justify-between items-center mb-4">
-                <div class="font-semibold text-xl">ประวัติการบันทึกประจำวัน</div>
+                <div class="font-semibold text-xl">รายการเหตุการณ์</div>
                 <button pButton label="Clear" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(incidentTable)"></button>
             </div>
             <p-table
@@ -56,6 +82,7 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="hourOptions"
                                             placeholder="เลือกชั่วโมง"
                                             (onChange)="filter($event.value)"
@@ -79,6 +106,7 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="dataService.callTypeOptions()"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
@@ -100,6 +128,7 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="dataService.reportingChannelOptions()"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
@@ -121,6 +150,7 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="dataService.caseTypeOptions()"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
@@ -135,13 +165,14 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                 </p-columnFilter>
                             </div>
                         </th>
-                        <th style="min-width: 8rem">
+                        <th style="min-width: 14rem">
                             <div class="flex justify-between items-center">
                                 CBD
                                 <p-columnFilter field="cbd" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="dataService.cbdOptions()"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
@@ -163,6 +194,7 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
                                             [ngModel]="value"
+                                            [resetFilterOnHide]="true"
                                             [options]="dataService.severityOptions()"
                                             placeholder="ทั้งหมด"
                                             (onChange)="filter($event.value)"
@@ -195,7 +227,12 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                         <td>{{ incident.call_type }}</td>
                         <td>{{ incident.reporting_channel }}</td>
                         <td>{{ incident.case_type }}</td>
-                        <td>{{ incident.cbd }}</td>
+                        <!-- Full "CBD7 <description>" label, cut with an ellipsis at
+                             the column's width; the title carries the whole thing.
+                             A block span rather than styles on the td: an auto-layout
+                             table does not honour max-width on a cell, but it does
+                             size the cell to a block child that has one. -->
+                        <td><span class="cbd-label" [title]="dataService.cbdLabel(incident.cbd)">{{ dataService.cbdLabel(incident.cbd) }}</span></td>
                         <td>
                             @if (incident.severity === '-') {
                                 -
@@ -215,13 +252,16 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
         </div>
 
     <div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">วันที่มีการบันทึกข้อมูลมากที่สุดในเดือนนี้</div>
+        <div class="font-semibold text-xl mb-4">วันที่บันทึกสูงสุดในเดือนนี้</div>
         <p-table [value]="dataService.loading() ? skeletonDayRows : topDays()" stripedRows [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:33%">อันดับ</th>
-                    <th style="min-width:33%">วันที่</th>
-                    <th style="min-width:33%">จำนวน</th>
+                    <th style="min-width: 7rem">อันดับ</th>
+                    <th style="min-width: 13rem">วันที่</th>
+                    <th style="min-width: 13rem">จำนวน</th>
+                    <!-- Switch-to-day control; a heading would only repeat the
+                         button's tooltip. -->
+                    <th style="min-width: 6rem"></th>
                 </tr>
             </ng-template>
             <ng-template #body let-item let-rowIndex="rowIndex">
@@ -230,18 +270,43 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
                         <td><p-skeleton width="1.5rem" /></td>
                         <td><p-skeleton width="min(12rem, 90%)" /></td>
                         <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        <td></td>
                     </tr>
                 } @else {
                     <tr>
                         <td>{{ rowIndex + 1 }}</td>
                         <td>{{ formatDay(item.operational_day) }}</td>
                         <td>{{ item.count }}</td>
+                        <!-- Inline, not Tailwind's text-right: PrimeNG's own
+                             td { text-align: start } is unlayered CSS, and this
+                             project loads Tailwind's utilities in a layer, so any
+                             utility loses to it. -->
+                        <td style="text-align: right">
+                            <!-- The day on screen gets a marker instead of a button:
+                                 the list is for this same month, so the row for the
+                                 day being viewed is nearly always in it. -->
+                            @if (item.operational_day === viewedDay()) {
+                                <p-tag value="กำลังดู" severity="secondary" />
+                            } @else {
+                                <p-button
+                                    icon="pi pi-arrow-right"
+                                    severity="secondary"
+                                    [text]="true"
+                                    [rounded]="true"
+                                    size="small"
+                                    pTooltip="สลับเวลา"
+                                    tooltipPosition="left"
+                                    ariaLabel="สลับเวลา"
+                                    (onClick)="viewDay(item.operational_day)"
+                                />
+                            }
+                        </td>
                     </tr>
                 }
             </ng-template>
             <ng-template #emptymessage>
                 <tr>
-                    <td colspan="3">ยังไม่มีข้อมูล</td>
+                    <td colspan="4">ยังไม่มีข้อมูล</td>
                 </tr>
             </ng-template>
         </p-table>
@@ -450,9 +515,32 @@ import { parseIsoDate } from '../dashboardclone/services/date-utils';
     <app-incident-history-date-dial />
     `,
     styles: `
+        /* Sized and spaced like the dashboard's scroll-to-top: 50px with a
+           20px icon, sitting the same gap to the left of the 50px date dial
+           in the corner. !important because PrimeNG sets the position inline. */
         :host ::ng-deep .p-scrolltop {
-            right: 4.2rem !important;
+            right: 5rem !important;
             bottom: 1rem !important;
+            width: 50px !important;
+            height: 50px !important;
+        }
+
+        :host ::ng-deep .p-scrolltop .p-scrolltop-icon {
+            font-size: 20px;
+            width: 20px;
+            height: 20px;
+            line-height: 20px;
+        }
+
+        /* Caps the CBD column: labels longer than this truncate instead of
+           widening it. The header's min-width is the same figure so short
+           labels do not narrow it either. */
+        .cbd-label {
+            display: block;
+            max-width: 14rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .p-datatable-frozen-tbody {
@@ -508,6 +596,21 @@ export class IncidentHistoryComponent implements OnInit {
     clear(incidentTable: Table) {
         incidentTable.clear();
     }
+
+    // Switch the page to one of the month's top days. Same call the date
+    // dial's picker makes; the header line at the top changing to the
+    // back-dated notice is the feedback, as it is for the refresh button up
+    // there, and this card sits below a ten-row table, so the page scrolls up
+    // to where the changed data starts.
+    protected readonly viewedDay = computed(() => this.dataService.context()?.operational_day ?? null);
+
+    viewDay(isoDate: string): void {
+        this.dataService.select(parseIsoDate(isoDate));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    protected readonly longDate = computed(() => formatThaiLongDate(this.dataService.selectedDate()));
+    protected readonly shortDate = computed(() => formatThaiShortDate(this.dataService.selectedDate()));
 
     formatDay(isoDate: string): string {
         return parseIsoDate(isoDate).toLocaleDateString('th-TH', {

@@ -22,20 +22,25 @@ function sameSummary(a: DailySummary | null, b: DailySummary | null): boolean {
     imports: [ChartModule, SkeletonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
-        <div class="flex justify-center">
+        <!-- One square box holding all three states, so the card never changes
+             height as the skeleton gives way to the chart.
+             The square is driven by *width* - w-full capped at max-w-90, with
+             aspect-square deriving the height - rather than by a fixed height.
+             Driving it from a fixed height instead pinned the canvas at 360px
+             across every breakpoint, which fitted a desktop column but hung
+             48px outside the card on a 375px phone. This way the box is
+             min(card width, 22.5rem) and simply gets smaller when the card
+             does, so it can never overflow. -->
+        <div class="w-full max-w-90 aspect-square mx-auto flex items-center justify-center">
             @if (!chartReady()) {
-                <!-- Boxed to the chart's own h-90 so finishing the load does not
-                     resize the card; the circle itself stays 20rem. -->
-                <div class="h-90 flex items-center justify-center">
-                    <p-skeleton width="20rem" height="20rem" shape="circle" />
-                </div>
+                <p-skeleton width="100%" height="100%" shape="circle" />
             } @else if (isEmpty()) {
-                <div class="h-90 flex flex-col items-center justify-center gap-3 text-muted-color">
+                <div class="flex flex-col items-center justify-center gap-3 text-muted-color">
                     <i class="pi pi-chart-pie text-5xl opacity-30"></i>
                     <span>ยังไม่มีการบันทึกข้อมูล</span>
                 </div>
             } @else {
-                <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" class="h-90" />
+                <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" [plugins]="chartPlugins" class="block h-full w-full" />
             }
         </div>
     </div>`
@@ -91,6 +96,89 @@ export class DailyIncidentSummaryWidget {
 
     private pendingOptions = false;
 
+    /** Writes the day's total into the hole in the middle of the ring.
+     *
+     *  Passed to p-chart's `plugins` input rather than registered on Chart
+     *  globally, so no other chart on the board grows a number in its centre.
+     *
+     *  Everything is read at draw time - the figures from the live dataset,
+     *  the colours from the document - which means a data push through
+     *  refresh() and a dark/light swap both land here without the plugin
+     *  needing to be rebuilt or re-registered.
+     */
+    protected readonly chartPlugins = [
+        {
+            id: 'centreTotal',
+            // After the arcs, so it sits over the ring; before the tooltip, so
+            // a tooltip still covers it.
+            afterDatasetsDraw: (chart: any) => {
+                const arc = chart.getDatasetMeta(0)?.data?.[0];
+                if (!arc) return;
+
+                // The arc's own centre, not the canvas centre - the legend
+                // along the bottom pushes the ring upwards.
+                const { x, y, innerRadius } = arc.getProps(['x', 'y', 'innerRadius'], true);
+                if (!innerRadius) return;
+
+                const values: number[] = chart.data?.datasets?.[0]?.data ?? [];
+                const total = values.reduce((sum, value) => sum + (value ?? 0), 0);
+
+                const style = getComputedStyle(document.documentElement);
+                const family = getComputedStyle(chart.canvas).fontFamily;
+                // Sized off the hole rather than fixed, so the number still
+                // fits inside the ring on a 264px phone canvas.
+                const totalSize = Math.round(innerRadius * 0.68);
+                const labelSize = Math.round(innerRadius * 0.2);
+
+                // "ครั้ง" rather than "ทั้งหมด": the card is already titled
+                // ผลรวมทั้งหมดต่อวัน, so a unit says something the heading does
+                // not, and it matches the wording used in the tooltips.
+                const totalText = String(total);
+                const unitText = 'รวม';
+                const totalFont = `600 ${totalSize}px ${family}`;
+                const unitFont = `${labelSize}px ${family}`;
+
+                const ctx = chart.ctx;
+                ctx.save();
+                ctx.textAlign = 'center';
+                // Baselines are positioned explicitly below, so the two lines
+                // are placed by their real ink rather than by their em boxes.
+                ctx.textBaseline = 'alphabetic';
+
+                // Measure the glyphs instead of guessing at offsets. Thai
+                // vowels and tone marks stack well above the nominal line box -
+                // ครั้ง carries both ั and ้ - so any spacing derived from the
+                // font size alone either collides with the number above or
+                // leaves the pair sitting visibly low in the ring. Asking for
+                // the actual bounding box gets both lines right, and keeps
+                // working when the ring shrinks on a phone.
+                ctx.font = totalFont;
+                const totalMetrics = ctx.measureText(totalText);
+                const totalAscent = totalMetrics.actualBoundingBoxAscent;
+                const totalDescent = totalMetrics.actualBoundingBoxDescent;
+
+                ctx.font = unitFont;
+                const unitMetrics = ctx.measureText(unitText);
+                const unitAscent = unitMetrics.actualBoundingBoxAscent;
+                const unitDescent = unitMetrics.actualBoundingBoxDescent;
+
+                const gap = labelSize * 0.5;
+                const blockHeight = totalAscent + totalDescent + gap + unitAscent + unitDescent;
+                const blockTop = y - blockHeight / 2;
+
+                ctx.fillStyle = style.getPropertyValue('--text-color');
+                ctx.font = totalFont;
+                ctx.fillText(totalText, x, blockTop + totalAscent);
+
+                ctx.fillStyle = style.getPropertyValue('--text-color-secondary');
+                ctx.font = unitFont;
+                ctx.fillText(unitText, x, blockTop + totalAscent + totalDescent + gap + unitAscent);
+
+                ctx.restore();
+            }
+        }
+    ];
+
     constructor() {
         afterNextRender(() => {
             this.scheduleInitChart(true);
@@ -101,9 +189,32 @@ export class DailyIncidentSummaryWidget {
         // the rebuild lands, which is the same "confident but wrong" state
         // the skeletons exist to prevent - just harder to notice, because it
         // is real data under the wrong heading.
+        //
+        // Taking the skeleton back down is this effect's job too, and it has
+        // to be, because nothing else can be relied on to do it. chartReady is
+        // only ever raised inside initChart, and initChart only runs when a
+        // tracked signal changes - but `counts` is compared by value, and
+        // daily_summary is scoped to the operational *day*, not the shift. So
+        // switching shift on the same day delivers a new object holding the
+        // same three numbers, the equality check correctly reports "no
+        // change", nothing is notified, initChart never runs, and the skeleton
+        // put up above stays up forever.
+        //
+        // Re-arming on the loading edge instead means a finished load always
+        // rebuilds, whether or not this widget's own figures moved.
+        let wasLoading = false;
         effect(() => {
             if (this.loading()) {
                 this.chartReady.set(false);
+                wasLoading = true;
+                return;
+            }
+            if (wasLoading) {
+                wasLoading = false;
+                // Data-only: a shift switch does not touch the theme, and the
+                // canvas is unmounted anyway, so it will be built fresh from
+                // the options already in place.
+                this.scheduleInitChart(false);
             }
         });
 
@@ -183,13 +294,33 @@ export class DailyIncidentSummaryWidget {
             return;
         }
 
+        // Borders are painted in the card's own colour rather than a grey, so
+        // they read as space between the segments instead of an outline drawn
+        // around them - and they stay invisible against the card in either
+        // theme without needing a second palette.
+        const cardColor = documentStyle.getPropertyValue('--surface-card');
+
         this.chartData.set({
             labels: ['เช้า', 'บ่าย', 'ดึก'],
             datasets: [
                 {
                     data,
-                    backgroundColor: [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-300')],
-                    hoverBackgroundColor: [documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-200')]
+                    backgroundColor: [documentStyle.getPropertyValue('--p-primary-600'), documentStyle.getPropertyValue('--p-primary-400'), documentStyle.getPropertyValue('--p-primary-200')],
+                    hoverBackgroundColor: [documentStyle.getPropertyValue('--p-primary-500'), documentStyle.getPropertyValue('--p-primary-300'), documentStyle.getPropertyValue('--p-primary-100')],
+                    // The gap itself. `spacing` pulls the arcs apart; the
+                    // border then thickens that gap and gives each segment a
+                    // clean edge, so three shifts read as three pieces rather
+                    // than one ring cut with hairlines.
+                    spacing: 3,
+                    borderWidth: 3,
+                    borderColor: cardColor,
+                    // Rounded ends, so the gaps look deliberate rather than
+                    // like the ring was snapped apart.
+                    borderRadius: 6,
+                    // Lifts the segment under the cursor out of the ring.
+                    // hoverOffset: 14,
+                    hoverBorderColor: cardColor,
+                    hoverBorderWidth: 3
                 }
             ]
         });
@@ -199,6 +330,21 @@ export class DailyIncidentSummaryWidget {
         }
 
         this.chartOptions.set({
+            // The wrapper is already a square sized to the card, so let the
+            // canvas fill it instead of re-deriving a size from the doughnut's
+            // own 1:1 ratio - that is what left the canvas 60px shorter than
+            // its box.
+            maintainAspectRatio: false,
+            // Required once maintainAspectRatio is false: the canvas then takes
+            // its size straight from the container, and chart.js answers a
+            // resize with update('resize'), whose transition is duration:0 by
+            // default. A chart measured twice as it attaches would lose its
+            // entry animation outright - which is exactly what happened to the
+            // two bar charts. Same 400ms here, for the same reason.
+            transitions: { resize: { animation: { duration: 400, easing: 'easeOutQuart' } } },
+            // A thinner ring than the 50% default - it carries the same
+            // information in less ink, and it clears the middle for the total.
+            cutout: '64%',
             plugins: {
                 legend: {
                     // Under the ring, keyed with the same rounded swatches and
@@ -216,10 +362,13 @@ export class DailyIncidentSummaryWidget {
                     }
                 },
                 tooltip: {
+                    // The footer that used to restate the day's total is gone:
+                    // the centre of the ring now shows it permanently, so
+                    // repeating it in every tooltip was just noise.
+                    usePointStyle: true,
                     callbacks: {
-                        // The total is the one number the ring does not state
-                        // outright, and it is the headline for the day.
-                        footer: (items: any[]) => `รวมทั้งหมด ${((items[0]?.dataset?.data ?? []) as number[]).reduce((sum, value) => sum + (value ?? 0), 0)}`
+                        // "เช้า: 39 ครั้ง" rather than a bare number.
+                        label: (item: any) => ` ${item.label}: ${item.parsed} ครั้ง`
                     }
                 }
             }

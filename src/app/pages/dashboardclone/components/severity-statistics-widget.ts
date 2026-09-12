@@ -208,12 +208,15 @@ const SEVERITY_TONE: Record<string, string> = {
                     <div [class]="'sev-track ' + row.tone"></div>
                 </div>
             }
-        } @else if (isEmpty()) {
-            <div class="flex flex-col items-center justify-center gap-3 py-12 text-muted-color">
-                <i class="pi pi-chart-bar text-5xl opacity-30"></i>
-                <span>ยังไม่มีการบันทึกข้อมูล</span>
-            </div>
         } @else {
+            <!-- No empty state on this card, deliberately. The five triage
+                 levels are a fixed list, not a set of results, so a shift with
+                 nothing recorded yet is honestly described by five rows of
+                 zero - and the reader keeps the scale they will be reading
+                 against once numbers arrive. Swapping in a placeholder would
+                 also collapse the card's height and shove the doughnut below
+                 it up the page. -->
+
             @for (row of rows(); track row.name) {
                 <div class="sev-row">
                     <div class="flex items-baseline justify-between gap-2">
@@ -264,9 +267,4 @@ export class SeverityStatisticsWidget {
             tone: SEVERITY_TONE[item.severity_name?.trim()] ?? 'sev-unknown'
         }));
     });
-
-    // Every level at zero is a real answer - the shift recorded nothing - and
-    // five empty rows would look like a component that failed to load rather
-    // than one saying so.
-    protected readonly isEmpty = computed(() => this.rows().every((row) => row.count === 0));
 }

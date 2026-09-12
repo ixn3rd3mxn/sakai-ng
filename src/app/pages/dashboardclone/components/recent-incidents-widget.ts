@@ -18,8 +18,8 @@ const SKELETON_ROWS = Array.from({ length: 5 }, () => ({}) as RecentIncidentItem
         <p-table [value]="tableRows()" [paginator]="!loading()" [rows]="5" responsiveLayout="scroll">
             <ng-template #header>
                 <tr>
-                    <th style="min-width: 7rem;">เวลา</th>
-                    <th style="min-width: 7rem;">ประเภท</th>
+                    <th style="min-width: 6rem;">เวลา</th>
+                    <th style="min-width: 8rem;">ประเภท</th>
                     <th style="min-width: 7rem;">CBD</th>
                     <th style="min-width: 7rem;">ระดับ</th>
                 </tr>

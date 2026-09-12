@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, computed, inject, signal, OnInit } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -16,11 +16,13 @@ import { DispatchApiService } from '../services/dispatch-api.service';
 import { DispatchDataService } from '../services/dispatch-data.service';
 import { formatDateParam, parseIsoDate } from '../services/date-utils';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
+import { CenteredPanelDirective } from '../../../shared/centered-panel.directive';
+import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
 
 @Component({
     standalone: true,
     selector: 'app-dispatch-action-dial',
-    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule, TooltipModule, BuddhistYearDirective],
+    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule, TooltipModule, BuddhistYearDirective, CenteredPanelDirective],
     template: `<p-toast />
     <p-confirmdialog />
     <!-- Two controls, not one three-item menu. Saving is what this page is for
@@ -67,13 +69,17 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
         (onClick)="openSaveDialog()"
     />
 
-    <p-dialog header="สลับวันเวลา" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '24vw', '960px': '33vw', '500px': '67vw' }" [style]="{ width: '18vw' }" [modal]="true">
+    <p-dialog header="สลับวัน" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '29vw', '960px': '33vw', '500px': '75vw' }" [style]="{ width: '18vw' }" [modal]="true">
         <div class="flex gap-4">
-            <div class="flex flex-col gap-1"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="tempSelectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-1 flex-1 min-w-0"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="tempSelectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
+            <div class="flex flex-col gap-1 flex-1 min-w-0">
                 <div class="font-semibold">เลือกวัน</div>
+                <!-- centeredPanel: the popup is wider than this input, so it is
+                     centred under it (on a phone, on the screen) rather than hung
+                     off its left edge. See CenteredPanelDirective. -->
                 <p-datepicker
                     buddhistYear
+                    centeredPanel
                     [(ngModel)]="tempSelectedDate"
                     [minDate]="minDate"
                     [maxDate]="maxDate"
@@ -102,7 +108,7 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
         </ng-template>
     </p-dialog>
 
-    <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '28vw', '1100px': '40vw', '960px': '44vw', '500px': '80vw' }" [style]="{ width: '23vw' }" [modal]="true">
+    <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '30vw', '1100px': '40vw', '960px': '44vw', '500px': '89vw' }" [style]="{ width: '25vw' }" [modal]="true">
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ประเภท</div>
@@ -155,8 +161,36 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
                 </div>
                 <div class="flex flex-col gap-1">
                     <div class="font-semibold">CBD</div>
+                    <!-- centeredPanel on this select and the severity one below:
+                         their options are nowrap, so the list grows to the
+                         longest name - well past the dialog on a phone - and
+                         would hang off the field's left edge. See
+                         CenteredPanelDirective.
+
+                         Same shape as the flood intake form's long dropdowns:
+                         25 entries is too many to scan on every call, so a
+                         search box on top, and the three CBDs this console
+                         picked most recently above the full list. The
+                         shortlist is per browser, never sent anywhere. -->
                     <div class="w-full">
-                        <p-select [(ngModel)]="cbd" [options]="cbdOptions" optionLabel="name" placeholder="เลือก CBD" class="w-full" appendTo="body" [showClear]="true" [invalid]="isCbdInvalid" />
+                        <p-select
+                            centeredPanel
+                            [(ngModel)]="cbd"
+                            (ngModelChange)="onCbdChanged()"
+                            [options]="cbdGroups()"
+                            [group]="true"
+                            optionGroupLabel="label"
+                            optionGroupChildren="items"
+                            optionLabel="name"
+                            placeholder="เลือก CBD"
+                            [showClear]="true"
+                            [filter]="true"
+                            [resetFilterOnHide]="true"
+                            filterBy="name"
+                            class="w-full"
+                            appendTo="body"
+                            [invalid]="isCbdInvalid"
+                        />
                     </div>
                     @if (isCbdInvalid) {
                         <p-message severity="error" size="small" variant="simple">โปรดเลือก CBD</p-message>
@@ -165,7 +199,7 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
                 <div class="flex flex-col gap-1">
                     <div class="font-semibold">ระดับความรุนแรง</div>
                     <div class="w-full">
-                        <p-select [(ngModel)]="severity" [options]="severityOptions" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [invalid]="isSeverityInvalid" />
+                        <p-select centeredPanel [(ngModel)]="severity" [options]="severityOptions" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [invalid]="isSeverityInvalid" />
                     </div>
                     @if (isSeverityInvalid) {
                         <p-message severity="error" size="small" variant="simple">โปรดเลือกระดับความรุนแรง</p-message>
@@ -238,6 +272,26 @@ import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
             width: 20px;
             height: 20px;
             line-height: 20px;
+        }
+
+        /* Trigger rotation on open. PrimeNG's own p-speeddial-rotate does this
+           for the default + icon but switches itself off once hideIcon is set,
+           so the bars/times pair gets it back here: the icon swap is instant
+           and the quarter turn is what makes it read as one motion. The
+           transition list is Button's own plus transform - a bare transform
+           transition would drop the hover colour fades. */
+        :host ::ng-deep .p-speeddial-button {
+            transition:
+                transform 250ms cubic-bezier(0.4, 0, 0.2, 1),
+                background var(--p-button-transition-duration),
+                color var(--p-button-transition-duration),
+                border-color var(--p-button-transition-duration),
+                box-shadow var(--p-button-transition-duration),
+                outline-color var(--p-button-transition-duration);
+        }
+
+        :host ::ng-deep .p-speeddial-open .p-speeddial-button {
+            transform: rotate(90deg);
         }
 
         /* Shared by all three button groups in this dialog. PrimeNG lays a
@@ -464,6 +518,23 @@ export class DispatchActionDial implements OnInit {
         { name: 'CBD25 อุบัติเหตุจราจร' }
     ];
 
+    // The three CBDs picked most recently on this browser, kept in
+    // localStorage under this page's own key. Same store the flood intake
+    // form uses for its agent/amphoe/tambon shortlists.
+    private readonly recents = new RecentPicksStore<'cbd'>('dispatch-dashboard:recent-picks', ['cbd']);
+
+    // Resolved against cbdOptions by name, so the shortlist holds the very
+    // same option objects as the full list - which is what lets ngModel
+    // recognise the selection whichever section it was picked from.
+    readonly cbdGroups = computed(() => groupByRecent(this.cbdOptions, this.recents.recentOf('cbd'), (o) => o.name));
+
+    onCbdChanged(): void {
+        // Recorded on the pick, not on save: the dispatcher who clears the
+        // field or abandons the call still picked that CBD, and the list is
+        // only a shortcut - nothing downstream reads it.
+        if (this.cbd) this.recents.remember('cbd', this.cbd.name);
+    }
+
     severityOptions: SelectOption[] = [
         { name: 'ระดับที่ 1 สีแดง ฉุกเฉินวิกฤติ' },
         { name: 'ระดับที่ 2 สีเหลือง ฉุกเฉินเร่งด่วน' },
@@ -662,7 +733,7 @@ export class DispatchActionDial implements OnInit {
 
             this.messageService.add({
                 severity: 'success',
-                summary: 'สลับวันเวลา',
+                summary: 'สลับวัน',
                 detail: `เลือกวัน: ${this.tempSelectedDate.toLocaleDateString('th-TH')} เวลา: ${this.tempSelectedTime.name}`
             });
             this.displayDateTime = false;
@@ -687,7 +758,7 @@ export class DispatchActionDial implements OnInit {
         // What is left is the pair that changes which day the board shows.
         this.menuItems = [
             {
-                label: 'สลับวันเวลา',
+                label: 'สลับวัน',
                 icon: 'pi pi-calendar-clock',
                 command: () => {
                     this.openDateTimeDialog();

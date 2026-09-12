@@ -16,6 +16,7 @@ import { FloodAgent, FloodCase, FloodCaseInput, FloodDuplicate, FloodShift } fro
 import { FloodApiService } from '../services/flood-api.service';
 import { FloodDataService } from '../services/flood-data.service';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
+import { groupByRecent } from '../../../shared/recent-picks';
 import { FloodDraftService } from '../services/flood-draft.service';
 import { FloodDuplicateWarning } from './flood-duplicate-warning';
 import { AppUpdateService } from '../../../core/app-update.service';
@@ -91,20 +92,6 @@ function shiftForTime(at: Date | null): FloodShift {
     if (minutes >= MORNING_START_MINUTES && minutes < AFTERNOON_START_MINUTES) return 'morning';
     if (minutes >= AFTERNOON_START_MINUTES || minutes < NIGHT_START_MINUTES) return 'afternoon';
     return 'night';
-}
-
-// The three long dropdowns all read the same way: the handful of values this
-// console actually uses on top, the full list underneath. Recents are resolved
-// against the live list rather than trusted from storage, so an amphoe, tambon
-// or agent that is no longer offered stops appearing without a migration - and
-// a tambon remembered under another amphoe simply is not in the narrowed list.
-//
-// Recents stay in the full list as well: a name that jumps between two sections
-// depending on who used the browser last is harder to find, not easier.
-function groupByRecent<T>(all: T[], recent: string[], valueOf: (item: T) => string): { label: string; items: T[] }[] {
-    const shortlist = recent.map((value) => all.find((item) => valueOf(item) === value)).filter((item): item is T => !!item);
-    const everything = { label: 'ทั้งหมด', items: all };
-    return shortlist.length ? [{ label: 'ใช้ล่าสุด', items: shortlist }, everything] : [everything];
 }
 
 const AUTOSAVE_INTERVAL_MS = 12_000;

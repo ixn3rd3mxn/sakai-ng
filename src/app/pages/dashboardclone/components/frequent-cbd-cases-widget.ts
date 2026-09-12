@@ -114,9 +114,30 @@ export class FrequentCbdCasesWidget {
         // the rebuild lands, which is the same "confident but wrong" state
         // the skeletons exist to prevent - just harder to notice, because it
         // is real data under the wrong heading.
+        //
+        // Taking the skeleton back down is this effect's job too, and it has
+        // to be, because nothing else can be relied on to do it. chartReady is
+        // only ever raised inside initChart, and initChart only runs when a
+        // tracked signal changes - but `rows` is compared by value, and two
+        // shifts that both recorded no CBD cases compare equal as a pair of
+        // empty lists. Nothing is notified, initChart never runs, and the
+        // skeleton put up above stays up forever.
+        //
+        // Re-arming on the loading edge instead means a finished load always
+        // rebuilds, whether or not this widget's own figures moved.
+        let wasLoading = false;
         effect(() => {
             if (this.loading()) {
                 this.chartReady.set(false);
+                wasLoading = true;
+                return;
+            }
+            if (wasLoading) {
+                wasLoading = false;
+                // Data-only: a shift switch does not touch the theme, and the
+                // canvas is unmounted anyway, so it will be built fresh from
+                // the options already in place.
+                this.scheduleInitChart(false);
             }
         });
 

@@ -138,9 +138,25 @@ export class HourlyChartWidget {
     constructor() {
         afterNextRender(() => this.scheduleInitChart(true));
 
+        // Raising chartReady again is this effect's job as well as lowering it.
+        // It is only ever raised inside initChart, and initChart only runs when
+        // a tracked signal changes - but `buckets` is compared by value, so two
+        // days that both recorded nothing deliver 24 identical zero rows, the
+        // equality check correctly reports "no change", and nothing is
+        // notified. The skeleton put up here would then stay up forever.
+        //
+        // Re-arming on the loading edge means a finished load always rebuilds,
+        // whether or not the hours themselves moved.
+        let wasLoading = false;
         effect(() => {
             if (this.data.loading()) {
                 this.chartReady.set(false);
+                wasLoading = true;
+                return;
+            }
+            if (wasLoading) {
+                wasLoading = false;
+                this.scheduleInitChart(false);
             }
         });
 

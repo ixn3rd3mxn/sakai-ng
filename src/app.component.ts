@@ -1,6 +1,7 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { AppUpdateNotice } from './app/core/app-update-notice';
+import { ModalScrollLock } from './app/core/modal-scroll-lock';
 
 @Component({
     selector: 'app-root',
@@ -10,4 +11,8 @@ import { AppUpdateNotice } from './app/core/app-update-notice';
     // changes, and it has to appear on the login and landing pages too.
     template: `<router-outlet></router-outlet><app-update-notice />`
 })
-export class AppComponent {}
+export class AppComponent {
+    // Injected for its side effect: it watches the document for stacked
+    // modal dialogs from here on, on every route.
+    private readonly scrollLock = inject(ModalScrollLock);
+}

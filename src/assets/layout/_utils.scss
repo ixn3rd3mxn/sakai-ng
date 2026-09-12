@@ -17,9 +17,47 @@
 }
 
 .p-toast {
+    /* Stock width is 25rem, wider than a phone screen, where the toast hung
+       off the left edge. Cap it so the 20px gutter PrimeNG gives it on the
+       right shows on the left too; on anything wider this never binds. */
+    max-width: calc(100vw - 40px);
+
     &.p-toast-top-right,
     &.p-toast-top-left,
     &.p-toast-top-center {
         top: 100px;
+    }
+}
+
+/* Select popups opened by a field carrying CenteredPanelDirective (see
+   shared/centered-panel.directive.ts, which puts this class on the list via
+   panelStyleClass). The directive sizes the list to its field's width and
+   sits it flush underneath; these are the two parts that have to be CSS.
+
+   1. What happens to an option longer than the field. PrimeNG's options are
+      nowrap with overflow hidden, so without this the long CBD names would
+      be cut mid-character. Cut at the label with an ellipsis instead.
+
+      > span, not a class: PrimeNG 21 renders the option text in a bare span
+      (SelectItem's template), with no class to hook. The span is a flex
+      item, and a flex item refuses to shrink below its text unless
+      min-width says it may - the ellipsis never appears otherwise.
+
+   2. Never wider than the screen, from the moment the list is created. The
+      directive sizes the list on show, but PrimeNG appends it to body at
+      its natural width first and measures the field after, and a list wider
+      than a phone screen overflows the page for that instant - which a
+      mobile browser answers by zooming the page out, moving the dialog
+      under PrimeNG's measurement. The class has to be on the list before
+      that, hence panelStyleClass rather than the class the directive adds
+      on show. */
+.p-select-overlay.centered-panel-select {
+    max-width: 100vw;
+
+    .p-select-option > span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 }
