@@ -62,6 +62,24 @@ const BREAKDOWN_ICONS: Record<string, string> = {
         '[style.--label-scale]': 'appliedScale()'
     },
     styles: `
+        /* The comparison line stays one line and one size: where it does not
+           fit it is cut with an ellipsis rather than wrapped, which made the
+           row of cards ragged. The full text is in the title. Same rule as
+           call-stats-widget on /report/manual-dashboard.
+
+           The padding/negative-margin pair is the same trick as the CBD column
+           on /report/summary: Thai stacked marks (เมื่ carries ื and ่) reach
+           past the line box, and overflow: hidden would clip them; the box is
+           padded so they fit and the margin pulls the layout back so the line
+           takes no extra height. */
+        .diff-line {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-block: 0.25em;
+            margin-block: -0.25em;
+        }
+
         /* Every card in the row below is tinted - a share of a status colour
            mixed into the surface - and the default skeleton is a 6% white wash
            tuned for a neutral background, which all but disappears on them.
@@ -325,7 +343,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                 @if (loading()) {
                     <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                 } @else {
-                    <div class="text-sm">
+                    <div class="text-sm diff-line" [title]="diffText(totalDiff()) + ' เทียบกับเมื่อวาน'">
                         <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
                         <span> เทียบกับเมื่อวาน</span>
                     </div>
@@ -356,8 +374,10 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                         <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                     } @else {
                         <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
-                             line gets, and at base size it wrapped. -->
-                        <div class="text-sm">
+                             line gets, and at base size it wrapped. Where even
+                             text-sm does not fit, .diff-line cuts it with an
+                             ellipsis. -->
+                        <div class="text-sm diff-line" [title]="diffText(card.diff) + ' เทียบกับเมื่อวาน'">
                             <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>

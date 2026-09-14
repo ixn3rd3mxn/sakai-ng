@@ -1,10 +1,11 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, effect, input, viewChild } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
-import { TableModule } from 'primeng/table';
+import { Table, TableModule } from 'primeng/table';
 import { SkeletonModule } from 'primeng/skeleton';
 import { TagModule } from 'primeng/tag';
 import { CallLogEntry, CallStatus } from '../call-log.types';
 import { formatDuration } from '../format-utils';
+import { PageFillerRow, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
 
 // Wording matches the stat cards above the table on purpose - "รับสาย" and
 // "ไม่ได้รับสาย" mean the same thing in both places, so a reader can tie a row
@@ -22,13 +23,15 @@ const STATUS_TAG: Record<CallStatus, { label: string; severity: 'success' | 'dan
     unknown: { label: 'ไม่ทราบสถานะ', severity: 'secondary' }
 };
 
-const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
+const PAGE_SIZE = 8;
+
+const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEntry);
 
 @Component({
     standalone: true,
     selector: 'app-call-log',
     imports: [TableModule, SkeletonModule, ButtonModule, TagModule],
-    template: `<div class="card" style="margin-bottom: 0.25rem">
+    template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
                  where this page already puts one - beside the heading, not
@@ -62,7 +65,7 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
              double the row height and ruin the scan down the columns. At the
              current 8/12 split there is room to spare, but a narrower column
              would otherwise start folding the time range. -->
-        <p-table [value]="tableRows()" [paginator]="!loading()" [rows]="8" stripedRows [scrollable]="true" [rowHover]="true" responsiveLayout="scroll">
+        <p-table [value]="tableRows()" [paginator]="true" [rows]="PAGE_SIZE" stripedRows [scrollable]="true" [rowHover]="true" responsiveLayout="scroll">
             <ng-template #header>
                 <!-- One 8rem floor for every column, here and in the missed-calls
                      table, so the two read as one grid rather than two tables that
@@ -96,7 +99,22 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
                         <td><p-skeleton /></td>
                         <td><p-skeleton /></td>
                         <td><p-skeleton width="4rem" /></td>
-                        <td><p-skeleton width="6rem" /></td>
+                        <!-- In a tag-sized box (.tag-box, _utils.scss) so a loading
+                             row is as tall as a loaded one; a bare skeleton is 1rem,
+                             shorter than the status tag every real row carries. -->
+                        <td><span class="tag-box"><p-skeleton width="6rem" /></span></td>
+                    </tr>
+                } @else if (isPageFiller(call)) {
+                    <!-- Pads a short page to PAGE_SIZE rows so the paginator
+                         does not move; see page-filler.ts. The last cell sits in
+                         the same tag-sized box so a filler is as tall as a row
+                         with a status tag. -->
+                    <tr>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td class="text-right">-</td>
+                        <td><span class="tag-box">-</span></td>
                     </tr>
                 } @else {
                     <tr>
@@ -127,9 +145,11 @@ const SKELETON_ROWS = Array.from({ length: 8 }, () => ({}) as CallLogEntry);
                     </tr>
                 }
             </ng-template>
+            <!-- Only ever the failure case: a day with nothing recorded is a
+                 page of fillers, not an empty table. -->
             <ng-template #emptymessage>
                 <tr>
-                    <td colspan="5">{{ emptyMessage() }}</td>
+                    <td colspan="5">ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้</td>
                 </tr>
             </ng-template>
         </p-table>
@@ -147,9 +167,27 @@ export class CallLogWidget {
      *  presentational, like `available` above. */
     health = input<string>('');
 
-    protected readonly tableRows = computed<CallLogEntry[]>(() => (this.loading() ? SKELETON_ROWS : this.calls()));
+    protected readonly PAGE_SIZE = PAGE_SIZE;
+    protected readonly isPageFiller = isPageFiller;
 
-    protected readonly emptyMessage = computed(() => (this.available() ? 'ยังไม่มีการบันทึกข้อมูล' : 'ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้'));
+    // Padded to whole pages so a short page does not move the paginator (see
+    // page-filler.ts). Left empty when the feed is down so the table says so
+    // instead of showing a page of dashes that reads as "no calls today".
+    protected readonly tableRows = computed<(CallLogEntry | PageFillerRow)[]>(() => {
+        if (this.loading()) return SKELETON_ROWS;
+        return this.available() ? padToPage(this.calls(), PAGE_SIZE) : [];
+    });
+
+    private readonly table = viewChild.required(Table);
+
+    constructor() {
+        // Back to page 1 when the page being viewed no longer exists - see
+        // MissedCallsWidget for why the table's own paginator is not enough.
+        effect(() => {
+            const table = this.table();
+            if ((table.first ?? 0) >= this.tableRows().length) table.first = 0;
+        });
+    }
 
     // Same HH:MM:SS the four duration cards use, so a row here can be read
     // against the averages above without converting units in your head.

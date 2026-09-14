@@ -124,10 +124,11 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
         }
     `,
     template: `
-        <!-- mt-8 matches the 2rem rhythm .card uses between blocks, so this
-             section reads as separate from the stat cards above rather than
-             running on from them. -->
-        <div class="flex flex-wrap items-baseline justify-between gap-2 mt-8 mb-4">
+        <!-- mt-4: this heading sits outside a card, so it gets the 1rem a card
+             title would get from its own padding and no more - the page is
+             spaced as tightly as /report/dashboard, where rows are 0.5rem
+             apart and nothing carries the 2rem .card rhythm. -->
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mt-4 mb-4">
             <div class="font-semibold text-xl">สถานะเจ้าหน้าที่ปฏิบัติงาน</div>
             @if (status()) {
                 <div class="flex items-center gap-2 text-sm text-surface-500 dark:text-surface-400">

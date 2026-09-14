@@ -47,7 +47,7 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
     standalone: true,
     selector: 'app-hourly-chart',
     imports: [ChartModule, SkeletonModule, ButtonModule],
-    template: `<div class="card" style="margin-bottom: 0.25rem">
+    template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <div class="font-semibold text-xl">สถิติจำนวนการใช้บริการตามเวลา</div>
             <!-- Opens the official NIEMS page in a new tab. An anchor rather

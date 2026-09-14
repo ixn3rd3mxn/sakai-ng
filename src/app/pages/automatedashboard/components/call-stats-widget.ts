@@ -64,6 +64,21 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
         .card {
             --p-skeleton-background: color-mix(in srgb, var(--text-color) 12%, transparent);
             --p-skeleton-animation-background: color-mix(in srgb, var(--text-color) 28%, transparent);
+
+            /* Kills .card's margin-bottom: 2rem.
+
+               The Tailwind mb-0 in the template never applied: .card is
+               unlayered while utilities live in @layer utilities, and unlayered
+               author styles outrank layered ones no matter the source order. So
+               every stat card carried 2rem of bottom margin - the gap under each
+               row of cards, and the bulk of the space above the roster heading.
+               Component styles are unlayered too and Angular's scoping attribute
+               adds specificity, so this wins cleanly without !important.
+               Spacing comes from the grid gap instead.
+
+               Same fix as incident-type-stats-widget on /report/dashboard and
+               agent-status-widget below. */
+            margin-bottom: 0;
         }
 
         /* Each card sets its own --card-hue; the strength is shared, which is
@@ -144,6 +159,27 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 
         :host-context(.app-dark) .diff-worse {
             color: var(--p-red-100);
+        }
+
+        /* The comparison line stays one line and one size. Where it does not
+           fit - the counter cards are ~106px inside at 150% browser zoom with
+           the sidebar open, and "+12 เทียบกับเมื่อวาน" is wider than that at
+           14px - it is cut with an ellipsis rather than wrapped or shrunk: a
+           second line made the row of cards ragged, and 12px read as a
+           different element from the rest of the card. The full text is in
+           the title.
+
+           The padding/negative-margin pair is the same trick as the CBD column
+           on /report/summary: Thai stacked marks (เมื่ carries ื and ่) reach
+           past the line box, and overflow: hidden would clip them; the box is
+           padded so they fit and the margin pulls the layout back so the line
+           takes no extra height. */
+        .diff-line {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-block: 0.25em;
+            margin-block: -0.25em;
         }
 
         /* The card labels, sized off a variable rather than a Tailwind step.
@@ -316,8 +352,10 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                         <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                     } @else if (card.diff !== null) {
                         <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
-                             line gets, and at base size it wrapped too. -->
-                        <div class="text-sm">
+                             line gets, and at base size it wrapped too. Where
+                             even text-sm does not fit, .diff-line cuts it with
+                             an ellipsis. -->
+                        <div class="text-sm diff-line" [title]="diffText(card.diff) + ' เทียบกับเมื่อวาน'">
                             <span [class]="diffClass(card.diff, card.polarity)">{{ diffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>
@@ -341,7 +379,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                             @if (loading()) {
                                 <p-skeleton width="min(9rem, 100%)" height="3rem" />
                             } @else {
-                                <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl sm:text-5xl">{{ card.value }}</div>
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl lg:text-4xl 2xl:text-5xl">{{ card.value }}</div>
                             }
                         </div>
                     </div>
@@ -350,8 +388,9 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                     } @else if (card.diff !== null) {
                         <!-- Same xs/sm split as the counter row. This line is
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
-                             is the one that wrapped first on mobile. -->
-                        <div class="text-xs sm:text-sm diff-line-time">
+                             is the one that wrapped first on mobile; .diff-line
+                             cuts it with an ellipsis where it still does not fit. -->
+                        <div class="text-xs sm:text-sm diff-line diff-line-time" [title]="durationDiffText(card.diff) + ' เทียบกับเมื่อวาน'">
                             <span [class]="diffClass(card.diff, card.polarity)">{{ durationDiffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>

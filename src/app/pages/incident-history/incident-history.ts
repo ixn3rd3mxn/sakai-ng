@@ -339,7 +339,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
                     <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:101px">ต่อเวรบ่าย</th>
                     <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
@@ -379,7 +379,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
                     <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:101px">ต่อเวรบ่าย</th>
                     <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
@@ -419,7 +419,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
                     <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:101px">ต่อเวรบ่าย</th>
                     <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
@@ -459,7 +459,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
                     <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:101px">ต่อเวรบ่าย</th>
                     <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>
@@ -499,7 +499,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                 <tr>
                     <th style="min-width:356px">ชื่อ</th>
                     <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:100px">ต่อเวรบ่าย</th>
+                    <th style="min-width:101px">ต่อเวรบ่าย</th>
                     <th style="min-width:100px">ต่อเวรดึก</th>
                     <th style="min-width:100px">ต่อวัน</th>
                     <th style="min-width:100px">ต่อสัปดาห์</th>

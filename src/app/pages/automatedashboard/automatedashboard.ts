@@ -44,18 +44,18 @@ import { CallStatsDataService } from './services/call-stats-data.service';
                  it elaborates: 24 stacked columns want the whole page, and
                  putting it higher would push the live agent board under a
                  22rem canvas on a screen where "who is free now" is the thing
-                 people look up. mt-8 keeps the rhythm the roster set. -->
-            <div class="col-span-12 mt-8">
+                 people look up. mt-4 on top of the grid gap: the same 1rem
+                 break the roster heading gets above it, so the chart reads as
+                 a new section rather than another row of the roster. The two
+                 tables below carry no margin - they continue the chart. -->
+            <div class="col-span-12 mt-4">
                 <app-hourly-chart />
             </div>
-            <!-- mt-8 matches the margin agent-status-widget puts above its own
-                 heading, keeping one rhythm down the page. Both carry it so the
-                 pair stays level at xl and stays separated when they stack. -->
             <!-- Exceptions on the left, so the short actionable list is read
                  first. The two will not always be the same height - missed
                  calls is usually a handful of rows and the log fills up as the
                  day goes on - which is the cost of putting them side by side. -->
-            <div class="col-span-12 xl:col-span-4 mt-8">
+            <div class="col-span-12 xl:col-span-4">
                 <app-missed-calls
                     [calls]="callLogData.missed()"
                     [loading]="callLogData.loading()"
@@ -63,7 +63,7 @@ import { CallStatsDataService } from './services/call-stats-data.service';
                     [health]="callLogData.healthMessage()"
                 />
             </div>
-            <div class="col-span-12 xl:col-span-8 mt-8">
+            <div class="col-span-12 xl:col-span-8">
                 <app-call-log
                     [calls]="callLogData.calls()"
                     [loading]="callLogData.loading()"
