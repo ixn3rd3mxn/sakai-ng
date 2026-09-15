@@ -69,17 +69,25 @@ export interface MissedCallEntry {
     anonymous: boolean;
 }
 
-export interface CallLogSummary {
+/** One frame of `/call-log/missed/stream`: the abandoned-call table alone. */
+export interface MissedCallsSummary {
     /** Bangkok calendar day, resolved server-side. */
     day: string;
-    /** False when that feed could not be read. Distinct from an empty array,
+    /** False when the feed could not be read. Distinct from an empty array,
      *  which means "none today" - a real and reassuring claim that must not be
      *  made on the strength of a failed request. */
     missed_available: boolean;
-    calls_available: boolean;
     missed: MissedCallEntry[];
+    /** Naive Bangkok wall-clock of the last cycle in which the feed read. */
+    fetched_at: string | null;
+    health: FeedHealth;
+}
+
+/** One frame of `/call-log/calls/stream`: the answered-call table alone. */
+export interface CallsSummary {
+    day: string;
+    calls_available: boolean;
     calls: CallLogEntry[];
-    /** Naive Bangkok wall-clock of the last cycle in which either feed read. */
     fetched_at: string | null;
     /** This log is the independent witness the counters are checked against -
      *  it lists calls one by one over a different endpoint, so it can
@@ -87,3 +95,8 @@ export interface CallLogSummary {
      *  lands on both payloads, because either side could be the stale one. */
     health: FeedHealth;
 }
+
+/** Both tables in one payload - the shape of the one-shot `GET /call-log`.
+ *  The live boards stream the two halves separately (see the two services),
+ *  so that a table switched off stops its own upstream polling. */
+export type CallLogSummary = MissedCallsSummary & CallsSummary;

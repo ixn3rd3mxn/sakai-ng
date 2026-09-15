@@ -13,6 +13,7 @@ import datetime as dt
 
 from tests import helpers  # noqa: F401  - path/env setup, must precede libs
 from libs import call_stats as cs
+from libs import feed_health as fh
 
 TZ = cs.BANGKOK_TZ
 UTC = dt.timezone.utc
@@ -464,3 +465,77 @@ def test_hourly_ignores_rows_with_an_unusable_pointer():
     out = cs.parse_hourly({"data": [_hour(24, 9, 9, 0), {"pointer": True}, _hour(5, 3, 3, 0)]})
     assert out[5]["incoming"] == 3
     assert sum(b["incoming"] for b in out) == 3, "hour 24 does not exist and must not be folded in"
+
+
+# ---------------------------------------------------------------------------
+# The hourly chart's own feed
+# ---------------------------------------------------------------------------
+
+
+def test_the_counters_payload_no_longer_carries_the_chart():
+    """The buckets stream separately so a board with the chart switched off
+    does not fetch them. If they creep back into the counters' payload the
+    chart's switch stops meaning anything on the wire."""
+    helpers.reset_call_stats(cs)
+    touched: list[str] = []
+    helpers.stub_call_stats(
+        cs,
+        rollup=lambda day: cs.CallStats(incoming=3, answer=3),
+        live=None,
+        times=None,
+        hourly=lambda day: touched.append("hourly") or [],
+    )
+    payload = asyncio.run(cs.get_call_stats())
+    assert "hourly" not in payload
+    assert touched == [], "resolving the counters must not read the hourly endpoint"
+
+
+def test_the_hourly_payload_says_when_the_feed_was_unreadable():
+    helpers.reset_call_stats(cs)
+    helpers.stub_call_stats(cs, hourly=None)
+    payload = asyncio.run(cs.get_hourly())
+    assert payload["available"] is False and payload["hourly"] is None
+    assert payload["fetched_at"] is None, "nothing was read, so nothing dates the payload"
+    assert payload["is_current"] is True
+
+
+def test_a_finished_day_is_fetched_once_and_a_failed_read_is_not_pinned():
+    helpers.reset_call_stats(cs)
+    fetched: list = []
+    buckets = {"n": None}
+    helpers.stub_call_stats(cs, hourly=lambda day: fetched.append(day) or buckets["n"])
+    yesterday = cs.bangkok_calendar_day() - dt.timedelta(days=1)
+
+    asyncio.run(cs.get_hourly(yesterday))
+    asyncio.run(cs.get_hourly(yesterday))
+    assert len(fetched) == 2, "an unreadable past day is retried, not remembered as empty"
+
+    buckets["n"] = []
+    asyncio.run(cs.get_hourly(yesterday))
+    asyncio.run(cs.get_hourly(yesterday))
+    assert len(fetched) == 3, "a past day that read is final and never refetched"
+
+    asyncio.run(cs.get_hourly())
+    asyncio.run(cs.get_hourly())
+    assert len(fetched) == 5, "today is never cached - it is still changing"
+
+
+def test_the_hourly_feed_reports_its_sum_for_the_daily_total_check():
+    helpers.reset_call_stats(cs)
+    fh.reset()
+    helpers.stub_call_stats(cs, hourly=[{"hour": 9, "label": "09:00", "incoming": 4, "answer": 4, "missed": 0}])
+    asyncio.run(cs.get_hourly())
+    assert fh.snapshot()["observed_seconds_ago"].get(fh.HOURLY) is not None
+
+    # A past day has nothing to disagree with, so it does not report.
+    fh.reset()
+    asyncio.run(cs.get_hourly(cs.bangkok_calendar_day() - dt.timedelta(days=1)))
+    assert fh.HOURLY not in fh.snapshot()["observed_seconds_ago"]
+
+
+def test_the_hourly_loop_wakes_for_midnight():
+    """Same rollover rule as the counters: the sleep never overshoots
+    Bangkok midnight, so the chart swaps onto the new day as it begins."""
+    assert cs._hourly_interval({"available": True}) <= cs.POLL_SECONDS
+    assert cs._hourly_interval({"available": True}) <= cs.seconds_until_next_bangkok_midnight() + 1
+    assert cs._hourly_interval({"available": False}) <= cs.RETRY_SECONDS

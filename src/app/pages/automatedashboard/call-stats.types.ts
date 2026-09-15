@@ -23,6 +23,23 @@ export interface HourlyBucket {
     missed: number;
 }
 
+/** One frame of `/call-stats/hourly/stream`, or the body of
+ *  `GET /call-stats/hourly?day=`. The chart's data used to ride on
+ *  `CallStatsSummary`; it is its own payload now so a board with the chart
+ *  switched off does not fetch it - see HourlyDataService. */
+export interface HourlySummary {
+    /** Bangkok calendar day, resolved server-side. */
+    day: string;
+    is_current: boolean;
+    /** False when the feed could not be read. The chart blanks on its own,
+     *  exactly as the duration cards do, rather than drawing 24 empty hours. */
+    available: boolean;
+    /** 24 buckets in hour order, or null when unavailable. */
+    hourly: HourlyBucket[] | null;
+    fetched_at: string | null;
+    health: FeedHealth;
+}
+
 export interface CallStatsSummary {
     /** Bangkok calendar day these counters cover, as `YYYY-MM-DD`. Resolved
      *  server-side - never computed in the browser, whose clock and timezone
@@ -85,11 +102,6 @@ export interface CallStatsSummary {
      *  cumulative, so both read low all morning simply because the day is
      *  young - the same partial-day caveat the counter row carries. */
     times_diff: CallTimes | null;
-
-    /** 24 hourly buckets for the chart, or null when that feed could not be
-     *  read. Independent of `available` and of `times`: the chart blanks on
-     *  its own, exactly as the duration cards do. */
-    hourly: HourlyBucket[] | null;
 
     /** The day `diff` is measured against - always the day before `day`. */
     compare_day: string;

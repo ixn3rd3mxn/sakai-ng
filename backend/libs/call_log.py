@@ -1,8 +1,8 @@
 """Per-call detail for the two log tables on the automate dashboard.
 
-Two upstream feeds, one for each table. They are read together in a single
-poll cycle but they cost wildly different amounts, which is worth knowing
-before changing the interval:
+Two upstream feeds, one for each table, each on its own poll loop. They cost
+wildly different amounts, which is worth knowing before changing the interval
+- and is why they are no longer read together in one cycle:
 
 * **abandoned** (`/v2/abandon/today`) ~2.4s even with the connection
   warm. Grouped by caller, not by call: one row per number, carrying `amount`
@@ -27,8 +27,6 @@ agent is identified by extension and named from our own mapping instead.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 from datetime import date as date_cls
@@ -37,7 +35,7 @@ from typing import Optional
 
 import httpx
 
-from libs import agents, feed_health, relay
+from libs import agents, broadcast, feed_health, relay
 from libs.call_stats import bangkok_calendar_day, day_epoch_window
 from libs.shift import BANGKOK_TZ
 
@@ -300,105 +298,114 @@ async def _fetch_call_logs(day: date_cls, names: dict[str, str]) -> Optional[lis
     return collected
 
 
-async def get_call_log(day: Optional[date_cls] = None) -> dict:
-    """Both tables in one payload.
+def _fetched_at(*readable: bool) -> Optional[str]:
+    """Naive Bangkok wall-clock, or None when nothing was actually read."""
+    return datetime.now(BANGKOK_TZ).replace(tzinfo=None).isoformat() if any(readable) else None
 
-    The two feeds are fetched concurrently and their failures are independent:
-    the abandoned feed is roughly seventy times slower, and one being
-    unreachable must not blank the other's table.
+
+async def get_missed() -> dict:
+    """The abandoned-call table on its own.
+
+    Today only, always: the upstream path is fixed (`/v2/abandon/today`) and
+    takes no day.
     """
+    missed = await _fetch_abandoned()
+    return {
+        "day": bangkok_calendar_day().isoformat(),
+        # A flag rather than an empty list: an empty list means "none today",
+        # which is a real and reassuring statement, while an unreadable feed
+        # means nothing is known. The two must not render the same way.
+        "missed_available": missed is not None,
+        "missed": missed or [],
+        "fetched_at": _fetched_at(missed is not None),
+        "health": feed_health.for_feed(feed_health.CALL_LOG),
+    }
+
+
+async def get_calls(day: Optional[date_cls] = None) -> dict:
+    """The answered-call table on its own."""
     target = day or bangkok_calendar_day()
     names = await agents.load_names()
-    missed, calls = await asyncio.gather(_fetch_abandoned(), _fetch_call_logs(target, names))
+    calls = await _fetch_call_logs(target, names)
 
     # This feed is the independent witness the counters are checked against:
     # it lists calls one by one over a different endpoint, so it can contradict
-    # a summary feed claiming the day was silent. See libs.feed_health.
+    # a summary feed claiming the day was silent. See libs.feed_health. Only
+    # this half reports - the abandoned table takes no part in any check, so
+    # a board showing it alone has nothing to say to the health module.
     feed_health.report_call_log(
         day=target.isoformat(),
         calls_available=calls is not None,
         calls=len(calls or []),
-        missed=len(missed or []),
     )
 
     return {
         "day": target.isoformat(),
-        # Separate flags rather than one: an empty list means "none today",
-        # which is a real and reassuring statement, while an unreadable feed
-        # means nothing is known. The two must not render the same way.
-        "missed_available": missed is not None,
         "calls_available": calls is not None,
-        "missed": missed or [],
         "calls": calls or [],
-        "fetched_at": (
-            datetime.now(BANGKOK_TZ).replace(tzinfo=None).isoformat()
-            if (missed is not None or calls is not None)
-            else None
-        ),
+        "fetched_at": _fetched_at(calls is not None),
+        "health": feed_health.for_feed(feed_health.CALL_LOG),
+    }
+
+
+async def get_call_log(day: Optional[date_cls] = None) -> dict:
+    """Both tables in one payload, for the one-shot GET.
+
+    The two feeds are fetched concurrently and their failures are independent:
+    the abandoned feed is roughly seventy times slower, and one being
+    unreachable must not blank the other's table.
+
+    The live boards do not use this: each table streams its own half (see the
+    broadcast section), so a board with one table switched off does not keep
+    the other feed's upstream busy.
+    """
+    missed, calls = await asyncio.gather(get_missed(), get_calls(day))
+    return {
+        **missed,
+        **calls,
+        "fetched_at": calls["fetched_at"] or missed["fetched_at"],
+        # Read after both halves, so a contradiction the calls half just
+        # raised is on this payload rather than one cycle late.
         "health": feed_health.for_feed(feed_health.CALL_LOG),
     }
 
 
 # ---------------------------------------------------------------------------
-# Live broadcast - one poll loop shared by every connection, started on the
-# first subscriber and cancelled with the last, so a board nobody is watching
-# polls nothing. Same shape as libs.agents and libs.call_stats.
+# Live broadcast - one poll loop per table (libs.broadcast.Feed), each shared
+# by every connection to it and running only while one exists.
+#
+# Two loops rather than one carrying both tables, because the two feeds cost
+# so differently. The abandoned feed takes ~2.4s per read; a wall display that
+# shows the stat rows and the roster and never scrolls down to either table
+# was nonetheless keeping both feeds polled around the clock. With one loop
+# per table, a board switches a table off and that table's upstream goes
+# quiet - and the ~35ms call-log feed no longer waits on the slow one to be
+# gathered alongside it.
 # ---------------------------------------------------------------------------
 
-_subscribers: set[asyncio.Queue] = set()
-_poller: Optional[asyncio.Task] = None
-_latest: Optional[dict] = None
-_latest_signature: Optional[str] = None
+# `fetched_at` is in the signed payload so an idle board still receives a
+# frame each poll and can prove it is alive - see the same decision in
+# call_stats. Kept as a module name because the tests read it.
+_signature = broadcast.signature
 
-
-def _signature(payload: dict) -> str:
-    # `fetched_at` is included so an idle board still receives a frame each
-    # poll and can prove it is alive - see the same decision in call_stats.
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-
-
-async def _poll_loop() -> None:
-    global _latest, _latest_signature
-    while True:
-        payload = await get_call_log()
-        signature = _signature(payload)
-        if signature != _latest_signature:
-            _latest, _latest_signature = payload, signature
-            for queue in list(_subscribers):
-                if queue.full():
-                    try:
-                        queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                queue.put_nowait(payload)
-        readable = payload["missed_available"] or payload["calls_available"]
-        await asyncio.sleep(POLL_SECONDS if readable else RETRY_SECONDS)
-
-
-async def subscribe() -> asyncio.Queue:
-    global _poller
-    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
-    _subscribers.add(queue)
-    if _poller is None or _poller.done():
-        _poller = asyncio.create_task(_poll_loop())
-    if _latest is not None:
-        queue.put_nowait(_latest)
-    return queue
-
-
-def unsubscribe(queue: asyncio.Queue) -> None:
-    global _poller
-    _subscribers.discard(queue)
-    if not _subscribers and _poller is not None:
-        _poller.cancel()
-        _poller = None
+missed_feed = broadcast.Feed(
+    "call-log-missed",
+    get_missed,
+    lambda payload: POLL_SECONDS if payload["missed_available"] else RETRY_SECONDS,
+    RETRY_SECONDS,
+)
+calls_feed = broadcast.Feed(
+    "call-log-calls",
+    get_calls,
+    lambda payload: POLL_SECONDS if payload["calls_available"] else RETRY_SECONDS,
+    RETRY_SECONDS,
+)
 
 
 async def aclose() -> None:
-    global _poller, _client, _client_loop
-    if _poller is not None:
-        _poller.cancel()
-        _poller = None
+    global _client, _client_loop
+    missed_feed.close()
+    calls_feed.close()
     if _client is not None:
         await _client.aclose()
         _client = None

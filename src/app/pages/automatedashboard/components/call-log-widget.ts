@@ -1,7 +1,8 @@
-import { Component, computed, effect, input, viewChild } from '@angular/core';
+import { Component, computed, effect, input, output, viewChild } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 import { Table, TableModule } from 'primeng/table';
 import { SkeletonModule } from 'primeng/skeleton';
+import { TooltipModule } from 'primeng/tooltip';
 import { TagModule } from 'primeng/tag';
 import { CallLogEntry, CallStatus } from '../call-log.types';
 import { formatDuration } from '../format-utils';
@@ -30,7 +31,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
 @Component({
     standalone: true,
     selector: 'app-call-log',
-    imports: [TableModule, SkeletonModule, ButtonModule, TagModule],
+    imports: [TableModule, SkeletonModule, ButtonModule, TagModule, TooltipModule],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
@@ -38,10 +39,27 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                  floating between the heading and the link. -->
             <div class="flex items-baseline gap-2 min-w-0">
                 <div class="font-semibold text-xl">ประวัติการรับสาย</div>
-                @if (health()) {
+                @if (enabled() && health()) {
                     <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
                 }
             </div>
+            <!-- Switches the card off for this browser - see CardVisibilityService
+                 for what that buys and why every card starts on. Present in
+                 both states, in the same spot, so the card can be flipped
+                 repeatedly without chasing a button; the button in the middle
+                 of a switched-off card is the second, more obvious way back. -->
+            <p-button
+                [icon]="enabled() ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                severity="secondary"
+                size="small"
+                [text]="true"
+                [rounded]="true"
+                [ariaLabel]="enabled() ? 'ปิดการ์ดนี้' : 'เปิดการ์ดนี้'"
+                [pTooltip]="enabled() ? 'ปิดการ์ดนี้ (หยุดรับข้อมูล)' : 'เปิดการ์ดนี้'"
+                tooltipPosition="left"
+                class="shrink-0"
+                (onClick)="enabledChange.emit(!enabled())"
+            />
             <!-- Opens the official NIEMS page in a new tab. An anchor rather
                      than a button because pButton is an attribute directive, so
                      this is a real link: middle-click works, and the board
@@ -65,7 +83,25 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
              double the row height and ruin the scan down the columns. At the
              current 8/12 split there is room to spare, but a narrower column
              would otherwise start folding the time range. -->
-        <p-table [value]="tableRows()" [paginator]="true" [rows]="PAGE_SIZE" stripedRows [scrollable]="true" [rowHover]="true" responsiveLayout="scroll">
+        <!-- Switched off, the table stays in the flow but invisible, as a
+             spacer: the card must keep exactly the height it has when on, so
+             toggling it never shifts the rest of the board, and the only way
+             to get that height right in every theme and zoom is to let the
+             real table set it. visibility keeps layout and drops paint and
+             hit-testing; inert takes the paginator out of the tab order. -->
+        <div class="relative">
+        <p-table
+            [value]="tableRows()"
+            [paginator]="true"
+            [rows]="PAGE_SIZE"
+            stripedRows
+            [scrollable]="true"
+            [rowHover]="true"
+            responsiveLayout="scroll"
+            [style.visibility]="enabled() ? null : 'hidden'"
+            [attr.inert]="enabled() ? null : ''"
+            [attr.aria-hidden]="enabled() ? null : 'true'"
+        >
             <ng-template #header>
                 <!-- One 8rem floor for every column, here and in the missed-calls
                      table, so the two read as one grid rather than two tables that
@@ -153,6 +189,17 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                 </tr>
             </ng-template>
         </p-table>
+            @if (!enabled()) {
+                <!-- Same icon-and-line shape as the chart's empty state, so a
+                     switched-off card and a quiet one read as the same family
+                     of "nothing to draw here" - but the wording says which. -->
+                <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-color">
+                    <i class="pi pi-eye-slash text-5xl opacity-30"></i>
+                    <span>ปิดการรับข้อมูลอยู่</span>
+                    <p-button label="เปิดการ์ดนี้" icon="pi pi-eye" size="small" (onClick)="enabledChange.emit(true)" />
+                </div>
+            }
+        </div>
     </div>`
 })
 export class CallLogWidget {
@@ -167,6 +214,13 @@ export class CallLogWidget {
      *  presentational, like `available` above. */
     health = input<string>('');
 
+    /** Whether the table is shown. Off, the card keeps its size but shows a
+     *  placeholder in place of the rows, and the page stops the feed behind
+     *  it - see the page component. Owned by the page, like the rest, so this
+     *  stays presentational. */
+    enabled = input<boolean>(true);
+    enabledChange = output<boolean>();
+
     protected readonly PAGE_SIZE = PAGE_SIZE;
     protected readonly isPageFiller = isPageFiller;
 
@@ -174,6 +228,11 @@ export class CallLogWidget {
     // page-filler.ts). Left empty when the feed is down so the table says so
     // instead of showing a page of dashes that reads as "no calls today".
     protected readonly tableRows = computed<(CallLogEntry | PageFillerRow)[]>(() => {
+        // Switched off: a page of fillers, not skeletons. The table is only a
+        // hidden spacer then, and animating skeletons under a placeholder is
+        // work for nobody. Checked first because the feed is closed and
+        // reports `loading` while off.
+        if (!this.enabled()) return padToPage([], PAGE_SIZE);
         if (this.loading()) return SKELETON_ROWS;
         return this.available() ? padToPage(this.calls(), PAGE_SIZE) : [];
     });

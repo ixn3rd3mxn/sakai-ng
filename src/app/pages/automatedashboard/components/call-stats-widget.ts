@@ -379,7 +379,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                             @if (loading()) {
                                 <p-skeleton width="min(9rem, 100%)" height="3rem" />
                             } @else {
-                                <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl lg:text-4xl xl:text-5xl">{{ card.value }}</div>
+                                <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl lg:text-4xl xl:text-[46px]/[1]">{{ card.value }}</div>
                             }
                         </div>
                     </div>

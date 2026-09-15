@@ -37,7 +37,7 @@ _ORIGINALS: dict[str, object] = {}
 
 def _remember_originals(module) -> None:
     """Capture the real fetchers once, before anything stubs them."""
-    for name in ("_fetch", "_fetch_live", "_fetch_times"):
+    for name in ("_fetch", "_fetch_live", "_fetch_times", "_fetch_hourly"):
         _ORIGINALS.setdefault(name, getattr(module, name))
 
 
@@ -58,6 +58,10 @@ def reset_call_stats(module) -> None:
     module._latest_signature = None
     module._subscribers.clear()
     module._poller = None
+    # The hourly chart's own cache and broadcast, since its split from the
+    # counters' payload.
+    module._hourly_final.clear()
+    module.hourly_feed.reset()
     module._client = None
     module._client_loop = None
     # Restore the real fetchers. Without this the stubs outlive the test that
@@ -86,10 +90,9 @@ def reset_agents(module) -> None:
 
 
 def reset_call_log(module) -> None:
-    module._latest = None
-    module._latest_signature = None
-    module._subscribers.clear()
-    module._poller = None
+    # One broadcast per table since the split - see libs.broadcast.Feed.
+    module.missed_feed.reset()
+    module.calls_feed.reset()
     module._client = None
     module._client_loop = None
     for name, func in _CALL_LOG_ORIGINALS.items():
@@ -124,10 +127,10 @@ def reset_all() -> None:
     reset_events(_events)
 
 
-def stub_call_stats(module, *, rollup=None, live=None, times=None) -> None:
-    """Replace the three upstream fetchers.
+def stub_call_stats(module, *, rollup=None, live=None, times=None, hourly=None) -> None:
+    """Replace the four upstream fetchers.
 
-    All three must be stubbed together in any offline test. Leaving one real
+    All four must be stubbed together in any offline test. Leaving one real
     means it silently reaches the network mid-test - which is exactly how the
     live feed and the durations feed each leaked into these suites while they
     were being written, producing assertions that passed against whatever the
@@ -143,10 +146,14 @@ def stub_call_stats(module, *, rollup=None, live=None, times=None) -> None:
     async def _times(day):
         return times(day) if callable(times) else times
 
+    async def _hourly(day):
+        return hourly(day) if callable(hourly) else hourly
+
     _remember_originals(module)
     module._fetch = _rollup
     module._fetch_live = _live
     module._fetch_times = _times
+    module._fetch_hourly = _hourly
 
 
 _CALL_LOG_ORIGINALS: dict[str, object] = {}

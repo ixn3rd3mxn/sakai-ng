@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 
-from libs import feed_health, relay
+from libs import broadcast, feed_health, relay
 from libs.shift import BANGKOK_TZ
 
 logger = logging.getLogger(__name__)
@@ -212,7 +212,6 @@ class _Entry:
     available: bool       # False when the upstream holds no data for `day`
     live: bool = False    # LIVE_FIELDS came from the live feed, not the rollup
     times: Optional["CallTimes"] = None  # None when the durations feed had nothing
-    hourly: Optional[list[dict]] = None  # None when the hourly feed could not be read
 
     @property
     def final(self) -> bool:
@@ -296,6 +295,7 @@ def _http() -> httpx.AsyncClient:
 
 
 async def aclose() -> None:
+    hourly_feed.close()
     global _client, _client_loop, _poller
     if _poller is not None:
         _poller.cancel()
@@ -602,13 +602,6 @@ async def _resolve(day: date_cls, today: date_cls, now: float, force: bool) -> _
             stale=False,
             available=True,
             times=times,
-            # Fetched for every day resolved, including the comparison day
-            # nothing draws. That is one wasted request per process: a past
-            # day's entry is `final` the moment it is built and never refetched,
-            # so the alternative - threading a "do I need this?" flag through
-            # the cache - would buy one request and cost a way for a cached
-            # entry to exist with the chart data missing and no path to fill it.
-            hourly=await _fetch_hourly(day),
         ),
         today,
     )
@@ -690,12 +683,6 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
             # number being compared with itself.
             rollup_incoming=entry.stats.incoming if entry.available else None,
             live_incoming=overlay.get("incoming") if overlay else None,
-            # The same 24 buckets the chart draws, summed. A second rollup over
-            # the same calls, so it is an independent witness to the daily
-            # total - and free, since the chart already needed it.
-            hourly_incoming=(
-                sum(bucket["incoming"] for bucket in entry.hourly) if entry.hourly is not None else None
-            ),
         )
 
     return {
@@ -722,9 +709,6 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
         # Per-duration change vs `compare_day`, in seconds and signed. Null
         # when either day's durations are missing - see `times_diff` above.
         "times_diff": times_diff,
-        # 24 buckets for the hourly chart, or null when that feed could not be
-        # read - the chart blanks on its own, like the duration cards.
-        "hourly": entry.hourly,
         "compare_day": previous.day.isoformat(),
         # NOTE: when `day` is today this compares a day in progress against a
         # completed one, because the upstream ignores the time-of-day part of
@@ -739,6 +723,86 @@ def _payload(entry: _Entry, previous: _Entry, today: date_cls, overlay: Optional
         "health": feed_health.for_feed(feed_health.CALL_STATS),
         **asdict(stats),
     }
+
+
+# ---------------------------------------------------------------------------
+# The hourly chart
+#
+# Its own payload and its own stream, not a field on the counters' payload as
+# it was at first. The buckets come from a separate upstream endpoint, and
+# bundling them into the counters meant every board holding the stat rows
+# open - the wall display, around the clock - fetched the chart's data once a
+# minute whether or not the chart was on screen. On its own feed it is fetched
+# only while some board has the chart switched on.
+#
+# The cost of the split is that `hourly_disagrees_with_daily` (libs.feed_health)
+# can only run while the chart is open somewhere: it needs the hourly sum, and
+# nothing reads the hourly endpoint otherwise. That was accepted knowingly.
+# ---------------------------------------------------------------------------
+
+# Finished days only. A past day's buckets never change, so paging back
+# through history costs one upstream call per day ever, not one per look.
+# Today is never cached here: it is polled by the feed while watched and
+# fetched fresh by the GET otherwise.
+_hourly_final: dict[date_cls, Optional[list[dict]]] = {}
+_hourly_lock = asyncio.Lock()
+
+
+async def get_hourly(day: Optional[date_cls] = None) -> dict:
+    """The 24 buckets for `day` (default: the current Bangkok day).
+
+    Never raises: `_fetch_hourly` degrades to None, and the payload says so
+    with `available` rather than an empty chart that reads as a quiet day.
+    """
+    today = bangkok_calendar_day()
+    target = day or today
+
+    if target < today:
+        async with _hourly_lock:
+            if target not in _hourly_final:
+                buckets = await _fetch_hourly(target)
+                # Only a successful read is final. None says the upstream
+                # could not be reached just now, not that the day has no
+                # buckets, and must not be pinned for the life of the process.
+                if buckets is not None:
+                    if len(_hourly_final) >= MAX_CACHED_DAYS:
+                        _hourly_final.pop(min(_hourly_final))
+                    _hourly_final[target] = buckets
+            else:
+                buckets = _hourly_final[target]
+    else:
+        buckets = await _fetch_hourly(target)
+
+    # Today only, as for the counters: a past day has nothing to disagree
+    # with. The sum is the second rollup over the same calls that the
+    # daily-total check compares against.
+    if target == today:
+        feed_health.report_hourly(
+            day=target.isoformat(),
+            incoming=sum(bucket["incoming"] for bucket in buckets) if buckets is not None else None,
+        )
+
+    return {
+        "day": target.isoformat(),
+        "is_current": target == today,
+        # Null when the feed could not be read - the chart blanks on its own,
+        # like the duration cards, rather than drawing 24 empty hours.
+        "available": buckets is not None,
+        "hourly": buckets,
+        "fetched_at": datetime.now(BANGKOK_TZ).replace(tzinfo=None).isoformat() if buckets is not None else None,
+        "health": feed_health.for_feed(feed_health.HOURLY),
+    }
+
+
+def _hourly_interval(payload: dict) -> float:
+    # The rollup's cadence, not the live feed's: the upstream recomputes the
+    # buckets every few minutes, so polling faster buys nothing. Woken early
+    # at Bangkok midnight so the chart swaps onto the new day as it begins.
+    interval = POLL_SECONDS if payload["available"] else RETRY_SECONDS
+    return min(interval, seconds_until_next_bangkok_midnight() + 1)
+
+
+hourly_feed = broadcast.Feed("call-stats-hourly", get_hourly, _hourly_interval, RETRY_SECONDS)
 
 
 def seconds_until_next_bangkok_midnight(now: Optional[datetime] = None) -> float:

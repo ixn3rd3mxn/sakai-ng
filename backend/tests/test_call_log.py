@@ -190,6 +190,40 @@ def test_both_feeds_failing_leaves_no_timestamp():
     assert payload["fetched_at"] is None
 
 
+def test_each_table_polls_only_its_own_feed():
+    """The reason the two tables stream separately: a board with the missed
+    table switched off must not keep the ~2.4s abandoned feed busy, and vice
+    versa. If either half ever gathers both feeds again, the switches on the
+    dashboard stop doing anything on the wire."""
+    touched: list[str] = []
+    helpers.stub_call_log(
+        call_log,
+        abandoned=lambda: touched.append("abandoned") or [],
+        calls=lambda day, names: touched.append("calls") or [],
+    )
+
+    asyncio.run(call_log.get_missed())
+    assert touched == ["abandoned"]
+
+    touched.clear()
+    asyncio.run(call_log.get_calls(dt.date(2026, 8, 30)))
+    assert touched == ["calls"]
+
+    touched.clear()
+    asyncio.run(call_log.get_call_log(dt.date(2026, 8, 30)))
+    assert sorted(touched) == ["abandoned", "calls"], "the one-shot GET still serves both"
+
+
+def test_the_two_feeds_hold_independent_broadcast_state():
+    """Two _Feed instances, not one shared set: a subscriber to one table
+    must not start - or keep alive - the other table's poll loop."""
+    assert call_log.missed_feed is not call_log.calls_feed
+    assert call_log.missed_feed._subscribers is not call_log.calls_feed._subscribers
+    # And each backs off on its own feed's flag, not the other's.
+    assert call_log.missed_feed._interval({"missed_available": True}) == call_log.POLL_SECONDS
+    assert call_log.calls_feed._interval({"calls_available": False}) == call_log.RETRY_SECONDS
+
+
 def test_the_broadcast_signature_changes_when_a_call_lands():
     helpers.stub_call_log(call_log, abandoned=[], calls=[])
     first = asyncio.run(call_log.get_call_log(dt.date(2026, 8, 30)))

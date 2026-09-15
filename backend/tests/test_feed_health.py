@@ -218,22 +218,54 @@ def test_hourly_buckets_must_add_up_to_the_daily_total():
     fh.reset()
     fh.report_call_stats(
         day="2026-09-03", available=True, incoming=41, answer=34, abandon=7,
-        rollup_incoming=41, hourly_incoming=0,
+        rollup_incoming=41,
     )
+    fh.report_hourly(day="2026-09-03", incoming=0)
 
     assert "hourly_disagrees_with_daily" in _codes()
     # One of the two is wrong and the evidence does not say which, so the
     # board keeps showing the daily figure rather than blanking a number that
     # may well be the correct one.
     assert fh.for_feed(fh.CALL_STATS)["trusted"] is True
+    # The chart's own payload carries the warning too.
+    assert fh.for_feed(fh.HOURLY)["ok"] is False and fh.for_feed(fh.HOURLY)["trusted"] is True
+
+
+def test_the_hourly_check_needs_the_chart_to_be_open():
+    """The hourly buckets stream on their own feed, polled only while a board
+    has the chart on. With no hourly observation the check does not run -
+    silence, not a false alarm about a feed nobody asked for."""
+    fh.reset()
+    fh.report_call_stats(
+        day="2026-09-03", available=True, incoming=41, answer=34, abandon=7,
+        rollup_incoming=41,
+    )
+
+    assert fh.snapshot()["ok"] is True
+
+
+def test_the_two_rollups_are_never_compared_across_a_day_boundary():
+    """The counters and the chart tick on separate loops, so around Bangkok
+    midnight one can report the new day before the other has caught up. A
+    day with zero calls so far against yesterday's total is not a
+    disagreement."""
+    fh.reset()
+    fh.report_call_stats(
+        day="2026-09-04", available=True, incoming=0, answer=0, abandon=0,
+        rollup_incoming=0,
+    )
+    fh.report_hourly(day="2026-09-03", incoming=180)
+
+    assert fh.snapshot()["ok"] is True
 
 
 def test_agreeing_rollups_are_quiet():
     fh.reset()
     fh.report_call_stats(
         day="2026-09-03", available=True, incoming=50, answer=42, abandon=8,
-        rollup_incoming=50, hourly_incoming=50,
+        rollup_incoming=50,
     )
+    fh.report_hourly(day="2026-09-03", incoming=50)
 
     assert fh.snapshot()["ok"] is True
 
@@ -246,8 +278,9 @@ def test_the_live_overlay_is_not_mistaken_for_a_rollup_disagreement():
     fh.reset()
     fh.report_call_stats(
         day="2026-09-03", available=True, incoming=41, answer=34, abandon=7,
-        rollup_incoming=36, live_incoming=41, hourly_incoming=36,
+        rollup_incoming=36, live_incoming=41,
     )
+    fh.report_hourly(day="2026-09-03", incoming=36)
 
     assert fh.snapshot()["ok"] is True
 

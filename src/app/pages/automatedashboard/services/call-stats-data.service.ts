@@ -17,6 +17,13 @@ export class CallStatsDataService implements OnDestroy {
     private readonly selection$ = new BehaviorSubject<string | null>(null);
     private readonly subscription: Subscription;
 
+    /** What was asked for: a `YYYY-MM-DD`, or `null` for "today, live". Not
+     *  the same as `day`, which is what the server answered with. Public so
+     *  HourlyDataService can follow the same selection without a second
+     *  picker - the chart always shows the day the counters show. */
+    private readonly _selection = signal<string | null>(null);
+    readonly selection = this._selection.asReadonly();
+
     private readonly _summary = signal<CallStatsSummary | null>(null);
     readonly summary = this._summary.asReadonly();
 
@@ -84,12 +91,15 @@ export class CallStatsDataService implements OnDestroy {
      *  previous date for anyone east of Greenwich. */
     select(date: Date): void {
         this._loading.set(true);
-        this.selection$.next(formatDateParam(date));
+        const day = formatDateParam(date);
+        this._selection.set(day);
+        this.selection$.next(day);
     }
 
     /** Back to today, live. */
     selectCurrent(): void {
         this._loading.set(true);
+        this._selection.set(null);
         this.selection$.next(null);
     }
 

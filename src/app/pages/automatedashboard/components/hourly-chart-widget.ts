@@ -1,9 +1,10 @@
-import { afterNextRender, Component, DestroyRef, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { afterNextRender, Component, DestroyRef, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
+import { TooltipModule } from 'primeng/tooltip';
 import { LayoutService } from '@/app/layout/service/layout.service';
-import { CallStatsDataService } from '../services/call-stats-data.service';
+import { HourlyDataService } from '../services/hourly-data.service';
 import { HourlyBucket } from '../call-stats.types';
 
 /** True when two payloads describe the same 24 hours.
@@ -46,10 +47,35 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
 @Component({
     standalone: true,
     selector: 'app-hourly-chart',
-    imports: [ChartModule, SkeletonModule, ButtonModule],
+    imports: [ChartModule, SkeletonModule, ButtonModule, TooltipModule],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
-            <div class="font-semibold text-xl">สถิติจำนวนการใช้บริการตามเวลา</div>
+            <div class="flex items-baseline gap-2 min-w-0">
+                <div class="font-semibold text-xl">สถิติจำนวนการใช้บริการตามเวลา</div>
+                @if (enabled() && health()) {
+                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
+                }
+            </div>
+            <!-- Same switch as the two tables below, and since the chart got a
+                 stream of its own it means the same thing: off, the page closes
+                 the hourly stream and the backend stops polling the hourly
+                 upstream once no board has it open - see HourlyDataService.
+                 Present in both states, in the same spot, so the card can be
+                 flipped repeatedly without chasing a button; the button in
+                 the middle of a switched-off card is the second, more obvious
+                 way back. -->
+            <p-button
+                [icon]="enabled() ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                severity="secondary"
+                size="small"
+                [text]="true"
+                [rounded]="true"
+                [ariaLabel]="enabled() ? 'ปิดการ์ดนี้' : 'เปิดการ์ดนี้'"
+                [pTooltip]="enabled() ? 'ปิดการ์ดนี้ (หยุดรับข้อมูล)' : 'เปิดการ์ดนี้'"
+                tooltipPosition="left"
+                class="shrink-0"
+                (onClick)="enabledChange.emit(!enabled())"
+            />
             <!-- Opens the official NIEMS page in a new tab. An anchor rather
                  than a button because pButton is an attribute directive, so
                  this is a real link: middle-click works, and the board
@@ -78,8 +104,19 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
              whose transition is duration:0, so every bar snaps to full height
              and the entry animation is lost. Sizing the wrapper instead of the
              chart means the height is settled before p-chart even exists. -->
+        <!-- The box is kept at its 22rem whether the chart is on or off, so
+             switching the card never shifts the tables below it. -->
         <div class="h-88">
-            @if (!chartReady()) {
+            @if (!enabled()) {
+                <!-- Same shape as the empty state below, so the two read as
+                     one family - but this one says why, and offers the way
+                     back. -->
+                <div class="h-full flex flex-col items-center justify-center gap-3 text-muted-color">
+                    <i class="pi pi-eye-slash text-5xl opacity-30"></i>
+                    <span>ปิดการรับข้อมูลอยู่</span>
+                    <p-button label="เปิดการ์ดนี้" icon="pi pi-eye" size="small" (onClick)="enabledChange.emit(true)" />
+                </div>
+            } @else if (!chartReady()) {
                 <p-skeleton width="100%" height="100%" />
             } @else if (isEmpty()) {
                 <!-- Chart.js draws axes but no bars for an all-zero stack, which
@@ -99,24 +136,34 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
     </div>`
 })
 export class HourlyChartWidget {
+    /** Whether the chart is shown. Off, the card keeps its size but shows a
+     *  placeholder in the chart's box. Owned by the page, like the two
+     *  tables' flag, so all three optional cards are wired the same way. */
+    enabled = input<boolean>(true);
+    enabledChange = output<boolean>();
+
     private readonly layoutService = inject(LayoutService);
     private readonly destroyRef = inject(DestroyRef);
-    private readonly data = inject(CallStatsDataService);
+    private readonly data = inject(HourlyDataService);
+
+    /** The backend's short line about the hourly feed, or `''` when it is
+     *  healthy - the same slot the two tables use for theirs. */
+    protected readonly health = this.data.healthMessage;
 
     // Compared by value, not by reference.
     //
-    // The call-stats stream pushes a frame every LIVE_POLL_SECONDS (5s) whether
-    // or not anything changed - `fetched_at` is in the payload signature on
-    // purpose, so an idle board can prove it is still alive. Every frame is
-    // freshly parsed JSON, so `hourly` is a new array each time and a signal
-    // comparing by reference sees 24 identical buckets as a change. That fired
-    // the data effect, which called chartData.set(), which had PrimeNG destroy
-    // and rebuild the chart - replaying its entry animation every five seconds.
+    // The hourly stream pushes a frame every poll whether or not anything
+    // changed - `fetched_at` is in the payload signature on purpose, so an
+    // idle board can prove it is still alive. Every frame is freshly parsed
+    // JSON, so `hourly` is a new array each time and a signal comparing by
+    // reference sees 24 identical buckets as a change. That fired the data
+    // effect, which called chartData.set(), which had PrimeNG destroy and
+    // rebuild the chart - replaying its entry animation on every frame.
     //
     // Fixing it here rather than by quietening the heartbeat: the heartbeat is
     // doing its job, and a widget should not repaint for a payload whose
     // contents it has already drawn.
-    private readonly buckets = computed(() => this.data.summary()?.hourly ?? null, { equal: sameBuckets });
+    private readonly buckets = computed(() => this.data.hourly(), { equal: sameBuckets });
 
     // Built inside initChart, so they describe the dataset actually drawn
     // rather than the one that will be drawn 150ms from now.

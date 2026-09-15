@@ -1,85 +1,77 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
-import { Observable, Subscription } from 'rxjs';
+import { Injectable, OnDestroy, computed, inject } from '@angular/core';
+import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { CallLogSummary } from '../call-log.types';
-import { feedHealthMessage } from '../format-utils';
-import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { CallLogSummary, CallsSummary, MissedCallsSummary } from '../call-log.types';
+import { liveTableFeed } from './live-table-feed';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
-// Same shape as AgentsDataService: transport and state in one place, since
-// there is no day selection here - just today's two logs.
+// One service per table, on two streams, where there used to be one service
+// carrying both over one connection. The split is what makes the card
+// switches mean something: the abandoned feed upstream takes ~2.4s a read,
+// and a wall display that never scrolls down to that table was keeping it
+// polled around the clock. Each table now opens its own stream only while its
+// card is on - see the page component.
+//
+// Both are provided by the page, not in root, so a stream that is open is
+// closed when the page is left rather than living for the whole app session.
+
+/** ประวัติการรับสาย - the answered-call table. */
 @Injectable()
 export class CallLogDataService implements OnDestroy {
     private readonly http = inject(HttpClient);
-    // One line per stream, so a deploy of either half is noticed on
-    // whichever board happens to be open.
-    private readonly watchDeploySignals = deploySignalListener();
-    private readonly subscription: Subscription;
+    private readonly feed = liveTableFeed<CallsSummary>(`${API_BASE_URL}/call-log/calls/stream`, 'call-log-calls');
 
-    private readonly _summary = signal<CallLogSummary | null>(null);
-    readonly summary = this._summary.asReadonly();
+    readonly summary = this.feed.summary;
+    readonly loading = this.feed.loading;
+    readonly healthMessage = this.feed.healthMessage;
 
-    private readonly _loading = signal<boolean>(true);
-    readonly loading = this._loading.asReadonly();
+    readonly calls = computed(() => this.summary()?.calls ?? []);
 
-    readonly calls = computed(() => this._summary()?.calls ?? []);
-    readonly missed = computed(() => this._summary()?.missed ?? []);
-
-    // Per-feed, because the two fail independently. Each is true only once a
-    // payload has arrived AND that feed was readable, so an empty table can be
-    // told apart from one that never loaded.
-    readonly callsAvailable = computed(() => !this._loading() && (this._summary()?.calls_available ?? false));
-    readonly missedAvailable = computed(() => !this._loading() && (this._summary()?.missed_available ?? false));
+    // True only once a payload has arrived AND the feed was readable, so an
+    // empty table can be told apart from one that never loaded.
+    readonly callsAvailable = computed(() => !this.loading() && (this.summary()?.calls_available ?? false));
 
     /** The backend's verdict on whether this feed's data can be believed.
      *  Defaults to trusting it, so a backend that predates the field leaves
      *  the board unchanged rather than blanking it. */
-    readonly trusted = computed(() => this._summary()?.health?.trusted ?? true);
+    readonly trusted = computed(() => this.summary()?.health?.trusted ?? true);
 
-    /** Short Thai line for the two table headers, or `''` when the feed is
-     *  fine. Both tables show the same line: the contradiction that raises it
-     *  is about the day as a whole, not about one of the two lists. */
-    readonly healthMessage = computed(() => (this._loading() ? '' : feedHealthMessage(this._summary()?.health)));
-
-    constructor() {
-        this.subscription = this.stream().subscribe((summary) => {
-            this._summary.set(summary);
-            this._loading.set(false);
-        });
+    /** Open or close the stream - see `liveTableFeed`. */
+    setWanted(wanted: boolean): void {
+        this.feed.setWanted(wanted);
     }
 
-    // Pushed only when either log actually changes. The backend polls every
-    // 20s but re-broadcasts nothing unless the payload differs, so a quiet
-    // evening costs one connection and no frames.
-    //
-    // Reconnection is not left to the browser - see the same note in
-    // AgentsDataService and the comment on `resilientEventSource`.
-    private stream(): Observable<CallLogSummary> {
-        return new Observable<CallLogSummary>((subscriber) => {
-            // Runs for every source the helper opens, not only the first: a
-            // rebuilt EventSource starts with no listeners.
-            return resilientEventSource(`${API_BASE_URL}/call-log/stream`, (source) => {
-                this.watchDeploySignals(source);
-                source.addEventListener('call-log', (event: MessageEvent<string>) => {
-                    try {
-                        subscriber.next(JSON.parse(event.data) as CallLogSummary);
-                    } catch {
-                        // ignore malformed frames
-                    }
-                });
-            });
-        });
-    }
-
-    /** One-shot fetch, for callers that do not want a live connection. */
+    /** One-shot fetch of both tables, for callers that do not want a live
+     *  connection. */
     fetchOnce(): Observable<CallLogSummary> {
         return this.http.get<CallLogSummary>(`${API_BASE_URL}/call-log`);
     }
 
     ngOnDestroy(): void {
-        this.subscription.unsubscribe();
+        this.feed.destroy();
+    }
+}
+
+/** สายที่ไม่ได้รับ - the abandoned-call table. */
+@Injectable()
+export class MissedCallsDataService implements OnDestroy {
+    private readonly feed = liveTableFeed<MissedCallsSummary>(`${API_BASE_URL}/call-log/missed/stream`, 'call-log-missed');
+
+    readonly summary = this.feed.summary;
+    readonly loading = this.feed.loading;
+    readonly healthMessage = this.feed.healthMessage;
+
+    readonly missed = computed(() => this.summary()?.missed ?? []);
+    readonly missedAvailable = computed(() => !this.loading() && (this.summary()?.missed_available ?? false));
+
+    /** Open or close the stream - see `liveTableFeed`. */
+    setWanted(wanted: boolean): void {
+        this.feed.setWanted(wanted);
+    }
+
+    ngOnDestroy(): void {
+        this.feed.destroy();
     }
 }

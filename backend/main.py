@@ -18,7 +18,7 @@ from pymongo.errors import PyMongoError
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
-from libs import agents, aggregations, call_log, call_stats, deploys, events, feed_health, lookups, relay
+from libs import agents, aggregations, broadcast, call_log, call_stats, deploys, events, feed_health, lookups, relay
 from libs import flood_cases, flood_events, flood_lookups
 from libs.configs import APP_BUILD, CORS_ORIGINS, DEPLOY_TOKEN, db
 from libs.models import (
@@ -551,6 +551,30 @@ async def get_call_stats(day: Optional[date_cls] = Query(None)):
     return await call_stats.get_call_stats(day)
 
 
+@app.get("/api/call-stats/hourly")
+async def get_call_stats_hourly(day: Optional[date_cls] = Query(None)):
+    """The 24 hourly buckets for one Bangkok calendar day (default: today).
+
+    Same `day` semantics as `/api/call-stats/summary`. A finished day is
+    fetched once and cached; today is fetched fresh, and streamed by the
+    endpoint below while a board has the chart open.
+    """
+    if day is not None and day > call_stats.bangkok_calendar_day():
+        raise HTTPException(status_code=400, detail="day cannot be in the future")
+    return await call_stats.get_hourly(day)
+
+
+@app.get("/api/call-stats/hourly/stream")
+async def stream_call_stats_hourly(request: Request):
+    """Server-sent events for the hourly chart, today only.
+
+    Split from `/api/call-stats/stream` so a board with the chart switched
+    off does not keep the hourly upstream polled - see the note in
+    libs.call_stats above `get_hourly`.
+    """
+    return _feed_stream(request, call_stats.hourly_feed, "call-stats-hourly")
+
+
 @app.get("/api/call-stats/stream")
 async def stream_call_stats(request: Request):
     """Server-sent events for the call-stats widget.
@@ -629,17 +653,11 @@ async def get_call_log():
     return await call_log.get_call_log()
 
 
-@app.get("/api/call-log/stream")
-async def stream_call_log(request: Request):
-    """Server-sent events for the two log tables.
-
-    Polled far more slowly than the agent board: these are logs rather than
-    live status, and the abandoned-call feed takes seconds to answer. One
-    shared loop serves both tables and every open board.
-    """
-
+def _feed_stream(request: Request, feed: broadcast.Feed, event: str) -> EventSourceResponse:
+    """SSE over one libs.broadcast.Feed: the connection is a queue the feed
+    pushes to, and the feed polls only while such a queue exists."""
     async def event_generator():
-        queue = await call_log.subscribe()
+        queue = await feed.subscribe()
         try:
             while True:
                 if await request.is_disconnected():
@@ -648,11 +666,33 @@ async def stream_call_log(request: Request):
                     payload = await asyncio.wait_for(queue.get(), timeout=5)
                 except asyncio.TimeoutError:
                     continue
-                yield {"event": "call-log", "data": _sse_data(payload)}
+                yield {"event": event, "data": _sse_data(payload)}
         finally:
-            call_log.unsubscribe(queue)
+            feed.unsubscribe(queue)
 
     return _sse(event_generator())
+
+
+@app.get("/api/call-log/calls/stream")
+async def stream_call_log_calls(request: Request):
+    """Server-sent events for the answered-call table.
+
+    One stream per table rather than one for both: the board can switch a
+    table off, and only a stream of its own lets that stop the upstream
+    polling behind it. Polled far more slowly than the agent board - these are
+    logs rather than live status.
+    """
+    return _feed_stream(request, call_log.calls_feed, "call-log-calls")
+
+
+@app.get("/api/call-log/missed/stream")
+async def stream_call_log_missed(request: Request):
+    """Server-sent events for the abandoned-call table.
+
+    The expensive one: the upstream takes seconds to answer, which is the
+    main reason the two tables stream separately.
+    """
+    return _feed_stream(request, call_log.missed_feed, "call-log-missed")
 
 
 @app.get("/api/incident-history")

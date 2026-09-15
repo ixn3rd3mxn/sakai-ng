@@ -64,6 +64,7 @@ logger = logging.getLogger(__name__)
 AGENTS = "agents"
 CALL_STATS = "call_stats"
 CALL_LOG = "call_log"
+HOURLY = "hourly"
 
 # An observation older than this is ignored rather than trusted. The poll
 # loops only run while a board is connected (see `subscribe` in each module),
@@ -273,34 +274,45 @@ def _check_divergence(obs: dict) -> list[Issue]:
     return []
 
 
-def _check_hourly_agreement(obs: dict) -> list[Issue]:
-    """Do the day's 24 buckets add up to the day's total?
+def _check_hourly_agreement(stats: dict, hourly: dict) -> list[Issue]:
+    """The 24 hourly buckets, summed, must equal the daily rollup's incoming.
 
-    Two separate rollups over the same calls, fetched from two endpoints, so
-    one of them going stale while the other refreshes shows up here as a
-    straight arithmetic disagreement - no threshold, no judgement.
+    Two rollups over the same calls from two endpoints, so one going stale
+    while the other refreshes shows up here as a straight arithmetic
+    disagreement - no threshold, no judgement.
 
     Compared against the *rollup* incoming rather than the number on the
     board. The board's figure may carry the live overlay, which the hourly
     feed knows nothing about, so comparing with that would report the overlay
     working correctly as a fault every time a call landed inside the lag.
 
+    Two observations, not one, since the chart streams separately from the
+    counters (libs.call_stats): each arrives on its own loop, so they are
+    compared only when both are fresh and describe the same Bangkok day -
+    around midnight one can tick before the other. When nobody has the chart
+    open the hourly feed is not polled and this check simply does not run;
+    that is the accepted cost of not fetching a chart nobody is looking at.
+
     A warning rather than a discredit: the two disagreeing proves one of them
     wrong without saying which, and blanking a figure that may well be the
     right one trades a known-wrong display for an unnecessarily blank board.
+    Filed against both feeds, so the chart's payload carries it as well as
+    the counters'.
     """
-    hourly = obs.get("hourly_incoming")
-    rollup = obs.get("rollup_incoming")
-    if hourly is None or rollup is None:
+    if stats["day"] != hourly["day"]:
         return []
-    if abs(hourly - rollup) > DIVERGENCE_TOLERANCE:
+    hourly_incoming = hourly.get("incoming")
+    rollup = stats.get("rollup_incoming")
+    if hourly_incoming is None or rollup is None:
+        return []
+    if abs(hourly_incoming - rollup) > DIVERGENCE_TOLERANCE:
         return [
             Issue(
                 code="hourly_disagrees_with_daily",
                 severity="warning",
-                feeds=(CALL_STATS,),
+                feeds=(CALL_STATS, HOURLY),
                 detail=(
-                    f"the hourly buckets for {obs['day']} sum to {hourly} incoming while the "
+                    f"the hourly buckets for {stats['day']} sum to {hourly_incoming} incoming while the "
                     f"daily rollup reports {rollup} - two rollups over the same calls disagree, "
                     "so one of them is stale"
                 ),
@@ -375,7 +387,6 @@ def report_call_stats(
     abandon: int,
     rollup_incoming: Optional[int] = None,
     live_incoming: Optional[int] = None,
-    hourly_incoming: Optional[int] = None,
 ) -> None:
     """Called for today only - see the call site.
 
@@ -394,12 +405,20 @@ def report_call_stats(
             "abandon": abandon,
             "rollup_incoming": rollup_incoming,
             "live_incoming": live_incoming,
-            "hourly_incoming": hourly_incoming,
         },
     )
 
 
-def report_call_log(*, day: str, calls_available: bool, calls: int, missed: int) -> None:
+def report_hourly(*, day: str, incoming: Optional[int]) -> None:
+    """Called for today only, from the hourly chart's feed. `incoming` is the
+    24 buckets summed, or None when the feed could not be read."""
+    _report(HOURLY, {"day": day, "incoming": incoming})
+
+
+def report_call_log(*, day: str, calls_available: bool, calls: int, missed: Optional[int] = None) -> None:
+    # `missed` is carried for the record only - no check reads it - and is
+    # optional because the two tables poll separately (libs.call_log) and the
+    # answered-call half reports on its own.
     _report(CALL_LOG, {"day": day, "calls_available": calls_available, "calls": calls, "missed": missed})
 
 
@@ -421,7 +440,8 @@ def _recompute_locked() -> None:
     if CALL_STATS in fresh:
         found += _check_counters(fresh[CALL_STATS])
         found += _check_divergence(fresh[CALL_STATS])
-        found += _check_hourly_agreement(fresh[CALL_STATS])
+        if HOURLY in fresh:
+            found += _check_hourly_agreement(fresh[CALL_STATS], fresh[HOURLY])
         if CALL_LOG in fresh:
             found += _check_contradiction(fresh[CALL_STATS], fresh[CALL_LOG])
 
