@@ -74,13 +74,23 @@ TIMEOUT_SECONDS = float(os.environ.get("AGENTS_TIMEOUT_SECONDS", "10"))
 NAMES_TTL_SECONDS = int(os.environ.get("AGENTS_NAMES_TTL_SECONDS", "60"))
 
 # The upstream lists every agent once per queue they belong to: a call taker
-# appears as both type 1 and type 6 ("Call Taker and Non Emergency Swarm").
-# Keeping only these two ids yields exactly one row per agent - verified
-# against the live feed - so no further de-duplication is needed.
+# appears as type 1 and again as type 6 ("Call Taker and Non Emergency
+# Swarm"); a non-emergency agent as type 2 and again as type 6. Type 6 is the
+# shared swarm queue, so it is never a role of its own and is dropped here.
+#
+# Keeping 1 and 5 alone used to yield one row per agent. Adding 2 broke that
+# guarantee - a call taker can also sit in the non-emergency queue - so
+# `parse_agents` now keeps one row per extension, by `ROLE_PRIORITY`.
 ROLES: dict[int, str] = {
     1: "รับแจ้งเหตุ",
+    2: "รับแจ้งเหตุไม่ฉุกเฉิน",
     5: "หัวหน้าปฏิบัติการ",
 }
+
+# Which row wins when an extension appears under more than one role, and the
+# order the roles are laid out on the board. Supervisors first, then call
+# takers, then non-emergency.
+ROLE_PRIORITY: dict[int, int] = {5: 0, 1: 1, 2: 2}
 
 # Only OFFLINE is hidden, and this is a deny-list on purpose.
 #
@@ -116,19 +126,26 @@ def parse_agents(body: dict, names: dict[str, str]) -> list[dict]:
     lets operators learn where each colleague sits; the status is carried by
     colour and text instead.
     """
-    agents = []
+    # One entry per extension. An agent in two queues arrives as two rows;
+    # the higher-priority role wins so a call taker who also covers the
+    # non-emergency queue is shown once, as a call taker.
+    by_extension: dict[str, dict] = {}
     for row in body.get("data") or []:
         if not isinstance(row, dict):
             continue
-        role = ROLES.get(row.get("agent_type_id"))
+        role_id = row.get("agent_type_id")
+        role = ROLES.get(role_id)
         action = row.get("action")
         if role is None or action in HIDDEN_ACTIONS:
             continue
         extension = str(row.get("agent_extension") or "")
         if not extension:
             continue
+        seen = by_extension.get(extension)
+        if seen is not None and ROLE_PRIORITY[seen["role_id"]] <= ROLE_PRIORITY[role_id]:
+            continue
         status = STATUSES.get(action, "unknown")
-        agents.append(
+        by_extension[extension] = (
             {
                 "extension": extension,
                 # None when the extension is not in the mapping - a new hire,
@@ -136,7 +153,7 @@ def parse_agents(body: dict, names: dict[str, str]) -> list[dict]:
                 # on-duty agent must never disappear from the board because a
                 # reference row is missing.
                 "name": names.get(extension),
-                "role_id": row.get("agent_type_id"),
+                "role_id": role_id,
                 "role": role,
                 "status": status,
                 # Only set when `status` is "unknown", so the card can show
@@ -145,8 +162,9 @@ def parse_agents(body: dict, names: dict[str, str]) -> list[dict]:
             }
         )
 
-    # Supervisors first, then call takers by extension.
-    agents.sort(key=lambda a: (0 if a["role_id"] == 5 else 1, a["extension"]))
+    # Supervisors, then call takers, then non-emergency - by extension within.
+    agents = list(by_extension.values())
+    agents.sort(key=lambda a: (ROLE_PRIORITY[a["role_id"]], a["extension"]))
     return agents
 
 

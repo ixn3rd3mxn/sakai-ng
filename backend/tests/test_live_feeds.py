@@ -108,16 +108,20 @@ def test_live_feed_still_lacks_queue_full_abandon():
 
 
 def test_agent_feed_yields_one_row_per_extension():
-    """The type-1/type-5 filter is the entire de-duplication. If the upstream
-    changed its queue structure this would start returning duplicates."""
+    """`parse_agents` collapses the queue rows to one per extension. If the
+    upstream grew a role we do not list, its agents would vanish instead -
+    the second assertion is how you find out."""
     requires_live()
     import httpx
 
     with httpx.Client(timeout=20) as client:
         body = client.get(agents.AGENTS_URL).json()
-    kept = [r for r in body["data"] if r.get("agent_type_id") in agents.ROLES]
-    extensions = [r["agent_extension"] for r in kept]
-    assert len(extensions) == len(set(extensions)), "the type filter no longer de-duplicates"
+    extensions = [a["extension"] for a in agents.parse_agents(body, {})]
+    assert len(extensions) == len(set(extensions)), "parse_agents no longer de-duplicates"
+    # Every type id the feed uses is one we either list or knowingly drop (6,
+    # the shared swarm queue, is the only one dropped on purpose).
+    seen = {r.get("agent_type_id") for r in body["data"]}
+    assert seen <= set(agents.ROLES) | {6}, f"unlisted agent_type_id(s): {sorted(seen - set(agents.ROLES) - {6})}"
 
 
 def test_agent_feed_actions_are_all_recognised():

@@ -11,6 +11,7 @@ import {
     FloodLookupsResponse
 } from '../flood-intake.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -50,25 +51,25 @@ export class FloodApiService {
     // changes, so an idle connection costs nothing. This has to stay open
     // while the page is up: several operators take calls at once, and the
     // duplicate check only works if each can see what the others just wrote.
+    //
+    // Reconnection is not left to the browser: EventSource gives up for good
+    // on a response that is not a stream, which is what a backend restart
+    // hands it. See the comment on `resilientEventSource`.
     streamCases(filters: FloodFilterState): Observable<FloodCasesResponse> {
         return new Observable<FloodCasesResponse>((subscriber) => {
             const query = this.buildParams(filters).toString();
-            const source = new EventSource(`${API_BASE_URL}/flood-cases/stream?${query}`);
-            this.watchDeploySignals(source);
-
-            source.addEventListener('flood-cases', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as FloodCasesResponse);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners.
+            return resilientEventSource(`${API_BASE_URL}/flood-cases/stream?${query}`, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('flood-cases', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as FloodCasesResponse);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-
-            // EventSource reconnects on its own; surfacing the error would
-            // only flash a warning during a blip that has already healed.
-            source.onerror = () => {};
-
-            return () => source.close();
         });
     }
 

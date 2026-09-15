@@ -5,6 +5,7 @@ import { environment } from '../../../../environments/environment';
 import { CallLogSummary } from '../call-log.types';
 import { feedHealthMessage } from '../format-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -53,19 +54,23 @@ export class CallLogDataService implements OnDestroy {
     // Pushed only when either log actually changes. The backend polls every
     // 20s but re-broadcasts nothing unless the payload differs, so a quiet
     // evening costs one connection and no frames.
+    //
+    // Reconnection is not left to the browser - see the same note in
+    // AgentsDataService and the comment on `resilientEventSource`.
     private stream(): Observable<CallLogSummary> {
         return new Observable<CallLogSummary>((subscriber) => {
-            const source = new EventSource(`${API_BASE_URL}/call-log/stream`);
-            this.watchDeploySignals(source);
-            source.addEventListener('call-log', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as CallLogSummary);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners.
+            return resilientEventSource(`${API_BASE_URL}/call-log/stream`, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('call-log', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as CallLogSummary);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-            source.onerror = () => {}; // EventSource retries on its own
-            return () => source.close();
         });
     }
 

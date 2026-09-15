@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { CallStatsSummary } from '../call-stats.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -29,23 +30,23 @@ export class CallStatsApiService {
     // which is what swaps the widget onto the new day. A past day is finished
     // and can never change, so it is fetched once with `getSummary` instead;
     // subscribing to one would mean a single frame and then silence forever.
+    //
+    // Reconnection is not left to the browser - see the note in
+    // AgentsDataService and the comment on `resilientEventSource`.
     streamSummary(): Observable<CallStatsSummary> {
         return new Observable<CallStatsSummary>((subscriber) => {
-            const source = new EventSource(`${API_BASE_URL}/call-stats/stream`);
-            this.watchDeploySignals(source);
-
-            source.addEventListener('call-stats', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as CallStatsSummary);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners.
+            return resilientEventSource(`${API_BASE_URL}/call-stats/stream`, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('call-stats', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as CallStatsSummary);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-
-            // EventSource retries the connection on its own; nothing to do here.
-            source.onerror = () => {};
-
-            return () => source.close();
         });
     }
 }

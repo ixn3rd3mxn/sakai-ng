@@ -5,6 +5,7 @@ import { environment } from '../../../../environments/environment';
 import { AgentsSummary } from '../agents.types';
 import { feedHealthMessage } from '../format-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -56,19 +57,26 @@ export class AgentsDataService implements OnDestroy {
 
     // Pushed only when the roster actually changes, so an unchanged board
     // costs nothing between status flips.
+    //
+    // Reconnection is not left to the browser: EventSource gives up for good
+    // on a response that is not a stream, which is what a backend restart
+    // hands it (an edge error page with no CORS header). The shift-handover
+    // freeze - roster stuck on 0-2 cards after ERR_HTTP2_PROTOCOL_ERROR and a
+    // CORS error - was this. See `resilientEventSource`.
     private stream(): Observable<AgentsSummary> {
         return new Observable<AgentsSummary>((subscriber) => {
-            const source = new EventSource(`${API_BASE_URL}/agents/stream`);
-            this.watchDeploySignals(source);
-            source.addEventListener('agents', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as AgentsSummary);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners.
+            return resilientEventSource(`${API_BASE_URL}/agents/stream`, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('agents', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as AgentsSummary);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-            source.onerror = () => {}; // EventSource retries on its own
-            return () => source.close();
         });
     }
 

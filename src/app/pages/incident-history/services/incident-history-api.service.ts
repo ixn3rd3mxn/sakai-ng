@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
+import { resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -31,24 +32,26 @@ export class IncidentHistoryApiService {
     // Backend re-pushes the "incident-history" event only when the payload
     // actually changes (see backend/main.py:stream_incident_history) - the
     // caller decides whether to open this at all (only while viewing today).
+    //
+    // Reconnection is not left to the browser: EventSource gives up for good
+    // on a response that is not a stream, which is what a backend restart
+    // hands it. See the comment on `resilientEventSource`.
     streamHistory(date?: string): Observable<IncidentHistoryResponse> {
         return new Observable<IncidentHistoryResponse>((subscriber) => {
             const query = this.buildParams(date).toString();
             const url = query ? `${API_BASE_URL}/incident-history/stream?${query}` : `${API_BASE_URL}/incident-history/stream`;
-            const source = new EventSource(url);
-            this.watchDeploySignals(source);
-
-            source.addEventListener('incident-history', (event: MessageEvent<string>) => {
-                try {
-                    subscriber.next(JSON.parse(event.data) as IncidentHistoryResponse);
-                } catch {
-                    // ignore malformed frames
-                }
+            // Runs for every source the helper opens, not only the first: a
+            // rebuilt EventSource starts with no listeners.
+            return resilientEventSource(url, (source) => {
+                this.watchDeploySignals(source);
+                source.addEventListener('incident-history', (event: MessageEvent<string>) => {
+                    try {
+                        subscriber.next(JSON.parse(event.data) as IncidentHistoryResponse);
+                    } catch {
+                        // ignore malformed frames
+                    }
+                });
             });
-
-            source.onerror = () => {};
-
-            return () => source.close();
         });
     }
 }

@@ -217,7 +217,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
 
             <!-- Card 1 - the call itself -->
             <div class="form-card">
-                <div class="form-card-title"><i class="pi pi-phone"></i> ข้อมูลการรับแจ้ง</div>
+                <div class="form-card-title">ข้อมูลการรับแจ้ง</div>
                 <div class="grid grid-cols-12 gap-3">
                     <div class="col-span-12 md:col-span-4">
                         <label class="field-label">วันที่</label>
@@ -304,7 +304,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
 
             <!-- Card 2 - who is calling -->
             <div class="form-card">
-                <div class="form-card-title"><i class="pi pi-user"></i> ผู้แจ้ง</div>
+                <div class="form-card-title">ผู้แจ้ง</div>
                 <div class="grid grid-cols-12 gap-3">
                     <div class="col-span-12 md:col-span-7">
                         <label class="field-label">ผู้แจ้ง</label>
@@ -345,7 +345,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                             class="w-full"
                             [(ngModel)]="form.phone"
                             (ngModelChange)="onPhoneChanged()"
-                            placeholder="083-1869048 หรือ 0831869048"
+                            placeholder="เช่น 0998887777"
                             inputmode="tel"
                         />
                     </div>
@@ -354,7 +354,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
 
             <!-- Card 3 - where -->
             <div class="form-card">
-                <div class="form-card-title"><i class="pi pi-map-marker"></i> สถานที่เกิดเหตุ</div>
+                <div class="form-card-title">สถานที่เกิดเหตุ</div>
                 <div class="grid grid-cols-12 gap-3">
                     <div class="col-span-12 md:col-span-6">
                         <label class="field-label required">อำเภอ</label>
@@ -425,7 +425,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
 
             <!-- Card 4 - the patient -->
             <div class="form-card">
-                <div class="form-card-title"><i class="pi pi-heart"></i> ผู้ประสบภัย</div>
+                <div class="form-card-title">ผู้ประสบภัย</div>
                 <div class="grid grid-cols-12 gap-3">
                     <div class="col-span-6 md:col-span-4">
                         <label class="field-label">เพศ</label>
@@ -479,7 +479,7 @@ const DUPLICATE_DEBOUNCE_MS = 500;
                     (click)="actionCardOpen.set(!actionCardOpen())"
                 >
                     <span class="flex items-center gap-2">
-                        <i class="pi pi-truck"></i> การดำเนินการ
+                        การดำเนินการ
                     </span>
                     <i class="pi" [class.pi-chevron-down]="!actionCardOpen()" [class.pi-chevron-up]="actionCardOpen()"></i>
                 </div>

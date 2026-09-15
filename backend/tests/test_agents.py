@@ -22,18 +22,42 @@ def _row(ext, action, type_id=1, username=None):
     }
 
 
-def test_type_filter_alone_yields_one_row_per_agent():
-    """The upstream lists a call taker once per queue: type 1 and again as
-    type 6 ('Call Taker and Non Emergency Swarm'). Keeping ids 1 and 5 is the
-    whole de-duplication - verified against the live feed."""
+def test_the_shared_swarm_queue_is_not_a_role():
+    """The upstream lists an agent once per queue: a call taker as type 1 and
+    again as type 6 ('Call Taker and Non Emergency Swarm'), a non-emergency
+    agent as type 2 and again as type 6. Type 6 is dropped; the agent is shown
+    once under the role that is theirs."""
     body = {"data": [
         _row("94018", "DND_OFF", 1),
         _row("94018", "DND_OFF", 6),
+        _row("94012", "DND_OFF", 2),
+        _row("94012", "DND_OFF", 6),
         _row("94011", "DND_OFF", 5),
     ]}
     out = agents.parse_agents(body, {})
-    assert [a["extension"] for a in out] == ["94011", "94018"]
-    assert {a["role_id"] for a in out} == {1, 5}
+    assert [(a["extension"], a["role_id"]) for a in out] == [("94011", 5), ("94018", 1), ("94012", 2)]
+
+
+def test_a_non_emergency_only_agent_is_shown():
+    """Seen live: extension 94012 arrived as type 2 and type 6 only, no type 1
+    row. Before type 2 was a role it was simply absent from the board."""
+    body = {"data": [_row("94012", "DND_OFF", 2), _row("94012", "DND_OFF", 6)]}
+    out = agents.parse_agents(body, {})
+    assert [(a["extension"], a["role"]) for a in out] == [("94012", agents.ROLES[2])]
+
+
+def test_an_agent_in_two_roles_is_shown_once_as_the_higher_one():
+    """A call taker who also covers the non-emergency queue has a type 1 row
+    and a type 2 row. Row order in the feed must not decide which wins."""
+    for rows in (
+        [_row("94018", "ANSWER", 1), _row("94018", "ANSWER", 2)],
+        [_row("94018", "ANSWER", 2), _row("94018", "ANSWER", 1)],
+    ):
+        out = agents.parse_agents({"data": rows}, {})
+        assert [(a["extension"], a["role_id"]) for a in out] == [("94018", 1)]
+    # Likewise a supervisor who is also queued as a call taker.
+    rows = [_row("94011", "DND_OFF", 1), _row("94011", "DND_OFF", 5)]
+    assert [a["role_id"] for a in agents.parse_agents({"data": rows}, {})] == [5]
 
 
 def test_offline_spare_desks_are_hidden():
@@ -86,16 +110,19 @@ def test_ordering_is_stable_and_not_by_status():
     reshuffles itself is harder to read than one with a fixed layout."""
     body = {"data": [
         _row("94020", "DND_SHORT", 1), _row("94014", "ANSWER", 1),
+        _row("94012", "DND_OFF", 2),
         _row("94011", "DND_OFF", 5), _row("94018", "RINGING", 1),
     ]}
     before = [a["extension"] for a in agents.parse_agents(body, {})]
     # Same agents, all statuses changed - the order must not move.
     body2 = {"data": [
         _row("94020", "DND_OFF", 1), _row("94014", "DND_OFF", 1),
+        _row("94012", "ANSWER", 2),
         _row("94011", "ANSWER", 5), _row("94018", "DND_OFF", 1),
     ]}
     after = [a["extension"] for a in agents.parse_agents(body2, {})]
-    assert before == after == ["94011", "94014", "94018", "94020"]
+    # Non-emergency (94012) sorts after every call taker, not by extension.
+    assert before == after == ["94011", "94014", "94018", "94020", "94012"]
 
 
 def test_a_missing_name_never_hides_an_agent():
