@@ -7,9 +7,16 @@
 Safe to re-run: every row is an upsert **keyed on the official code**
 (`district_code` / `subdistrict_code`), never on `district_id` /
 `subdistrict_id`. Those two are row numbers generated when the CSV was
-exported - re-export the file in a different order and every id shifts, which
-would make an id-keyed upsert rewrite the whole collection and silently
-re-point existing rows. Government area codes do not move.
+exported - re-export the file in a different order and every id shifts.
+Government area codes do not move.
+
+The ids matter more than that, though: a `flood_cases` document stores
+`district_id` / `subdistrict_id` and nothing else about its area (see
+`libs.flood_lookups.AreaSnapshot`). So a file whose ids differ from what the
+database already holds for the same code is **refused outright** - nothing is
+written - because applying it would re-point every stored case at a
+different amphoe or tambon without any record noticing. Fix the export (or
+the database) deliberately; this script will not do it for you.
 
 The collections are prefixed `flood_` on purpose. This database already holds
 the EMS collections (`incidents`, `call_types`, `cbd_categories`, `agents`);
@@ -105,6 +112,13 @@ def _validate(districts: list[dict], subdistricts: list[dict]) -> None:
     if len(set(sub_codes)) != len(sub_codes):
         raise SystemExit("subdistrict.csv: duplicate subdistrict_code")
 
+    # Ids are what cases store, so two rows sharing one would make a stored
+    # case ambiguous.
+    for label, rows, id_field in (("district.csv", districts, "district_id"), ("subdistrict.csv", subdistricts, "subdistrict_id")):
+        ids = [r[id_field] for r in rows]
+        if len(set(ids)) != len(ids):
+            raise SystemExit(label + ": duplicate " + id_field)
+
     known_ids = {d["district_id"] for d in districts}
     orphans = sorted({s["subdistrict_code"] for s in subdistricts if s["district_id"] not in known_ids})
     if orphans:
@@ -130,6 +144,29 @@ def _ensure_indexes() -> None:
     # The dropdown is always narrowed by amphoe, so this is the only read
     # pattern the tambon collection has.
     db[SUBDISTRICT_COLLECTION].create_index("district_id")
+
+
+def _refuse_renumbering(collection: str, key: str, id_field: str, docs: list[dict]) -> None:
+    """Abort before any write if a row's id would change under its code.
+
+    Cases store the id, so this is the one edit that would corrupt history.
+    """
+    stored = {
+        d[key]: d.get(id_field)
+        for d in db[collection].find({}, {key: 1, id_field: 1, "_id": 0})
+        if d.get(key) is not None
+    }
+    moved = [
+        (doc[key], stored[doc[key]], doc[id_field])
+        for doc in docs
+        if doc[key] in stored and stored[doc[key]] is not None and int(stored[doc[key]]) != doc[id_field]
+    ]
+    if moved:
+        lines = [collection + ": the file renumbers " + str(len(moved)) + " row(s) that cases may already point at; nothing written"]
+        lines += ["  " + code + ": " + id_field + " " + str(old) + " in the database, " + str(new) + " in the file" for code, old, new in moved[:20]]
+        if len(moved) > 20:
+            lines.append("  ... and " + str(len(moved) - 20) + " more")
+        raise SystemExit(chr(10).join(lines))
 
 
 def _upsert(collection: str, key: str, docs: list[dict]) -> tuple[int, int]:
@@ -176,6 +213,8 @@ def main(argv: list[str]) -> int:
     if check_only:
         print("CSVs are valid: " + str(len(districts)) + " district(s), " + str(len(subdistricts)) + " subdistrict(s)")
     else:
+        _refuse_renumbering(DISTRICT_COLLECTION, "district_code", "district_id", districts)
+        _refuse_renumbering(SUBDISTRICT_COLLECTION, "subdistrict_code", "subdistrict_id", subdistricts)
         _ensure_indexes()
         d_ins, d_upd = _upsert(DISTRICT_COLLECTION, "district_code", districts)
         s_ins, s_upd = _upsert(SUBDISTRICT_COLLECTION, "subdistrict_code", subdistricts)

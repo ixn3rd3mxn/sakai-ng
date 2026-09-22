@@ -75,8 +75,12 @@ class FloodCaseCreateIn(BaseModel):
     # lands at 16:28 is regularly written up by the incoming team.
     shift: Optional[FloodShift] = None
 
+    # Keys into the roster and `reporting_channels`. The older spellings are
+    # still accepted - a name, or the form's previous channel code - and
+    # resolved to the same keys (see `libs.flood_lookups`).
+    agent_id: Optional[str] = None
     agent_name: Optional[str] = None
-    agent_extension: Optional[str] = None
+    channel_id: Optional[int] = None
     channel: Optional[str] = None
 
     # A relationship ("ญาติ", "จนท."), not a person - free text with
@@ -90,6 +94,9 @@ class FloodCaseCreateIn(BaseModel):
 
     gender: Optional[str] = None
     age: Optional[int] = None
+    # For small children: months past the years, days past the months.
+    age_months: Optional[int] = None
+    age_days: Optional[int] = None
 
     ddpm_coordination: Optional[str] = None
     operating_unit: Optional[str] = None
@@ -101,11 +108,17 @@ class FloodCaseCreateIn(BaseModel):
 class FloodCaseUpdateIn(FloodCaseCreateIn):
     """Body for PATCH /api/flood-cases/{case_id}.
 
-    Same shape as create, so the drawer can submit the form it already holds
-    without a second mapping. `reported_at` omitted here means "leave it
-    alone" rather than "now" - an edit made the next morning must not stamp
-    the case with the time it was corrected.
+    Same field names as create, but every one optional and **partial**: only
+    the fields present in the body are written (see
+    `flood_cases.apply_update`). The endpoint dumps this with
+    `exclude_unset=True`, so "not in the body" and "in the body as null" stay
+    distinguishable - the first leaves the field alone, the second clears
+    it. `reported_at` omitted means "leave it alone" rather than "now".
     """
+
+    district: Optional[str] = None  # type: ignore[assignment]
+    subdistrict: Optional[str] = None  # type: ignore[assignment]
+    chief_complaint: Optional[str] = None  # type: ignore[assignment]
 
 
 class FloodCaseStatusIn(BaseModel):

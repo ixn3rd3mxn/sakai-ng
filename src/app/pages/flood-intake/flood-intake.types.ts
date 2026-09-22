@@ -16,9 +16,12 @@ export interface FloodCase {
     operational_day: string;
     shift: FloodShift | '';
     shift_label: string;
+    // The document stores keys (agent_id, channel_id, the two area codes);
+    // every name here is resolved by the server from its lookup cache.
+    agent_id: string;
     agent_name: string;
     agent_extension: string;
-    channel: string;
+    channel_id: number | null;
     channel_label: string;
     reporter: string;
     // Digits only, as stored; `phone_display` is the same number grouped.
@@ -32,6 +35,10 @@ export interface FloodCase {
     gender: string;
     gender_label: string;
     age: number | null;
+    // Months past the whole years, recorded for small children only.
+    age_months: number | null;
+    age_days: number | null;
+    age_label: string;
     chief_complaint: string;
     ddpm_coordination: string;
     operating_unit: string;
@@ -40,6 +47,21 @@ export interface FloodCase {
     status_label: string;
     remarks: string;
     updated_at: string;
+}
+
+// One save of a case, as the drawer's history dialog lists it. The values
+// are the text the table showed before and after - fixed when the edit was
+// made, so a later rename in a lookup does not rewrite the past.
+export interface FloodHistoryChange {
+    field: string;
+    label: string;
+    from: string;
+    to: string;
+}
+
+export interface FloodHistoryEntry {
+    at: string;
+    changes: FloodHistoryChange[];
 }
 
 // Only present on a case returned by the duplicate check: why it was flagged.
@@ -52,6 +74,10 @@ export interface FloodContext {
     shift: FloodShift;
     shift_label: string;
     server_now: string;
+    // True while a case has been logged within the last week. The "วันนี้" and
+    // "เวรนี้" tabs exist only for the live event; outside it they would sit at
+    // zero for whoever reviews the records months later.
+    active: boolean;
 }
 
 export interface FloodCaseCounts {
@@ -102,15 +128,28 @@ export interface FloodOption {
     label: string;
 }
 
+/** A row of the EMS `reporting_channels` collection. */
+export interface FloodChannel {
+    channel_id: number;
+    channel_name: string;
+}
+
 export interface FloodLookupsResponse {
     districts: FloodDistrict[];
     subdistricts: FloodSubdistrict[];
     agents: FloodAgent[];
-    channels: FloodOption[];
+    channels: FloodChannel[];
     genders: FloodOption[];
     statuses: FloodOption[];
     shifts: FloodOption[];
+    // Badges under the three free-text fields, and the suggestion list
+    // behind each one's dropdown. Names only: the fields stay free text.
     reporter_shortcuts: string[];
+    ddpm_shortcuts: string[];
+    crew_shortcuts: string[];
+    notifiers: string[];
+    ddpm_teams: string[];
+    crews: string[];
 }
 
 export interface FloodDuplicateResponse {
@@ -126,9 +165,12 @@ export interface FloodFilterState {
     search: string;
     dateFrom: string | null;
     dateTo: string | null;
+    // Hand-picked days, ISO. Set instead of dateFrom/dateTo, never with them:
+    // the one date control is in one of three modes at a time.
+    dates: string[];
     districtCode: string | null;
     shift: FloodShift | null;
-    agentName: string | null;
+    agentId: string | null;
 }
 
 export const EMPTY_FILTERS: FloodFilterState = {
@@ -136,28 +178,37 @@ export const EMPTY_FILTERS: FloodFilterState = {
     search: '',
     dateFrom: null,
     dateTo: null,
+    dates: [],
     districtCode: null,
     shift: null,
-    agentName: null
+    agentId: null
 };
 
 // The body POST/PATCH accept. Only district, subdistrict and chief_complaint
 // are required - a call that drops after twenty seconds still has to be
 // recorded, so everything else may be blank.
+/**
+ * A partial edit: only the fields present are written, so two operators
+ * finishing different parts of one case cannot overwrite each other. A
+ * field sent as null is cleared; a field left out is left alone.
+ */
+export type FloodCasePatch = Partial<FloodCaseInput>;
+
 export interface FloodCaseInput {
     district: string;
     subdistrict: string;
     chief_complaint: string;
     reported_at?: string | null;
     shift?: FloodShift | null;
-    agent_name?: string | null;
-    agent_extension?: string | null;
-    channel?: string | null;
+    agent_id?: string | null;
+    channel_id?: number | null;
     reporter?: string | null;
     phone?: string | null;
     location_note?: string | null;
     gender?: string | null;
     age?: number | null;
+    age_months?: number | null;
+    age_days?: number | null;
     ddpm_coordination?: string | null;
     operating_unit?: string | null;
     assistance?: string | null;

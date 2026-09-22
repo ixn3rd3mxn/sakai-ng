@@ -6,7 +6,6 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
-import { DatePickerModule } from 'primeng/datepicker';
 import { IconFieldModule } from 'primeng/iconfield';
 import { InputIconModule } from 'primeng/inputicon';
 import { InputTextModule } from 'primeng/inputtext';
@@ -18,10 +17,10 @@ import { ToastModule } from 'primeng/toast';
 import { TooltipModule } from 'primeng/tooltip';
 import { parseIsoDate, toBuddhistYear } from '../dashboardclone/services/date-utils';
 import { FloodCaseFormDrawer } from './components/flood-case-form-drawer';
+import { FloodDateFilter } from './components/flood-date-filter';
 import { FloodCase, FloodTab } from './flood-intake.types';
 import { FloodApiService } from './services/flood-api.service';
 import { FloodDataService } from './services/flood-data.service';
-import { BuddhistYearDirective } from '../../shared/buddhist-year.directive';
 import { FloodDraftService } from './services/flood-draft.service';
 
 interface TabDefinition {
@@ -48,11 +47,10 @@ const OUTBOX_RETRY_MS = 20_000;
         IconFieldModule,
         InputIconModule,
         SelectModule,
-        DatePickerModule,
         ToastModule,
         TooltipModule,
-        BuddhistYearDirective,
-        FloodCaseFormDrawer
+        FloodCaseFormDrawer,
+        FloodDateFilter
     ],
     providers: [FloodDataService, FloodDraftService, MessageService, ConfirmationService],
     styles: [
@@ -64,19 +62,36 @@ const OUTBOX_RETRY_MS = 20_000;
             :host ::ng-deep .flood-table .p-datatable-tbody > tr > td {
                 padding: 0.5rem 0.75rem;
             }
+
+            /* Every body row is the same height, data and skeleton alike, so
+               the table does not jump when loading ends and a row's height
+               never depends on whether it has a second line. 57px is what a
+               two-line row measures with the padding above; cells are
+               clamped so nothing can push past it. */
+            :host ::ng-deep .flood-table .p-datatable-tbody > tr {
+                height: 57px;
+            }
             :host ::ng-deep .flood-table .p-datatable-thead > tr > th {
                 padding: 0.6rem 0.75rem;
                 white-space: nowrap;
             }
 
-            /* The longest field on the row. Two lines, then an ellipsis - the
+            /* The longest field on the row. One line, then an ellipsis - the
                full text is one click away in the drawer, and letting it wrap
-               freely is what costs the other six rows. */
-            .clamp-2 {
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                -webkit-box-orient: vertical;
+               freely is what costs the other six rows. The unit line below it
+               gets the same treatment so the cell never exceeds two rows. */
+            .clamp-1 {
+                white-space: nowrap;
                 overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            /* Auto table layout sizes a column to its widest nowrap content,
+               which would defeat the ellipsis. Zeroing the cell's max-width
+               keeps its text out of that measurement, so the column stays at
+               the header's min-width plus its share of the free space. */
+            .clamp-cell {
+                max-width: 0;
             }
 
             .cell-sub {
@@ -129,9 +144,12 @@ const OUTBOX_RETRY_MS = 20_000;
             <div class="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
                     <div class="font-semibold text-xl">รับแจ้งขอความช่วยเหลืออุทกภัย</div>
-                    <div class="text-sm text-surface-500 dark:text-surface-400 mt-1">
+                    <div class="text-sm text-surface-500 dark:text-surface-400 mt-1 flex items-center gap-1">
+                        <span>วันปฏิบัติการ</span>
                         @if (dataService.context(); as ctx) {
-                            วันปฏิบัติการ {{ formatDay(ctx.operational_day) }} · เวร{{ ctx.shift_label }}
+                            <span>{{ formatDay(ctx.operational_day) }} · เวร{{ ctx.shift_label }}</span>
+                        } @else {
+                            <p-skeleton width="9.5rem" height="0.875rem" />
                         }
                     </div>
                 </div>
@@ -154,7 +172,7 @@ const OUTBOX_RETRY_MS = 20_000;
             </div>
 
             <div class="flex flex-wrap items-center gap-1 mb-4">
-                @for (tab of tabs; track tab.key) {
+                @for (tab of visibleTabs(); track tab.key) {
                     <button
                         type="button"
                         class="tab-button"
@@ -181,17 +199,7 @@ const OUTBOX_RETRY_MS = 20_000;
                     />
                 </p-iconfield>
 
-                <p-datepicker
-                    buddhistYear
-                    [ngModel]="dateRange()"
-                    (ngModelChange)="onDateRange($event)"
-                    selectionMode="range"
-                    dateFormat="dd/mm/yy"
-                    placeholder="ช่วงวันที่"
-                    [readonlyInput]="true"
-                    [showClear]="true"
-                    styleClass="w-44"
-                />
+                <flood-date-filter />
 
                 <p-select
                     [ngModel]="dataService.filters().districtCode"
@@ -219,11 +227,11 @@ const OUTBOX_RETRY_MS = 20_000;
                 />
 
                 <p-select
-                    [ngModel]="dataService.filters().agentName"
+                    [ngModel]="dataService.filters().agentId"
                     (ngModelChange)="dataService.setAgent($event)"
                     [options]="dataService.agents()"
                     optionLabel="agent_name"
-                    optionValue="agent_name"
+                    optionValue="agent_id"
                     placeholder="เจ้าหน้าที่รับแจ้ง"
                     [showClear]="true"
                     [filter]="true"
@@ -232,16 +240,17 @@ const OUTBOX_RETRY_MS = 20_000;
                     styleClass="w-52"
                 />
 
-                @if (dataService.hasActiveFilters()) {
-                    <button
-                        pButton
-                        type="button"
-                        label="ล้างตัวกรอง"
-                        icon="pi pi-filter-slash"
-                        class="p-button-text"
-                        (click)="clearFilters()"
-                    ></button>
-                }
+                <!-- Always in the row and always live, so the controls do not
+                     shift when the first filter is set and a click never has
+                     to be second-guessed. Clearing nothing is a no-op. -->
+                <button
+                    pButton
+                    type="button"
+                    label="ล้างตัวกรอง"
+                    icon="pi pi-filter-slash"
+                    class="p-button-outlined"
+                    (click)="clearFilters()"
+                ></button>
             </div>
 
             @if (selected().length > 0) {
@@ -318,7 +327,7 @@ const OUTBOX_RETRY_MS = 20_000;
                             <p-tableHeaderCheckbox />
                         </th>
                         <th style="width: 4rem">ลำดับ</th>
-                        <th style="min-width: 8rem">วันที่ / เวลา</th>
+                        <th style="min-width: 8rem">เวลา / วันที่</th>
                         <th style="min-width: 10rem">อำเภอ / ตำบล</th>
                         <th style="min-width: 10rem">ผู้แจ้ง</th>
                         <th style="min-width: 18rem">อาการสำคัญ</th>
@@ -366,10 +375,10 @@ const OUTBOX_RETRY_MS = 20_000;
                                 <div class="cell-sub tabular">{{ item.phone_display || '-' }}</div>
                             </td>
 
-                            <td>
-                                <div class="clamp-2">{{ item.chief_complaint }}</div>
+                            <td class="clamp-cell">
+                                <div class="clamp-1">{{ item.chief_complaint }}</div>
                                 @if (item.operating_unit) {
-                                    <div class="cell-sub">หน่วย: {{ item.operating_unit }}</div>
+                                    <div class="cell-sub clamp-1">หน่วย: {{ item.operating_unit }}</div>
                                 }
                             </td>
 
@@ -377,7 +386,7 @@ const OUTBOX_RETRY_MS = 20_000;
                                 <p-tag
                                     [value]="item.status_label"
                                     [severity]="item.status === 'success' ? 'success' : 'warn'"
-                                    [icon]="item.status === 'success' ? 'pi pi-check-circle' : 'pi pi-clock'"
+                                    [icon]="item.status === 'success' ? '' : ''"
                                 />
                             </td>
 
@@ -437,6 +446,12 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
     });
 
     private readonly searchInput = viewChild<any>('searchInput');
+    private readonly drawer = viewChild(FloodCaseFormDrawer);
+
+    /** For the route guard: may the open drawer, if any, be discarded? */
+    canLeave(): Promise<boolean> {
+        return this.drawer()?.confirmDiscard() ?? Promise.resolve(true);
+    }
 
     readonly tabs: TabDefinition[] = [
         { key: 'all', label: 'ทั้งหมด' },
@@ -446,20 +461,22 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
         { key: 'success', label: 'สำเร็จ' }
     ];
 
+    // "วันนี้" and "เวรนี้" are live-event views. They go when the server says
+    // no case has come in for a week (the page is an archive now, whatever the
+    // month) and when a date range is set: an explicit range and "today"
+    // contradict each other, and the backend would let "today" win silently.
+    readonly visibleTabs = computed<TabDefinition[]>(() => {
+        const { dateFrom, dateTo, dates } = this.dataService.filters();
+        const live = this.dataService.context()?.active === true && !dateFrom && !dateTo && !dates.length;
+        return live ? this.tabs : this.tabs.filter((t) => t.key !== 'today' && t.key !== 'current_shift');
+    });
+
     readonly selected = signal<FloodCase[]>([]);
     readonly skeletonRows = Array.from({ length: 8 }, () => ({}) as FloodCase);
 
     private retryTimer: ReturnType<typeof setInterval> | null = null;
     private flushing = false;
     private readonly onlineHandler = () => this.flushOutbox();
-
-    // Mirrors the two ISO strings the service holds back into the Date pair
-    // p-datepicker wants, so a refresh restores what the operator selected.
-    readonly dateRange = computed<Date[] | null>(() => {
-        const { dateFrom, dateTo } = this.dataService.filters();
-        if (!dateFrom || !dateTo) return null;
-        return [parseIsoDate(dateFrom), parseIsoDate(dateTo)];
-    });
 
     constructor() {
         // A row that disappears from the stream (somebody else deleted or
@@ -469,6 +486,14 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
             const visible = new Set(this.dataService.cases().map((c) => c.case_id));
             const kept = this.selected().filter((c) => visible.has(c.case_id));
             if (kept.length !== this.selected().length) this.selected.set(kept);
+        });
+
+        // A tab that has just been hidden (a range was set, or the stream
+        // reported the event over while it was selected) must not stay
+        // applied, or the table would be filtered by a button nobody can see.
+        effect(() => {
+            const tab = this.dataService.filters().tab;
+            if (!this.visibleTabs().some((t) => t.key === tab)) this.dataService.setTab('all');
         });
     }
 
@@ -556,10 +581,6 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
     countFor(tab: FloodTab): number {
         const counts = this.dataService.counts();
         return counts ? counts[tab] : 0;
-    }
-
-    onDateRange(range: Date[] | null): void {
-        this.dataService.setDateRange(range);
     }
 
     clearFilters(): void {

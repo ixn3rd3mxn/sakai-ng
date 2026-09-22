@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
 from libs import agents, aggregations, broadcast, call_log, call_stats, deploys, events, feed_health, lookups, relay
-from libs import flood_cases, flood_events, flood_lookups
+from libs import flood_cases, flood_events, flood_lookups, flood_names
 from libs.configs import APP_BUILD, CORS_ORIGINS, DEPLOY_TOKEN, db
 from libs.models import (
     DeploymentAnnounceIn,
@@ -840,9 +840,10 @@ def _flood_filters(
     tab: Optional[str],
     date_from: Optional[date_cls],
     date_to: Optional[date_cls],
+    dates: Optional[list[date_cls]],
     district_code: Optional[str],
     shift: Optional[str],
-    agent_name: Optional[str],
+    agent_id: Optional[str],
     status: Optional[str],
     search: Optional[str],
     limit: int,
@@ -852,9 +853,10 @@ def _flood_filters(
         tab=tab or flood_cases.TAB_ALL,
         date_from=date_from,
         date_to=date_to,
+        dates=dates,
         district_code=district_code,
         shift=shift,
-        agent_name=agent_name,
+        agent_id=agent_id,
         status=status,
         search=search,
         limit=limit,
@@ -864,50 +866,43 @@ def _flood_filters(
 
 @app.get("/api/flood-lookups")
 def get_flood_lookups():
-    """Districts, subdistricts and the operator roster in one response.
+    """Districts, subdistricts, the operator roster and the channels in one
+    response.
 
-    One payload rather than three endpoints because the whole set is tiny (12
-    + 115 + 19 rows) and the amphoe/tambon dependency has to resolve without a
-    round trip: the operator picks both while still on the call, and a request
-    per amphoe change would be felt.
+    One payload rather than four endpoints because the whole set is tiny (12
+    + 115 + 19 + 3 rows) and the amphoe/tambon dependency has to resolve
+    without a round trip: the operator picks both while still on the call,
+    and a request per amphoe change would be felt.
 
-    The roster is read straight from `agents` - the same collection the agent
-    board uses - and never written to. Names come back exactly as stored,
-    without an honorific: the flood spreadsheet wrote "นางเจะรอฮานี วันหวัง"
-    where `agents` holds "เจะรอฮานี วันหวัง", and inventing the prefix here
-    would mean writing to a collection another page owns.
+    All four come from the `flood_lookups` cache - the same one that turns
+    the keys on a stored case back into names - so what the form offers and
+    what the table shows can never disagree. The roster and channels are the
+    EMS collections `agents` / `reporting_channels`, read and never written.
     """
     _require_flood_lookups()
 
-    try:
-        roster = [
-            {
-                "agent_id": str(doc.get("agent_id") or ""),
-                "agent_name": doc["agent_name"],
-                "agent_extension": str(doc.get("agent_extension") or ""),
-            }
-            for doc in db.agents.find({}, {"agent_id": 1, "agent_name": 1, "agent_extension": 1, "_id": 0})
-            if doc.get("agent_name")
-        ]
-        # Roster order, which is what the staff list is ordered by - not
-        # alphabetical. `agent_id` is stored as a string, so sorting it as text
-        # would run 1, 10, 11, ... 2; it is compared as a number, with any
-        # non-numeric id sorted last rather than raising.
-        roster.sort(key=lambda a: (not a["agent_id"].isdigit(), int(a["agent_id"]) if a["agent_id"].isdigit() else 0, a["agent_name"]))
-    except PyMongoError:
-        # The roster is a convenience - the field is free text on the form
-        # anyway - so losing it must not cost the operator the area lists.
-        roster = []
+    # Suggestions under free-text fields. Read one by one so a list that was
+    # never seeded costs only itself.
+    def name_list(spec: flood_names.NameList) -> list[str]:
+        try:
+            return flood_names.names(spec)
+        except PyMongoError:
+            return []
 
     return {
         "districts": flood_lookups.districts(),
         "subdistricts": flood_lookups.subdistricts(),
-        "agents": roster,
-        "channels": [{"code": k, "label": v} for k, v in flood_cases.CHANNEL_LABELS.items()],
+        "agents": flood_lookups.agents(),
+        "channels": flood_lookups.channels(),
         "genders": [{"code": k, "label": v} for k, v in flood_cases.GENDER_LABELS.items()],
         "statuses": [{"code": k, "label": v} for k, v in flood_cases.STATUS_LABELS.items()],
         "shifts": [{"code": k, "label": v} for k, v in SHIFT_LABELS.items()],
         "reporter_shortcuts": list(flood_cases.REPORTER_SHORTCUTS),
+        "ddpm_shortcuts": list(flood_cases.DDPM_SHORTCUTS),
+        "crew_shortcuts": list(flood_cases.CREW_SHORTCUTS),
+        "notifiers": name_list(flood_names.NOTIFIERS),
+        "ddpm_teams": name_list(flood_names.DDPM_TEAMS),
+        "crews": name_list(flood_names.CREWS),
     }
 
 
@@ -916,16 +911,17 @@ def get_flood_cases(
     tab: Optional[str] = Query(None),
     date_from: Optional[date_cls] = Query(None),
     date_to: Optional[date_cls] = Query(None),
+    dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
-    agent_name: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(flood_cases.DEFAULT_LIMIT),
     offset: int = Query(0),
 ):
     filters = _flood_filters(
-        tab, date_from, date_to, district_code, shift, agent_name, status, search, limit, offset
+        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search, limit, offset
     )
     try:
         return flood_cases.list_cases(filters)
@@ -939,9 +935,10 @@ async def stream_flood_cases(
     tab: Optional[str] = Query(None),
     date_from: Optional[date_cls] = Query(None),
     date_to: Optional[date_cls] = Query(None),
+    dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
-    agent_name: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(flood_cases.DEFAULT_LIMIT),
@@ -961,7 +958,7 @@ async def stream_flood_cases(
     three EMS report pages rebuild their aggregations.
     """
     filters = _flood_filters(
-        tab, date_from, date_to, district_code, shift, agent_name, status, search, limit, offset
+        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search, limit, offset
     )
 
     async def event_generator():
@@ -1004,9 +1001,10 @@ def export_flood_cases(
     tab: Optional[str] = Query(None),
     date_from: Optional[date_cls] = Query(None),
     date_to: Optional[date_cls] = Query(None),
+    dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
-    agent_name: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
 ):
@@ -1018,7 +1016,7 @@ def export_flood_cases(
     been sent on.
     """
     filters = _flood_filters(
-        tab, date_from, date_to, district_code, shift, agent_name, status, search,
+        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search,
         flood_cases.MAX_LIMIT, 0,
     )
     try:
@@ -1096,18 +1094,33 @@ def get_flood_case(case_id: str):
     return {"case": case}
 
 
+@app.get("/api/flood-cases/{case_id}/history")
+def get_flood_case_history(case_id: str):
+    """The last few edits of one case, newest first - what the drawer's
+    history dialog shows. Kept off the case payload so the table's stream
+    does not carry every case's history on every frame."""
+    history = flood_cases.get_history(case_id)
+    if history is None:
+        raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
+    return {"history": history}
+
+
 @app.patch("/api/flood-cases/{case_id}")
 def update_flood_case(case_id: str, body: FloodCaseUpdateIn):
     _require_flood_lookups()
     try:
-        case = flood_cases.apply_update(case_id, body.model_dump())
+        # exclude_unset: a field the client left out is not written, a field
+        # it sent as null is cleared. That distinction is what lets two
+        # operators finish different parts of one case at the same time.
+        result = flood_cases.apply_update(case_id, body.model_dump(exclude_unset=True))
     except flood_cases.FloodCaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if case is None:
+    if result is None:
         raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
 
-    flood_events.notify_flood_cases_changed()
-    return {"case": case}
+    if result["changed"]:
+        flood_events.notify_flood_cases_changed()
+    return result
 
 
 @app.patch("/api/flood-cases/{case_id}/status")

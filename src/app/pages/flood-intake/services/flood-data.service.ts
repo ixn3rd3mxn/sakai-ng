@@ -13,6 +13,12 @@ import {
 import { OptionGroup } from '../../../shared/recent-picks';
 import { FloodApiService } from './flood-api.service';
 
+// Mirrors REPORTER_SHORTCUTS / DDPM_SHORTCUTS / CREW_SHORTCUTS in
+// backend/libs/flood_cases.py. Change both together.
+const REPORTER_SHORTCUTS: string[] = ['กู้ชีพ', 'จนท.', 'ทต.', 'รพ.', 'รพ.สต.', 'ศูนย์', 'สภ.', 'อบต.', 'เทศบาล'];
+const DDPM_SHORTCUTS: string[] = ['กอ.ร่วม', 'ประสาน', 'ประสานกู้ชีพ', 'ประสานงานทีมปภ.อำเภอ'];
+const CREW_SHORTCUTS: string[] = ['กู้ชีพ', 'ทต.', 'เทศบาล', 'รพ.', 'รพ.สต.', 'ศูนย์', 'อบต.'];
+
 // Owns the filter selection and the live snapshot it resolves to.
 //
 // Every filter is applied server-side and the selection re-opens the stream,
@@ -32,6 +38,11 @@ export class FloodDataService implements OnDestroy {
 
     private readonly _lookups = signal<FloodLookupsResponse | null>(null);
     readonly lookups = this._lookups.asReadonly();
+    // Whether the one lookups request is still out. Every dropdown on the
+    // page is empty until it lands, so the intake form waits on this the
+    // same way it waits on a case.
+    private readonly _lookupsPending = signal(true);
+    readonly lookupsPending = this._lookupsPending.asReadonly();
 
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
@@ -52,7 +63,16 @@ export class FloodDataService implements OnDestroy {
     readonly channels = computed(() => this._lookups()?.channels ?? []);
     readonly genders = computed(() => this._lookups()?.genders ?? []);
     readonly shifts = computed(() => this._lookups()?.shifts ?? []);
-    readonly reporterShortcuts = computed(() => this._lookups()?.reporter_shortcuts ?? []);
+    // The badges are fixed text, not data: the same lists as
+    // backend/libs/flood_cases.py, so they are on screen before /lookups
+    // answers (a case opened by link on a cold page shows its skeleton
+    // while both are in flight). The server's copy still replaces them.
+    readonly reporterShortcuts = computed(() => this._lookups()?.reporter_shortcuts ?? REPORTER_SHORTCUTS);
+    readonly ddpmShortcuts = computed(() => this._lookups()?.ddpm_shortcuts ?? DDPM_SHORTCUTS);
+    readonly crewShortcuts = computed(() => this._lookups()?.crew_shortcuts ?? CREW_SHORTCUTS);
+    readonly notifiers = computed(() => this._lookups()?.notifiers ?? []);
+    readonly ddpmTeams = computed(() => this._lookups()?.ddpm_teams ?? []);
+    readonly crews = computed(() => this._lookups()?.crews ?? []);
 
     // Options for the amphoe/tambon pair. Kept here rather than in the form so
     // the table's amphoe filter and the drawer's dropdown read the same list.
@@ -89,7 +109,15 @@ export class FloodDataService implements OnDestroy {
     }
 
     constructor() {
-        this.api.getLookups().subscribe((lookups) => this._lookups.set(lookups));
+        this.api.getLookups().subscribe({
+            next: (lookups) => {
+                this._lookups.set(lookups);
+                this._lookupsPending.set(false);
+            },
+            // A failure has to end the wait too, or every dropdown that shows
+            // a placeholder while these are in flight waits for ever.
+            error: () => this._lookupsPending.set(false)
+        });
 
         this.subscription = this.filters$
             .pipe(
@@ -108,6 +136,11 @@ export class FloodDataService implements OnDestroy {
 
     private patch(change: Partial<FloodFilterState>): void {
         const next = { ...this.filters$.value, ...change };
+        // Same comparison as the distinctUntilChanged below. If the pipe is
+        // going to drop this emission, loading must not be raised either, or
+        // nothing ever answers to lower it and the skeleton stays up for good
+        // (clearing the date picker after choosing only a start date did this).
+        if (JSON.stringify(next) === JSON.stringify(this.filters$.value)) return;
         this._filters.set(next);
         this._loading.set(true);
         this.filters$.next(next);
@@ -121,6 +154,13 @@ export class FloodDataService implements OnDestroy {
         this.patch({ search: search ?? '' });
     }
 
+    // The three shapes the date control produces. Each one clears the other
+    // two, so the state can never say "1st to 30th" and "the 4th" at once.
+    setDay(day: Date | null): void {
+        const iso = day ? formatDateParam(day) : null;
+        this.patch({ dateFrom: iso, dateTo: iso, dates: [] });
+    }
+
     setDateRange(range: Date[] | null): void {
         // p-datepicker in range mode reports [from, null] while the operator
         // is mid-selection; applying that as an open-ended range would blank
@@ -130,8 +170,14 @@ export class FloodDataService implements OnDestroy {
         if (from && !to) return;
         this.patch({
             dateFrom: from ? formatDateParam(from) : null,
-            dateTo: to ? formatDateParam(to) : null
+            dateTo: to ? formatDateParam(to) : null,
+            dates: []
         });
+    }
+
+    setDates(days: Date[] | null): void {
+        const dates = (days ?? []).map(formatDateParam).sort();
+        this.patch({ dateFrom: null, dateTo: null, dates });
     }
 
     setDistrict(districtCode: string | null): void {
@@ -142,8 +188,8 @@ export class FloodDataService implements OnDestroy {
         this.patch({ shift });
     }
 
-    setAgent(agentName: string | null): void {
-        this.patch({ agentName });
+    setAgent(agentId: string | null): void {
+        this.patch({ agentId });
     }
 
     clearFilters(): void {
@@ -152,7 +198,7 @@ export class FloodDataService implements OnDestroy {
 
     readonly hasActiveFilters = computed(() => {
         const f = this._filters();
-        return !!(f.search || f.dateFrom || f.dateTo || f.districtCode || f.shift || f.agentName || f.tab !== 'all');
+        return !!(f.search || f.dateFrom || f.dateTo || f.dates.length || f.districtCode || f.shift || f.agentId || f.tab !== 'all');
     });
 
     exportUrl(): string {

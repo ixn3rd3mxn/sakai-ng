@@ -43,11 +43,19 @@ import { BUDDHIST_ERA_OFFSET } from '../pages/dashboardclone/services/date-utils
 //                                     any more, so `width: auto` lets the
 //                                     month grid balloon to 442px instead
 //
-// So a min-width alone cannot fix both; the panel needs pinning. Rather than
-// hard-code a number - the day grid's width comes from theme tokens, and this
-// app's root font is 14px, not the 16px a rem value would suggest - the width
-// is measured off the day view on open and applied to the panel, so the other
-// two views inherit whatever the theme actually produces.
+// Height has the same problem in the other direction: the month view is
+// four rows of padded text and the year view five, so the popup (or the
+// popover holding an inline one) changes height as the operator drills from
+// day to month to year.
+//
+// So the month and year views are held to the day grid's size and the panel
+// is left to size itself around them. Rather than hard-code a number - the
+// day grid's width comes from theme tokens, and this app's root font is
+// 14px, not the 16px a rem value would suggest - the day view is measured
+// whenever it is on screen, and the month and year views are laid out as
+// grids of exactly that width and height. The day grid itself is left alone:
+// it is five rows for most months and six for some, and growing with the
+// month is PrimeNG's own behaviour and reads naturally.
 
 // Matches the year in "dd/mm/yyyy", including both halves of the range form
 // "dd/mm/yyyy - dd/mm/yyyy" that the table's filter produces.
@@ -80,6 +88,11 @@ export class BuddhistYearDirective implements AfterViewInit, OnDestroy {
     private readonly subscription = new Subscription();
     private panelObserver: MutationObserver | null = null;
     private panel: HTMLElement | null = null;
+    // The day grid's size, which the month and year views are held to.
+    // Refreshed every time the day grid is on screen, so drilling in from a
+    // six-row month gives a month view as tall as that month was.
+    private viewWidth = 0;
+    private viewHeight = 0;
 
     // Remembers the exact text last written to each node, so a rescan caused by
     // an unrelated mutation (switching to month view leaves the header year
@@ -97,6 +110,18 @@ export class BuddhistYearDirective implements AfterViewInit, OnDestroy {
 
     ngAfterViewInit(): void {
         this.patchInput();
+        // An inline picker has no input and never opens: its panel is simply
+        // there, so it is patched once on init and watched for the lifetime
+        // of the directive (the date filter's popover recreates it per open).
+        if (this.picker.inline) {
+            const panel = this.host.nativeElement.querySelector('.p-datepicker-panel') as HTMLElement | null;
+            // Inside a popover the panel exists before it is laid out, and an
+            // unlaid panel measures 0 x 0; wait a frame or two for it. (An
+            // overlay that renders in place and moves later still needs
+            // `remeasure()` once it has settled - see there.)
+            if (panel) this.whenMeasurable(panel, () => this.onPanelShow(panel));
+            return;
+        }
         this.subscription.add(this.picker.onShow.subscribe((panel: HTMLElement) => this.onPanelShow(panel)));
         this.subscription.add(this.picker.onClose.subscribe(() => this.disconnect()));
     }
@@ -135,37 +160,87 @@ export class BuddhistYearDirective implements AfterViewInit, OnDestroy {
 
     private onPanelShow(panel: HTMLElement): void {
         this.panel = panel;
-        this.pinPanelWidth(panel);
+        this.measureViews(panel);
         this.panelObserver = new MutationObserver(() => this.patchPanel(panel));
         this.patchPanel(panel);
     }
 
-    // Freeze the popup at the width the day grid gives it, so switching to the
-    // month or year view cannot resize it. The panel always opens on the day
-    // view, which is the one view with a width worth keeping.
-    private pinPanelWidth(panel: HTMLElement): void {
-        // Clear first: a panel reused across opens would otherwise measure the
-        // width pinned last time rather than the day grid's own.
-        panel.style.width = '';
-        if (!panel.querySelector('.p-datepicker-day-view')) return;
+    /**
+     * Measure again, from scratch. For an inline picker inside an overlay
+     * that first renders where it is declared and is appended to <body> and
+     * aligned only when its show animation starts (p-popover does this): the
+     * size taken in ngAfterViewInit is of the panel squeezed into whatever
+     * row it was declared in, so the overlay's onShow calls this once it has
+     * settled in its real place.
+     */
+    remeasure(): void {
+        const panel = this.panel;
+        if (!panel) return;
+        this.measureViews(panel);
+        this.patchPanel(panel);
+    }
 
+    private whenMeasurable(panel: HTMLElement, then: () => void, attempts = 10): void {
+        if (panel.offsetWidth > 0 || attempts === 0) {
+            then();
+            return;
+        }
+        requestAnimationFrame(() => this.whenMeasurable(panel, then, attempts - 1));
+    }
+
+    // Take the day grid's size, when it is on screen. Nothing is written to
+    // the panel itself: it keeps sizing itself around its content.
+    private measureViews(panel: HTMLElement): void {
+        const dayView = panel.querySelector('.p-datepicker-day-view') as HTMLElement | null;
+        if (!dayView) return;
         // offsetWidth, not getBoundingClientRect().width: the open animation
         // applies a transform, which the rect includes and layout width does
-        // not - measuring mid-animation would pin a scaled-down width.
-        const width = panel.offsetWidth;
-        if (width > 0) panel.style.width = `${width}px`;
+        // not - measuring mid-animation would take a scaled-down width.
+        const width = dayView.offsetWidth;
+        const height = dayView.offsetHeight;
+        if (width <= 0 || height <= 0) return;
+        this.viewWidth = width;
+        this.viewHeight = height;
+    }
+
+    // Hold the month and year views - rows of inline-flex boxes that would
+    // otherwise take whatever width and height their padding gives them - to
+    // the day grid's size, as grids, so their rows share it evenly. Set on
+    // the element rather than in a stylesheet because the view is recreated
+    // on every switch, the panel may live under <body>, and this directive
+    // has no styles of its own to scope to it.
+    private fitViews(panel: HTMLElement): void {
+        this.measureViews(panel);
+        if (!this.viewWidth || !this.viewHeight) return;
+
+        const grids: [string, string, number][] = [
+            ['.p-datepicker-month-view', '.p-datepicker-month', 3],
+            ['.p-datepicker-year-view', '.p-datepicker-year', 2]
+        ];
+        for (const [viewSelector, cellSelector, columns] of grids) {
+            const view = panel.querySelector(viewSelector) as HTMLElement | null;
+            if (!view) continue;
+            view.style.display = 'grid';
+            view.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+            view.style.width = `${this.viewWidth}px`;
+            view.style.height = `${this.viewHeight}px`;
+            view.querySelectorAll<HTMLElement>(cellSelector).forEach((cell) => (cell.style.width = 'auto'));
+        }
     }
 
     private disconnect(): void {
         this.panelObserver?.disconnect();
         this.panelObserver = null;
-        if (this.panel) this.panel.style.width = '';
         this.panel = null;
+        this.viewWidth = 0;
+        this.viewHeight = 0;
     }
 
     private patchPanel(panel: HTMLElement): void {
         // Detached while rewriting, or each write would re-enter the observer.
         this.panelObserver?.disconnect();
+
+        this.fitViews(panel);
 
         panel.querySelectorAll<HTMLElement>(BuddhistYearDirective.YEAR_SELECTOR).forEach((node) => {
             this.patchTextNode(node, (raw) => (/^\d{4}$/.test(raw) ? String(toBuddhist(Number(raw))) : null));

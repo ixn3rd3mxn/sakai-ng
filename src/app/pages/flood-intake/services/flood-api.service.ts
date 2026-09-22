@@ -5,9 +5,11 @@ import { environment } from '../../../../environments/environment';
 import {
     FloodCase,
     FloodCaseInput,
+    FloodCasePatch,
     FloodCasesResponse,
     FloodDuplicateResponse,
     FloodFilterState,
+    FloodHistoryEntry,
     FloodLookupsResponse
 } from '../flood-intake.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
@@ -33,9 +35,10 @@ export class FloodApiService {
         if (filters.search) params = params.set('search', filters.search);
         if (filters.dateFrom) params = params.set('date_from', filters.dateFrom);
         if (filters.dateTo) params = params.set('date_to', filters.dateTo);
+        for (const day of filters.dates) params = params.append('dates', day);
         if (filters.districtCode) params = params.set('district_code', filters.districtCode);
         if (filters.shift) params = params.set('shift', filters.shift);
-        if (filters.agentName) params = params.set('agent_name', filters.agentName);
+        if (filters.agentId) params = params.set('agent_id', filters.agentId);
         return params;
     }
 
@@ -77,12 +80,18 @@ export class FloodApiService {
         return this.http.get<{ case: FloodCase }>(`${API_BASE_URL}/flood-cases/${caseId}`);
     }
 
+    /** The last few edits of a case, newest first. */
+    getCaseHistory(caseId: string): Observable<{ history: FloodHistoryEntry[] }> {
+        return this.http.get<{ history: FloodHistoryEntry[] }>(`${API_BASE_URL}/flood-cases/${caseId}/history`);
+    }
+
     createCase(body: FloodCaseInput): Observable<{ case: FloodCase }> {
         return this.http.post<{ case: FloodCase }>(`${API_BASE_URL}/flood-cases`, body);
     }
 
-    updateCase(caseId: string, body: FloodCaseInput): Observable<{ case: FloodCase }> {
-        return this.http.patch<{ case: FloodCase }>(`${API_BASE_URL}/flood-cases/${caseId}`, body);
+    /** Writes only the fields in `body`; `changed` echoes which ones were applied. */
+    updateCase(caseId: string, body: FloodCasePatch): Observable<{ case: FloodCase; changed: string[] }> {
+        return this.http.patch<{ case: FloodCase; changed: string[] }>(`${API_BASE_URL}/flood-cases/${caseId}`, body);
     }
 
     // Status-only, deliberately not the full-form endpoint: the table row

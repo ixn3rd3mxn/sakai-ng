@@ -26,9 +26,9 @@ import { DestroyRef, Injectable, inject } from '@angular/core';
 // goes, PrimeNG's normal teardown runs and this stands aside - unless the
 // last mask belongs to something that never locked, in which case there is
 // no teardown coming and the lock this re-asserted is released here. The
-// flood intake drawer is that case: it does not block scroll, so PrimeNG
-// unlocks when the confirm inside it closes, this re-locks because the
-// drawer's mask is still up, and nothing would ever unlock again.
+// flood intake drawer was that case before it blocked scroll itself: PrimeNG
+// unlocked when the confirm inside it closed, this re-locked because the
+// drawer's mask was still up, and nothing would ever have unlocked again.
 //
 // Masks rather than the class, because the class is the thing that goes
 // wrong. .p-overlay-mask is the class every modal mask shares - dialog,

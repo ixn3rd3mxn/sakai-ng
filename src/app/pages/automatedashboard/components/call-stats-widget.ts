@@ -238,7 +238,13 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
         <div class="col-span-12">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div class="font-semibold text-xl">สถิติการให้บริการต่อวัน (EMS Agent)</div>
-                <div class="flex items-center gap-3 text-sm text-surface-500 dark:text-surface-400">
+                <!-- ml-auto: on a phone the title fills the line and this group
+                     wraps under it, where justify-between has nothing to spread
+                     a lone item against and leaves it on the left. The auto
+                     margin takes the slack so the button keeps to the right
+                     edge on its own line; on a wide screen the two share a line
+                     and justify-between already puts it there. -->
+                <div class="flex items-center gap-3 ml-auto text-sm text-surface-500 dark:text-surface-400">
                     @if (loading()) {
                         <p-progress-spinner [style]="{ width: '1rem', height: '1rem' }" strokeWidth="8" ariaLabel="กำลังโหลด" />
                     }
@@ -376,15 +382,26 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                             <!-- Smaller below sm: these cards are half-width on a
                                  phone and HH:MM:SS is eight characters, so 5xl
                                  overflows where the counters' 2-3 digits do not. -->
+                            <!-- The placeholder wears the value's own text classes and
+                                 is one line (1lh) tall, so it is the height of the real
+                                 line at every breakpoint. A flat 3rem was 48px against a
+                                 36/40/46px line, and the roster below sat 2-19px lower
+                                 while loading and jumped when the counters landed. -->
                             @if (loading()) {
-                                <p-skeleton width="min(9rem, 100%)" height="3rem" />
+                                <div class="text-3xl lg:text-4xl xl:text-[46px]/[1]">
+                                    <p-skeleton width="min(9rem, 100%)" height="1lh" />
+                                </div>
                             } @else {
                                 <div class="text-surface-900 dark:text-surface-0 font-medium text-3xl lg:text-4xl xl:text-[46px]/[1]">{{ card.value }}</div>
                             }
                         </div>
                     </div>
+                    <!-- Same reason as the value above: below sm the real line is
+                         10px type, not the 20px the counters' skeleton assumes. -->
                     @if (loading()) {
-                        <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
+                        <div class="text-xs sm:text-sm diff-line-time">
+                            <p-skeleton width="min(11rem, 100%)" height="1lh" />
+                        </div>
                     } @else if (card.diff !== null) {
                         <!-- Same xs/sm split as the counter row. This line is
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it

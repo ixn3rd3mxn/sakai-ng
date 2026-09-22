@@ -1,7 +1,7 @@
 """Offline tests for the flood intake data layer.
 
-No database and no network: `flood_lookups.install` takes the area tables as
-plain dicts precisely so the resolution rules - the part that decides what
+No database and no network: `flood_lookups.install` takes the master tables
+as plain dicts precisely so the resolution rules - the part that decides what
 gets written to a dispatch record - can be exercised directly.
 
 What is being protected here, each one written against a specific way this
@@ -18,6 +18,10 @@ could go wrong:
   it as different numbers would silently disable it.
 - **A blank age or sex still saves.** The spreadsheet has real rows with both
   empty, because the caller hung up.
+- **A case stores keys, and reads them back as codes and names.**
+  `agent_id`, `channel_id`, `district_id` and `subdistrict_id` are all the
+  document holds; every code and name the table shows is a cache lookup, and
+  a name typed into the search box is turned into keys before the query.
 - **No sequence number is ever stored.** "ลำดับ" is counted at render time
   from the current filter; a stored one would collide the moment two
   operators saved at once, which during a flood is constant.
@@ -51,10 +55,21 @@ SUBDISTRICTS = [
     {"subdistrict_id": 23, "district_id": 2, "subdistrict_code": "940207", "subdistrict_name": "ปากล่อ"},
     {"subdistrict_id": 63, "district_id": 6, "subdistrict_code": "940604", "subdistrict_name": "ปากู"},
 ]
+# Roster and channels as the EMS collections hold them.
+AGENTS = [
+    {"agent_id": "2", "agent_name": "เจะรอฮานี วันหวัง", "agent_extension": "94004"},
+    {"agent_id": "10", "agent_name": "อาสมะ ลาเตะ", "agent_extension": "94010"},
+    {"agent_id": "1", "agent_name": "จิดาภา อินทอง", "agent_extension": "94001"},
+]
+CHANNELS = [
+    {"channel_id": 1, "channel_name": "1669"},
+    {"channel_id": 2, "channel_name": "2nd"},
+    {"channel_id": 3, "channel_name": "วิทยุ"},
+]
 
 
 def setup() -> None:
-    fl.install(DISTRICTS, SUBDISTRICTS)
+    fl.install(DISTRICTS, SUBDISTRICTS, AGENTS, CHANNELS)
 
 
 def _raises(func, *args, **kwargs):
@@ -94,17 +109,17 @@ def test_blank_district_is_refused():
     assert isinstance(_raises(fl.resolve_district, ""), fl.AreaLookupError)
 
 
-def test_area_resolution_carries_all_four_snapshot_fields():
-    # Codes *and* names, never an id to be joined later: a case is a record of
-    # what was true when it was written.
+def test_area_resolution_stores_the_master_row_ids_only():
+    # Ids on the document; codes and names come back through the cache.
     setup()
-    fields = fl.resolve_area("เมืองปัตตานี", "รูสะมิแล").to_fields()
-    assert fields == {
-        "district_code": "9401",
-        "district_name": "เมืองปัตตานี",
-        "subdistrict_code": "940110",
-        "subdistrict_name": "รูสะมิแล",
-    }
+    area = fl.resolve_area("เมืองปัตตานี", "รูสะมิแล")
+    assert area.to_fields() == {"district_id": 1, "subdistrict_id": 11}
+    assert area.district_code == "9401" and area.subdistrict_code == "940110"
+    assert fl.district(1)["district_name"] == "เมืองปัตตานี" and fl.subdistrict(11)["subdistrict_name"] == "รูสะมิแล"
+    assert fl.district(99) is None and fl.subdistrict(None) is None
+    # And the other direction, for filters that arrive as codes.
+    assert fl.district_id_for_code("9402") == 2 and fl.subdistrict_id_for_code("940207") == 23
+    assert fl.district_id_for_code("0000") is None
 
 
 def test_subdistrict_from_another_district_is_refused():
@@ -123,7 +138,7 @@ def test_subdistrict_code_from_another_district_is_refused():
 def test_area_names_tolerate_spreadsheet_whitespace():
     setup()
     fields = fl.resolve_area("  เมืองปัตตานี ", " รูสะมิแล  ").to_fields()
-    assert fields["subdistrict_code"] == "940110"
+    assert fields["subdistrict_id"] == 11
 
 
 def test_subdistricts_filter_by_district():
@@ -137,7 +152,7 @@ def test_subdistrict_with_unknown_parent_is_dropped_not_offered():
     # Offering it would put a row in the dropdown that fails at write time.
     fl.install(DISTRICTS, SUBDISTRICTS + [
         {"subdistrict_id": 99, "district_id": 77, "subdistrict_code": "947701", "subdistrict_name": "ไม่มีอำเภอ"},
-    ])
+    ], AGENTS, CHANNELS)
     assert "947701" not in {s["subdistrict_code"] for s in fl.subdistricts()}
     setup()
 
@@ -162,15 +177,34 @@ def test_unrecognised_phone_length_is_shown_untouched():
 # --- fixed vocabularies -----------------------------------------------------
 
 
-def test_channel_accepts_both_the_form_label_and_the_spreadsheet_wording():
-    assert fc.resolve_channel("1669") == "1669"
-    assert fc.resolve_channel("โทรศัพท์ หมายเลข 1669") == "1669"
-    assert fc.resolve_channel("Second Call") == "second_call"
-    assert fc.resolve_channel("วิทยุ") == "radio"
+def test_channel_resolves_to_the_reporting_channels_id():
+    # The id, the collection's own name, the old form code and the
+    # spreadsheet's long spelling all land on the same row.
+    setup()
+    assert fc.resolve_channel(1) == 1 and fc.resolve_channel("1") == 1
+    assert fc.resolve_channel("1669") == 1
+    assert fc.resolve_channel("โทรศัพท์ หมายเลข 1669") == 1
+    assert fc.resolve_channel("2nd") == 2 and fc.resolve_channel("Second Call") == 2 and fc.resolve_channel("second_call") == 2
+    assert fc.resolve_channel("วิทยุ") == 3 and fc.resolve_channel("radio") == 3
+    assert fc.resolve_channel(None) is None and fc.resolve_channel("") is None
+    assert fl.channel_name(2) == "2nd" and fl.channel_name(None) == ""
 
 
 def test_unknown_channel_is_refused():
+    setup()
     assert isinstance(_raises(fc.resolve_channel, "LINE"), fc.FloodCaseError)
+    assert isinstance(_raises(fc.resolve_channel, "9"), fc.FloodCaseError)
+
+
+def test_agent_resolves_to_the_roster_id_from_id_or_exact_name():
+    setup()
+    assert fc.resolve_agent("2") == "2" and fc.resolve_agent(2) == "2"
+    assert fc.resolve_agent("เจะรอฮานี วันหวัง") == "2"
+    assert fc.resolve_agent(None) is None and fc.resolve_agent("  ") is None
+    assert isinstance(_raises(fc.resolve_agent, "ใครก็ไม่รู้"), fc.FloodCaseError)
+    assert isinstance(_raises(fc.resolve_agent, "99"), fc.FloodCaseError)
+    # Roster order: numeric ids compared as numbers, so 1, 2, 10 - not 1, 10, 2.
+    assert [a["agent_id"] for a in fl.agents()] == ["1", "2", "10"]
 
 
 def test_blank_status_means_pending():
@@ -185,6 +219,11 @@ def test_pending_exports_as_a_blank_cell():
     assert fc.STATUS_EXPORT_LABELS[fc.STATUS_SUCCESS] == "สำเร็จ"
 
 
+def test_gender_can_be_recorded_as_unspecified():
+    assert fc.resolve_gender("ไม่ระบุ") == "unspecified" and fc.resolve_gender("unspecified") == "unspecified"
+    assert fc.GENDER_LABELS["unspecified"] == "ไม่ระบุ"
+
+
 def test_age_and_gender_may_be_blank():
     assert fc.resolve_age(None) is None and fc.resolve_age("") is None
     assert fc.resolve_gender(None) is None and fc.resolve_gender("") is None
@@ -193,6 +232,32 @@ def test_age_and_gender_may_be_blank():
 def test_implausible_age_is_refused():
     assert isinstance(_raises(fc.resolve_age, 950), fc.FloodCaseError)
     assert isinstance(_raises(fc.resolve_age, "ไม่ทราบ"), fc.FloodCaseError)
+
+
+def test_months_need_the_years_and_stay_under_a_year():
+    assert fc.resolve_age_months(None, 1) is None and fc.resolve_age_months("", None) is None
+    assert fc.resolve_age_months(9, 1) == 9 and fc.resolve_age_months("11", 0) == 11
+    assert isinstance(_raises(fc.resolve_age_months, 12, 1), fc.FloodCaseError)
+    assert isinstance(_raises(fc.resolve_age_months, 9, None), fc.FloodCaseError)
+
+
+def test_days_need_the_months_and_stay_under_a_month():
+    assert fc.resolve_age_days(None, 0) is None
+    assert fc.resolve_age_days(5, 0) == 5 and fc.resolve_age_days("30", 3) == 30
+    assert isinstance(_raises(fc.resolve_age_days, 31, 0), fc.FloodCaseError)
+    assert isinstance(_raises(fc.resolve_age_days, 5, None), fc.FloodCaseError)
+
+
+def test_age_reads_as_before_unless_months_were_recorded():
+    assert fc.format_age(None, None) == ""
+    assert fc.format_age(45, None) == "45"
+    assert fc.format_age(1, 9) == "1 ปี 9 เดือน"
+    assert fc.format_age(1, 0) == "1 ปี"
+    assert fc.format_age(0, 11) == "11 เดือน"
+    assert fc.format_age(0, 3, 12) == "3 เดือน 12 วัน"
+    assert fc.format_age(0, 0, 5) == "5 วัน"
+    assert fc.format_age(0, 0) == "แรกเกิด"
+    assert fc.format_age(0, 0, 0) == "แรกเกิด"
 
 
 # --- shift ------------------------------------------------------------------
@@ -278,7 +343,7 @@ def test_missing_required_fields_are_refused():
 def test_everything_else_may_be_blank():
     setup()
     doc = _build()
-    for optional in ("agent_name", "channel", "reporter", "phone", "location_note",
+    for optional in ("agent_id", "channel_id", "reporter", "phone", "location_note",
                      "gender", "age", "ddpm_coordination", "operating_unit",
                      "assistance", "remarks"):
         assert doc[optional] is None, optional
@@ -351,8 +416,41 @@ def test_every_sample_row_is_accepted():
     setup()
     docs = [fc.build_case_document(row) for row in SAMPLE_ROWS]
     assert len(docs) == 4
-    assert [d["subdistrict_code"] for d in docs] == ["940110", "940604", "940207", "940106"]
+    assert [d["subdistrict_id"] for d in docs] == [11, 63, 23, 2]
     assert all(d["status"] == fc.STATUS_SUCCESS for d in docs)
+
+
+def test_keys_survive_the_request_model():
+    # The body reaches build_case_document through FloodCaseCreateIn, which
+    # drops any field it does not declare and sends the rest as None. Both
+    # bit once: agent_id / channel_id arrived and were stored as null.
+    from libs.models import FloodCaseCreateIn
+    setup()
+    body = FloodCaseCreateIn(district="9402", subdistrict="940207", chief_complaint="น้ำท่วม",
+                             agent_id="2", channel_id=1, age=1, age_months=9, age_days=5)
+    doc = fc.build_case_document(body.model_dump())
+    assert doc["agent_id"] == "2" and doc["channel_id"] == 1
+    assert (doc["age"], doc["age_months"], doc["age_days"]) == (1, 9, 5)
+    # And the older spellings still resolve when that is all a client sends.
+    legacy = FloodCaseCreateIn(district="9402", subdistrict="940207", chief_complaint="น้ำท่วม",
+                               agent_name="เจะรอฮานี วันหวัง", channel="Second Call")
+    doc = fc.build_case_document(legacy.model_dump())
+    assert doc["agent_id"] == "2" and doc["channel_id"] == 2
+
+
+def test_the_document_holds_keys_and_reads_back_as_names():
+    setup()
+    doc = fc.build_case_document(SAMPLE_ROWS[0])
+    assert doc["agent_id"] == "2" and doc["channel_id"] == 1
+    assert doc["district_id"] == 1 and doc["subdistrict_id"] == 11
+    for name_field in ("agent_name", "agent_extension", "channel",
+                       "district_code", "district_name", "subdistrict_code", "subdistrict_name"):
+        assert name_field not in doc, name_field
+    case = fc.serialise_case(doc)
+    assert case["agent_name"] == "เจะรอฮานี วันหวัง" and case["agent_extension"] == "94004"
+    assert case["channel_id"] == 1 and case["channel_label"] == "1669"
+    assert case["district_code"] == "9401" and case["district_name"] == "เมืองปัตตานี"
+    assert case["subdistrict_code"] == "940110" and case["subdistrict_name"] == "รูสะมิแล"
 
 
 def test_the_sample_row_with_no_sex_or_age_is_accepted():
@@ -472,7 +570,7 @@ class FakeCollection:
     def update_one(self, query, update):
         for doc in self.docs:
             if _matches(doc, query):
-                doc.update(update["$set"])
+                _apply_update(doc, update)
                 return type("R", (), {"matched_count": 1, "modified_count": 1, "upserted_id": None})()
         return type("R", (), {"matched_count": 0, "modified_count": 0, "upserted_id": None})()
 
@@ -480,12 +578,23 @@ class FakeCollection:
         n = 0
         for doc in self.docs:
             if _matches(doc, query):
-                doc.update(update["$set"])
+                _apply_update(doc, update)
                 n += 1
         return type("R", (), {"matched_count": n, "modified_count": n})()
 
     def create_index(self, *args, **kwargs):
         return None
+
+
+def _apply_update(doc, update):
+    """$set, and the one $push shape the history uses: $each with a negative
+    $slice, which keeps the last N of the array."""
+    doc.update(update.get("$set", {}))
+    for field, spec in update.get("$push", {}).items():
+        values = list(doc.get(field) or []) + list(spec["$each"])
+        if "$slice" in spec:
+            values = values[spec["$slice"]:]
+        doc[field] = values
 
 
 class _FakeDb(dict):
@@ -571,6 +680,47 @@ def test_tab_counts_respect_the_other_filters():
     ])
     counts = fc.list_cases(fc.CaseFilters(district_code="9402"), now=NOW)["counts"]
     assert counts["all"] == 2 and counts["success"] == 1 and counts["pending"] == 1
+
+
+def test_a_set_of_dates_matches_exactly_those_days_and_beats_the_span():
+    # The third shape of the date filter. Picked days are matched one by one,
+    # not as the span between the first and the last - "1st, 4th, 28th" must
+    # not quietly become "1st to 28th".
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [
+        _case(reported_at=datetime(2025, 11, 1, 10, 0)),
+        _case(reported_at=datetime(2025, 11, 2, 10, 0)),
+        _case(reported_at=datetime(2025, 11, 4, 10, 0)),
+        _case(reported_at=datetime(2025, 11, 28, 10, 0)),
+    ])
+    from datetime import date as d
+    picked = fc.CaseFilters(dates=[d(2025, 11, 28), d(2025, 11, 1), d(2025, 11, 4), d(2025, 11, 4)])
+    assert fc.list_cases(picked, now=NOW)["total"] == 3
+    # One control, one mode at a time: when both arrive the set wins.
+    both = fc.CaseFilters(dates=[d(2025, 11, 2)], date_from=d(2025, 11, 1), date_to=d(2025, 11, 30))
+    assert fc.list_cases(both, now=NOW)["total"] == 1
+
+
+def test_context_is_active_only_while_cases_are_recent():
+    # The time tabs follow the data, not the calendar: a week of silence
+    # after the last case and the page is an archive, whatever the month.
+    setup()
+    col = _use_fake_collection()
+    assert fc.list_cases(fc.CaseFilters(), now=NOW)["context"]["active"] is False
+
+    _seed(col, [_case(reported_at=datetime(2025, 11, 23, 12, 0))])
+    assert fc.list_cases(fc.CaseFilters(), now=NOW)["context"]["active"] is True
+    # Exactly a week later, still inside the window.
+    edge = NOW + timedelta(days=fc.ACTIVE_WINDOW_DAYS)
+    assert fc.list_cases(fc.CaseFilters(), now=edge)["context"]["active"] is True
+    # A day past it, and January's reviewer sees no "วันนี้ 0".
+    assert fc.list_cases(fc.CaseFilters(), now=edge + timedelta(days=1))["context"]["active"] is False
+    # The flag ignores whatever the table is filtered to, so a date range
+    # set in the middle of the event does not switch the tabs off.
+    from datetime import date as d
+    old_range = fc.CaseFilters(date_from=d(2025, 11, 1), date_to=d(2025, 11, 10))
+    assert fc.list_cases(old_range, now=NOW)["context"]["active"] is True
 
 
 def test_date_range_uses_the_operational_day_not_the_calendar_day():
@@ -749,6 +899,80 @@ def test_bulk_status_updates_only_the_named_cases():
     assert statuses == [fc.STATUS_PENDING, fc.STATUS_SUCCESS, fc.STATUS_SUCCESS]
 
 
+# --- edit history -------------------------------------------------------------
+
+
+def _history(col, case_id):
+    return fc.serialise_history(col.find_one({"case_id": case_id}))
+
+
+def test_an_edit_records_what_changed_in_words():
+    # The entry reads as the form does - names and labels, not the ids the
+    # document stores - so "who changed the crew?" is answered in one look.
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(operating_unit="กู้ชีพเต็กก่า")])
+    case_id = col.docs[0]["case_id"]
+    later = NOW + timedelta(minutes=5)
+    fc.apply_update(case_id, {"operating_unit": "อบต.ปากล่อ", "district": "เมืองปัตตานี", "subdistrict": "รูสะมิแล"}, now=later)
+    [entry] = _history(col, case_id)
+    assert entry["at"] == later.isoformat()
+    changed = {c["field"]: (c["from"], c["to"]) for c in entry["changes"]}
+    assert changed["operating_unit"] == ("กู้ชีพเต็กก่า", "อบต.ปากล่อ")
+    assert changed["district_name"] == ("โคกโพธิ์", "เมืองปัตตานี")
+    assert changed["subdistrict_name"] == ("ปากล่อ", "รูสะมิแล")
+    assert all(c["label"] for c in entry["changes"])
+    # Only what changed: the complaint was sent back unchanged and is absent.
+    assert "chief_complaint" not in changed
+
+
+def test_a_save_that_changes_nothing_visible_leaves_no_entry():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(assistance="ขนย้ายแล้ว")])
+    case_id = col.docs[0]["case_id"]
+    fc.apply_update(case_id, {"assistance": "ขนย้ายแล้ว"}, now=NOW)
+    assert _history(col, case_id) == []
+
+
+def test_the_row_button_is_an_edit_too():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case()])
+    case_id = col.docs[0]["case_id"]
+    fc.set_status(case_id, "สำเร็จ", now=NOW)
+    # Marking it finished again is not a second edit.
+    fc.set_status(case_id, "สำเร็จ", now=NOW + timedelta(minutes=1))
+    [entry] = _history(col, case_id)
+    assert entry["changes"] == [{"field": "status_label", "label": "สำเร็จ", "from": "ยังไม่สำเร็จ", "to": "สำเร็จ"}]
+
+
+def test_bulk_status_records_an_entry_only_where_it_flipped():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(), _case(status="สำเร็จ")])
+    ids = [d["case_id"] for d in col.docs]
+    assert fc.bulk_set_status(ids, "สำเร็จ", now=NOW) == 1
+    assert len(_history(col, ids[0])) == 1
+    assert _history(col, ids[1]) == []
+
+
+def test_history_keeps_the_newest_ten_newest_first():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case()])
+    case_id = col.docs[0]["case_id"]
+    for i in range(12):
+        fc.apply_update(case_id, {"remarks": f"ครั้งที่ {i}"}, now=NOW + timedelta(minutes=i))
+    history = _history(col, case_id)
+    assert len(history) == fc.HISTORY_LIMIT == 10
+    assert history[0]["changes"][0]["to"] == "ครั้งที่ 11"
+    assert history[-1]["changes"][0]["to"] == "ครั้งที่ 2"
+    # The endpoint's view of it, and its answer for a case that is not there.
+    assert fc.get_history(case_id) == history
+    assert fc.get_history("FLD-19990101-DEADBEEF") is None
+
+
 def test_bulk_status_with_no_ids_writes_nothing():
     setup()
     col = _use_fake_collection()
@@ -766,7 +990,7 @@ def test_an_edit_keeps_the_original_report_time_and_identity():
     original = dict(col.docs[0])
     later = datetime(2025, 11, 24, 9, 0)
 
-    updated = fc.apply_update(original["case_id"], _case(chief_complaint="แก้ไขแล้ว"), now=later)
+    updated = fc.apply_update(original["case_id"], _case(chief_complaint="แก้ไขแล้ว"), now=later)["case"]
     assert updated["case_id"] == original["case_id"]
     assert updated["chief_complaint"] == "แก้ไขแล้ว"
     assert col.docs[0]["reported_at"] == datetime(2025, 11, 23, 12, 0)
@@ -789,6 +1013,93 @@ def test_editing_a_missing_case_reports_it():
     setup()
     _use_fake_collection()
     assert fc.apply_update("FLD-19990101-DEADBEEF", _case(), now=NOW) is None
+
+
+# --- partial edits: several hands finishing one case --------------------------
+
+
+def test_an_edit_writes_only_the_fields_it_sent():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(assistance="ขนย้าย", ddpm_coordination="ประสาน ปภ.", remarks="เดิม")])
+    case_id = col.docs[0]["case_id"]
+
+    result = fc.apply_update(case_id, {"assistance": "ขนย้ายแล้ว"}, now=NOW)
+    assert result["changed"] == ["assistance"]
+    assert col.docs[0]["assistance"] == "ขนย้ายแล้ว"
+    # Untouched fields are untouched - not rewritten from anything.
+    assert col.docs[0]["ddpm_coordination"] == "ประสาน ปภ." and col.docs[0]["remarks"] == "เดิม"
+    assert col.docs[0]["chief_complaint"] == "น้ำท่วมบ้าน"
+
+
+def test_two_operators_editing_different_fields_both_land():
+    # The scenario this exists for: one finishes การช่วยเหลือ, the other is
+    # still on the ปภ. line. Whichever saves second must not erase the first.
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case()])
+    case_id = col.docs[0]["case_id"]
+
+    fc.apply_update(case_id, {"assistance": "ขนย้ายไปที่ปลอดภัย"}, now=NOW)
+    fc.apply_update(case_id, {"ddpm_coordination": "ประสานงานทีมปภ.อำเภอโคกโพธิ์"}, now=NOW)
+    assert col.docs[0]["assistance"] == "ขนย้ายไปที่ปลอดภัย"
+    assert col.docs[0]["ddpm_coordination"] == "ประสานงานทีมปภ.อำเภอโคกโพธิ์"
+
+
+def test_a_sent_null_clears_and_an_absent_field_does_not():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(remarks="เดิม", assistance="เดิม")])
+    case_id = col.docs[0]["case_id"]
+    fc.apply_update(case_id, {"remarks": None}, now=NOW)
+    assert col.docs[0]["remarks"] is None and col.docs[0]["assistance"] == "เดิม"
+
+
+def test_a_partial_edit_is_validated_against_what_is_stored():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(age=1)])
+    case_id = col.docs[0]["case_id"]
+    # Months alone are fine because the stored years stand in ...
+    fc.apply_update(case_id, {"age_months": 9}, now=NOW)
+    assert (col.docs[0]["age"], col.docs[0]["age_months"]) == (1, 9)
+    # ... and a tambon alone is checked inside the stored amphoe.
+    assert isinstance(_raises(fc.apply_update, case_id, {"subdistrict": "รูสะมิแล"}, now=NOW), fc.FloodCaseError)
+    fc.apply_update(case_id, {"district": "เมืองปัตตานี", "subdistrict": "รูสะมิแล"}, now=NOW)
+    assert (col.docs[0]["district_id"], col.docs[0]["subdistrict_id"]) == (1, 11)
+
+
+def test_a_group_member_sent_alone_writes_the_whole_group():
+    # A corrected time re-files the case: operational_day moves with
+    # reported_at even though only reported_at was sent. The stored shift is
+    # kept - it is the operator's own answer, and on an edit it is only
+    # replaced when a new one is sent (same rule as the full rewrite had).
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(reported_at=datetime(2025, 11, 24, 9, 0))])
+    case_id = col.docs[0]["case_id"]
+    result = fc.apply_update(case_id, {"reported_at": datetime(2025, 11, 24, 2, 0)}, now=NOW)
+    assert result["changed"] == ["reported_at"]
+    assert col.docs[0]["operational_day"] == datetime(2025, 11, 23)
+    assert col.docs[0]["shift"] == "morning"
+    fc.apply_update(case_id, {"shift": "afternoon"}, now=NOW)
+    assert col.docs[0]["shift"] == "afternoon"
+
+
+def test_an_empty_edit_changes_nothing():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case()])
+    before = dict(col.docs[0])
+    result = fc.apply_update(before["case_id"], {}, now=NOW)
+    assert result["changed"] == [] and col.docs[0] == before
+
+
+def test_the_update_model_tells_absent_from_null():
+    from libs.models import FloodCaseUpdateIn
+    body = FloodCaseUpdateIn(remarks=None)
+    assert body.model_dump(exclude_unset=True) == {"remarks": None}
+    assert FloodCaseUpdateIn().model_dump(exclude_unset=True) == {}
 
 
 # --- export -----------------------------------------------------------------

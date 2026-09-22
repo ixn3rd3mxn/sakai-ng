@@ -62,7 +62,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         <div class="card" style="margin-bottom: 0.25rem">
             <div class="flex justify-between items-center mb-4">
                 <div class="font-semibold text-xl">รายการเหตุการณ์</div>
-                <button pButton label="Clear" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(incidentTable)"></button>
+                <button pButton label="ล้างตัวกรอง" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(incidentTable)"></button>
             </div>
             <p-table
                 #incidentTable

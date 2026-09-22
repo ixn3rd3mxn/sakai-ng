@@ -2,19 +2,18 @@ import { Injectable, signal } from '@angular/core';
 import { FloodCaseInput } from '../flood-intake.types';
 import { RecentPicksStore } from '../../../shared/recent-picks';
 
-const DRAFT_PREFIX = 'flood-intake:draft:';
 const OUTBOX_KEY = 'flood-intake:outbox';
 const RECENT_PICKS_KEY = 'flood-intake:recent-picks';
 
-/** The dropdowns that keep a per-device shortlist. */
-export type RecentPickKind = 'agent' | 'district' | 'subdistrict';
+/**
+ * The dropdowns that keep a per-device shortlist. The last three are the
+ * free-text fields with a suggestion list (reporter, DDPM team, crew): the
+ * shortlist there holds the text as saved, resolved against the list on
+ * display, so a one-off typed value simply never shows.
+ */
+export type RecentPickKind = 'agent' | 'district' | 'subdistrict' | 'reporter' | 'ddpm' | 'unit';
 
-const RECENT_PICK_KINDS: readonly RecentPickKind[] = ['agent', 'district', 'subdistrict'];
-
-export interface FloodDraft {
-    savedAt: number;
-    form: Record<string, unknown>;
-}
+const RECENT_PICK_KINDS: readonly RecentPickKind[] = ['agent', 'district', 'subdistrict', 'reporter', 'ddpm', 'unit'];
 
 export interface OutboxEntry {
     id: string;
@@ -28,9 +27,11 @@ export interface OutboxEntry {
 }
 
 // Everything this page keeps in the browser rather than on the server: the
-// unfinished work that must survive the page going away (drafts, outbox),
-// because the disaster area's connection drops and a reload must not cost a
-// call, plus the small habits of whoever sits at this console.
+// outbox of calls the server has not acknowledged, because the disaster
+// area's connection drops and a reload must not cost a call, plus the small
+// habits of whoever sits at this console. (Form drafts used to live here too;
+// they were dropped - a half-typed call coming back on the next open was more
+// surprise than safety net.)
 //
 // localStorage is per-browser and never reaches the server. That is the point
 // here: this is one operator's scratchpad, not shared state - which is also
@@ -67,39 +68,6 @@ export class FloodDraftService {
             // A full or blocked store must not break the form; the draft is a
             // convenience, the outbox retries in memory for this session.
         }
-    }
-
-    private safeRemove(key: string): void {
-        try {
-            localStorage.removeItem(key);
-        } catch {
-            /* see safeSet */
-        }
-    }
-
-    // --- form drafts --------------------------------------------------------
-
-    private draftKey(caseId: string): string {
-        return `${DRAFT_PREFIX}${caseId}`;
-    }
-
-    saveDraft(caseId: string, form: Record<string, unknown>): void {
-        this.safeSet(this.draftKey(caseId), JSON.stringify({ savedAt: Date.now(), form } satisfies FloodDraft));
-    }
-
-    readDraft(caseId: string): FloodDraft | null {
-        const raw = this.safeGet(this.draftKey(caseId));
-        if (!raw) return null;
-        try {
-            const draft = JSON.parse(raw) as FloodDraft;
-            return draft?.form ? draft : null;
-        } catch {
-            return null;
-        }
-    }
-
-    clearDraft(caseId: string): void {
-        this.safeRemove(this.draftKey(caseId));
     }
 
     // --- outbox -------------------------------------------------------------

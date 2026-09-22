@@ -28,6 +28,15 @@ import { Select } from 'primeng/select';
 // Only the horizontal position is touched; PrimeNG still decides top,
 // including flipping above the field when there is no room below.
 //
+// PrimeNG decides it once, on show. The dialogs here are auto-height and
+// centred, so anything that changes their height while the popup is open
+// moves the field and leaves the popup behind: clearing the CBD select with
+// its list open (the clear icon does not close the list) fails the field,
+// its error message appears, the dialog grows and re-centres, and the list
+// is now ~10px off its field. So while the popup is open the dialog is
+// watched for size changes, and each one has PrimeNG realign the popup - top
+// included - before it is re-centred here.
+//
 // A select's list can also be wider than the phone screen outright (the CBD
 // list is ~410px), and no horizontal position fixes that. A select's popup
 // is therefore sized here too, at every screen size: exactly the field's
@@ -70,6 +79,7 @@ export class CenteredPanelDirective implements AfterViewInit, OnDestroy {
 
     private readonly subscription = new Subscription();
     private styleObserver: MutationObserver | null = null;
+    private resizeObserver: ResizeObserver | null = null;
     private panel: HTMLElement | null = null;
 
     // Tailwind's md in this project (assets/tailwind.css). Everything narrower
@@ -126,11 +136,34 @@ export class CenteredPanelDirective implements AfterViewInit, OnDestroy {
         // PrimeNG closes the popup on resize on non-touch devices, but on a
         // phone an orientation change leaves it open in its old place.
         window.addEventListener('resize', this.onResize);
+
+        // The dialog the field sits in, if any: when its height changes the
+        // field moves (see the note on validation messages above). Observing
+        // reports the current size once straight away, which is the position
+        // PrimeNG has just written, so that first report is skipped.
+        const dialog = this.host.nativeElement.closest('.p-dialog');
+        if (dialog) {
+            let initial = true;
+            this.resizeObserver = new ResizeObserver(() => {
+                if (initial) initial = false;
+                else this.realign();
+            });
+            this.resizeObserver.observe(dialog);
+        }
+    }
+
+    // PrimeNG's own placement, top and all; the style observer then re-centres
+    // horizontally as it does after every other PrimeNG write.
+    private realign(): void {
+        if (this.select) this.select.overlayViewChild?.alignOverlay();
+        else this.datePicker?.alignOverlay();
     }
 
     private disconnect(): void {
         this.styleObserver?.disconnect();
         this.styleObserver = null;
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = null;
         window.removeEventListener('resize', this.onResize);
         // The date picker reuses its popup element across opens; the select
         // destroys and recreates its own, so this is only load-bearing for
