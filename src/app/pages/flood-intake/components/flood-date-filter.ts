@@ -1,4 +1,4 @@
-import { Component, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, HostListener, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { DatePicker, DatePickerModule } from 'primeng/datepicker';
@@ -6,6 +6,8 @@ import { Popover, PopoverModule } from 'primeng/popover';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { parseIsoDate, toBuddhistYear } from '../../dashboardclone/services/date-utils';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
+import { DatePickerBoundsDirective } from '../../../shared/datepicker-bounds.directive';
+import { OpenBelowDirective } from '../../../shared/open-below.directive';
 import { FloodDataService } from '../services/flood-data.service';
 
 // The table's date filter, as a button that opens a popover.
@@ -29,6 +31,9 @@ import { FloodDataService } from '../services/flood-data.service';
 
 type DateMode = 'single' | 'multiple' | 'range';
 
+// Tailwind's md in this project; narrower is a phone.
+const PHONE_MAX_WIDTH = 768;
+
 const MODES: { label: string; value: DateMode }[] = [
     { label: 'วันเดียว', value: 'single' },
     { label: 'หลายวัน', value: 'multiple' },
@@ -38,7 +43,7 @@ const MODES: { label: string; value: DateMode }[] = [
 @Component({
     selector: 'flood-date-filter',
     standalone: true,
-    imports: [FormsModule, ButtonModule, DatePickerModule, PopoverModule, SelectButtonModule, BuddhistYearDirective],
+    imports: [FormsModule, ButtonModule, DatePickerModule, PopoverModule, SelectButtonModule, BuddhistYearDirective, DatePickerBoundsDirective, OpenBelowDirective],
     styles: [
         `
             .date-filter {
@@ -52,16 +57,23 @@ const MODES: { label: string; value: DateMode }[] = [
         `
     ],
     template: `
+        <!-- Always "วันที่", so a pick never changes the button's width or
+             the row around it. Filled while a date is applied, so the row
+             still says the filter is on; what it is set to is the page
+             header's date line (summary()). A class binding, not
+             [outlined]: pButton reads that input once, at creation. -->
         <button
             pButton
             type="button"
             icon="pi pi-calendar"
-            [label]="label()"
-            class="p-button-outlined"
+            label="วันที่"
+            [class.p-button-outlined]="!hasValue()"
             (click)="open($event)"
         ></button>
 
-        <p-popover #panel (onShow)="onShow()" (onHide)="onHide()">
+        <!-- openBelow: under the button at every size, never flipped
+             above it - see shared/open-below.directive. -->
+        <p-popover #panel openBelow (onShow)="onShow()" (onHide)="onHide()">
             <div class="date-filter">
                 <!-- Mode switch with an explicit close beside it. Clicking
                      outside works too, but not everyone knows that, and
@@ -92,11 +104,14 @@ const MODES: { label: string; value: DateMode }[] = [
                      and the calendar visibly blinks. p-datepicker keeps
                      mode-shaped state (a Date, a Date[], a [from, to]) that
                      a mode switch has to purge by hand - see setMode. -->
+                <!-- Nothing past today: no case has been reported on a day
+                     that has not come yet. -->
                 <p-datepicker
                     buddhistYear
                     inline
                     [selectionMode]="mode()"
                     [ngModel]="model()"
+                    [maxDate]="maxDate()"
                     (ngModelChange)="pick($event)"
                 />
 
@@ -132,7 +147,7 @@ export class FloodDateFilter {
     // What the popover shows. Switching it is navigation, not a data action:
     // the applied filter stays until a new pick replaces it.
     readonly mode = signal<DateMode>('single');
-    // The mode the applied value was picked in. The button label reads by it
+    // The mode the applied value was picked in. The summary reads by it
     // (a one-day value is "a day" from single mode and "a range" from range
     // mode), and reopening returns to it.
     private readonly appliedMode = signal<DateMode>('single');
@@ -152,17 +167,45 @@ export class FloodDateFilter {
 
     constructor() {
         // The popover is positioned against the button once, on open. A pick
-        // or a clear changes the label - and so the button's width, and with
-        // the search box beside it growing into the difference, its place in
-        // the row - while the popover is still open, and the arrow would
-        // keep pointing at where the button used to start. After any render
-        // in which the label changed, the arrow is moved to the button; the
-        // popover itself stays where it opened, so the calendar under the
-        // pointer does not jump.
+        // or a clear changes the header's date line, which can wrap and
+        // reflow the rows below it while the popover is still open, and the
+        // arrow would keep pointing at where the button used to be. After
+        // any render in which the summary changed, the arrow is moved to
+        // the button; the popover itself stays where it opened, so the
+        // calendar under the pointer does not jump.
         afterRenderEffect(() => {
-            this.label();
+            this.summary();
             this.pointArrowAtButton();
         });
+    }
+
+    // A phone turned sideways keeps the popover open (PrimeNG only closes it
+    // on resize for non-touch devices) and does not re-place it.
+    @HostListener('window:resize')
+    onResize(): void {
+        const panel = this.panel();
+        if (!panel.overlayVisible) return;
+        panel.align();
+        this.centerOnPhone();
+        this.pointArrowAtButton();
+    }
+
+    // Below md the popover sits centred on the screen rather than hanging
+    // off the button: the button's place in the wrapped filter row varies,
+    // and anchored to it the calendar lands lopsided against one edge.
+    // Same breakpoint, and same property, as shared/centered-panel.directive.
+    // Only across: keeping it below the button, at every size, is openBelow's.
+    private centerOnPhone(): boolean {
+        const container = this.panel().container;
+        const viewportWidth = window.innerWidth;
+        if (!container || viewportWidth >= PHONE_MAX_WIDTH) return false;
+        // offsetWidth, not the rect: the open animation's scale() is in the
+        // rect and not in the layout width.
+        const width = container.offsetWidth;
+        if (width <= 0) return false;
+        const left = Math.max(0, (viewportWidth - width) / 2);
+        container.style.insetInlineStart = `${Math.round(left + window.scrollX)}px`;
+        return true;
     }
 
     // PrimeNG's own arrow placement (the second half of Popover.align()),
@@ -172,17 +215,21 @@ export class FloodDateFilter {
         const container = panel.container;
         const target = panel.target as HTMLElement | null;
         if (!panel.overlayVisible || !container || !target) return;
+        const centred = window.innerWidth < PHONE_MAX_WIDTH;
         const c = container.getBoundingClientRect();
         const t = target.getBoundingClientRect();
         // The button has left the popover's span entirely (the row wrapped
         // differently): no arrow offset can reach it, so let the popover
-        // follow it after all.
-        if (t.left < c.left || t.left > c.right) {
+        // follow it after all. Not on a phone, where the popover stays
+        // centred whatever the button does.
+        if (!centred && (t.left < c.left || t.left > c.right)) {
             panel.align();
             return;
         }
         const radius = parseFloat(getComputedStyle(container).borderRadius) || 0;
-        const arrowLeft = Math.max(0, t.left - c.left - radius * 2);
+        // Kept on the popover's top edge when centred, where the button can
+        // sit either side of it.
+        const arrowLeft = Math.min(Math.max(0, t.left - c.left - radius * 2), Math.max(0, container.offsetWidth - 3 * 16));
         container.style.setProperty('--p-popover-arrow-left', `${arrowLeft}px`);
     }
 
@@ -214,12 +261,22 @@ export class FloodDateFilter {
         }
     });
 
+    // Today as the centre counts it - the same operational day the วันนี้
+    // button picks - or this machine's date until the server has said.
+    readonly maxDate = computed(() => {
+        const iso = this.dataService.context()?.operational_day;
+        if (iso) return parseIsoDate(iso);
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    });
+
     readonly hasValue = computed(() => {
         const { dateFrom, dateTo, dates } = this.filters();
         return !!(dateFrom || dateTo || dates.length);
     });
 
-    readonly label = computed(() => {
+    // The applied dates in words, for the page header - or null when none.
+    readonly summary = computed<string | null>(() => {
         const { dateFrom, dateTo, dates } = this.filters();
         if (dates.length) return describeDays(dates.map(parseIsoDate));
         if (dateFrom && dateTo) {
@@ -234,7 +291,7 @@ export class FloodDateFilter {
             const head = from.getFullYear() === to.getFullYear() ? formatDayMonth(from) : formatDay(from);
             return `${head} – ${formatDay(to)}`;
         }
-        return 'วันที่';
+        return null;
     });
 
     open(event: Event): void {
@@ -357,6 +414,8 @@ export class FloodDateFilter {
         // squeezed into the filter row. Measure again now that it is where
         // it will stay.
         this.calendar()?.remeasure();
+        // After the remeasure, which can change the popover's width.
+        if (this.centerOnPhone()) this.pointArrowAtButton();
     }
 
     onHide(): void {

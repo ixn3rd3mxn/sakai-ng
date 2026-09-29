@@ -2,12 +2,13 @@ import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, computed, inject, PLATFORM_ID, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { $t, updatePreset, updateSurfacePalette } from '@primeuix/themes';
+import { $t, updatePreset } from '@primeuix/themes';
 import Lara from '@primeuix/themes/lara';
 import Nora from '@primeuix/themes/nora';
 import { PrimeNG } from 'primeng/config';
+import { ButtonModule } from 'primeng/button';
 import { SelectButtonModule } from 'primeng/selectbutton';
-import { LayoutService } from '@/app/layout/service/layout.service';
+import { DEFAULT_LAYOUT_CONFIG, LayoutService } from '@/app/layout/service/layout.service';
 import { AppPreset } from '@/app/theme-preset';
 
 const presets = {
@@ -39,7 +40,7 @@ declare type SurfacesType = {
 @Component({
     selector: 'app-configurator',
     standalone: true,
-    imports: [CommonModule, FormsModule, SelectButtonModule],
+    imports: [CommonModule, FormsModule, ButtonModule, SelectButtonModule],
     template: `
         <div class="flex flex-col gap-4">
             <div>
@@ -63,7 +64,8 @@ declare type SurfacesType = {
                 </div>
             </div>
             <div>
-                <span class="text-sm text-muted-color font-semibold">Surface</span>
+                <!-- Each mode keeps its own surface; this row edits the one on screen. -->
+                <span class="text-sm text-muted-color font-semibold">Surface ({{ layoutService.isDarkTheme() ? 'โหมดมืด' : 'โหมดสว่าง' }})</span>
                 <div class="pt-2 flex gap-2 flex-wrap justify-start">
                     @for (surface of surfaces; track surface.name) {
                         <button
@@ -72,7 +74,7 @@ declare type SurfacesType = {
                             (click)="updateColors($event, 'surface', surface)"
                             class="cursor-pointer w-5 h-5 rounded-full flex shrink-0 items-center justify-center p-0 outline-offset-1"
                             [ngClass]="{
-                                    'outline outline-primary': selectedSurfaceColor() ? selectedSurfaceColor() === surface.name : layoutService.layoutConfig().darkTheme ? surface.name === 'zinc' : surface.name === 'slate'
+                                    'outline outline-primary': selectedSurfaceColor() === surface.name
                                 }"
                             [style]="{
                                     'background-color': surface?.palette?.['500']
@@ -89,6 +91,7 @@ declare type SurfacesType = {
                 <span class="text-sm text-muted-color font-semibold">Menu Mode</span>
                 <p-selectbutton [ngModel]="menuMode()" (ngModelChange)="onMenuModeChange($event)" [options]="menuModeOptions" [allowEmpty]="false" size="small" />
             </div>
+            <p-button label="ค่าเริ่มต้น" icon="pi pi-refresh" severity="secondary" [outlined]="true" size="small" [fluid]="true" [disabled]="isDefault()" (onClick)="resetToDefaults()" />
         </div>
     `,
     host: {
@@ -264,7 +267,7 @@ export class AppConfigurator {
         return this.layoutService.layoutConfig().primary;
     });
 
-    selectedSurfaceColor = computed(() => this.layoutService.layoutConfig().surface);
+    selectedSurfaceColor = computed(() => this.layoutService.getSurface());
 
     selectedPreset = computed(() => this.layoutService.layoutConfig().preset);
 
@@ -418,7 +421,7 @@ export class AppConfigurator {
         if (type === 'primary') {
             this.layoutService.layoutConfig.update((state) => ({ ...state, primary: color.name }));
         } else if (type === 'surface') {
-            this.layoutService.layoutConfig.update((state) => ({ ...state, surface: color.name }));
+            this.layoutService.layoutConfig.update((state) => ({ ...state, [state.darkTheme ? 'surfaceDark' : 'surfaceLight']: color.name }));
         }
         this.applyTheme(type, color);
 
@@ -429,18 +432,39 @@ export class AppConfigurator {
         if (type === 'primary') {
             updatePreset(this.getPresetExt());
         } else if (type === 'surface') {
-            updateSurfacePalette(color.palette);
+            // What updateSurfacePalette() does, minus its typing that rejects the light/dark form.
+            $t().surfacePalette(this.getSurfacePalettes()).update();
         }
     }
 
     onPresetChange(event: any) {
         this.layoutService.layoutConfig.update((state) => ({ ...state, preset: event }));
         const preset = presets[event as KeyOfType<typeof presets>];
-        const surfacePalette = this.surfaces.find((s) => s.name === this.selectedSurfaceColor())?.palette;
-        $t().preset(preset).preset(this.getPresetExt()).surfacePalette(surfacePalette).use({ useDefaultOptions: true });
+        $t().preset(preset).preset(this.getPresetExt()).surfacePalette(this.getSurfacePalettes()).use({ useDefaultOptions: true });
+    }
+
+    // Both keys are always passed: surfacePalette() treats an object without
+    // a 'dark' key as one palette for both modes.
+    getSurfacePalettes() {
+        const { surfaceLight, surfaceDark } = this.layoutService.layoutConfig();
+        return {
+            light: this.surfaces.find((s) => s.name === surfaceLight)?.palette,
+            dark: this.surfaces.find((s) => s.name === surfaceDark)?.palette
+        };
     }
 
     onMenuModeChange(event: string) {
         this.layoutService.layoutConfig.update((prev) => ({ ...prev, menuMode: event }));
+    }
+
+    isDefault = computed(() => {
+        const config = this.layoutService.layoutConfig();
+        return (Object.keys(DEFAULT_LAYOUT_CONFIG) as (keyof typeof DEFAULT_LAYOUT_CONFIG)[]).every((key) => config[key] === DEFAULT_LAYOUT_CONFIG[key]);
+    });
+
+    resetToDefaults() {
+        this.layoutService.layoutConfig.update((prev) => ({ ...prev, ...DEFAULT_LAYOUT_CONFIG }));
+        // Rebuilds the whole theme, so primary and surface are re-applied too.
+        this.onPresetChange(DEFAULT_LAYOUT_CONFIG.preset);
     }
 }

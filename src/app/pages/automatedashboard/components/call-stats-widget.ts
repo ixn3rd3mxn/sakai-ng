@@ -6,6 +6,7 @@ import { CallStatsDiff, CallStatsSummary, CallTimes } from '../call-stats.types'
 import { CallStatsDataService } from '../services/call-stats-data.service';
 import { parseIsoDate } from '../../dashboardclone/services/date-utils';
 import { formatDuration } from '../format-utils';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 /** Whether a rise in this metric is an improvement, a deterioration, or
  *  neither. It is the metric's property, not the card's, which is why every
@@ -44,7 +45,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
 @Component({
     standalone: true,
     selector: 'app-call-stats-widget',
-    imports: [SkeletonModule, ProgressSpinnerModule, ButtonModule],
+    imports: [SkeletonModule, ProgressSpinnerModule, ButtonModule, TruncateTooltipDirective],
     host: {
         // Set on the host so it inherits to every card. The host is
         // display:contents (the page applies `class="contents"`), which does not
@@ -167,7 +168,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
            14px - it is cut with an ellipsis rather than wrapped or shrunk: a
            second line made the row of cards ragged, and 12px read as a
            different element from the rest of the card. The full text is in
-           the title.
+           a tooltip.
 
            The padding/negative-margin pair is the same trick as the CBD column
            on /report/summary: Thai stacked marks (เมื่ carries ื and ่) reach
@@ -361,7 +362,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                              line gets, and at base size it wrapped too. Where
                              even text-sm does not fit, .diff-line cuts it with
                              an ellipsis. -->
-                        <div class="text-sm diff-line" [title]="diffText(card.diff) + ' เทียบกับเมื่อวาน'">
+                        <div class="text-sm diff-line" [appTruncateTooltip]="diffText(card.diff) + ' เทียบกับเมื่อวาน'">
                             <span [class]="diffClass(card.diff, card.polarity)">{{ diffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>
@@ -407,7 +408,7 @@ const THAI_DATE = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'lon
                              longer still ("+00:00:04 เทียบกับเมื่อวาน"), so it
                              is the one that wrapped first on mobile; .diff-line
                              cuts it with an ellipsis where it still does not fit. -->
-                        <div class="text-xs sm:text-sm diff-line diff-line-time" [title]="durationDiffText(card.diff) + ' เทียบกับเมื่อวาน'">
+                        <div class="text-xs sm:text-sm diff-line diff-line-time" [appTruncateTooltip]="durationDiffText(card.diff) + ' เทียบกับเมื่อวาน'">
                             <span [class]="diffClass(card.diff, card.polarity)">{{ durationDiffText(card.diff) }}</span>
                             <span> เทียบกับเมื่อวาน</span>
                         </div>

@@ -4,6 +4,7 @@ import { TagModule } from 'primeng/tag';
 import { SkeletonModule } from 'primeng/skeleton';
 import { RecentIncidentItem } from '../dispatch.types';
 import { PageFillerRow, isPageFiller, padToPage } from '../services/page-filler';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 const PAGE_SIZE = 5;
 
@@ -15,7 +16,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as RecentInci
 @Component({
     standalone: true,
     selector: 'app-recent-incidents',
-    imports: [TableModule, TagModule, SkeletonModule],
+    imports: [TableModule, TagModule, SkeletonModule, TruncateTooltipDirective],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">บันทึกล่าสุด</div>
         <!-- Fixed table layout: column widths come from the header cells
@@ -57,7 +58,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as RecentInci
                 <tr>
                     <td>{{ incident.time }}</td>
                     <td>{{ incident.call_type }}</td>
-                    <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" [title]="incident.cbd">{{ incident.cbd }}</td>
+                    <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" [appTruncateTooltip]="incident.cbd">{{ incident.cbd }}</td>
                     <td>
                         @if (incident.severity === '-') {
                             <!-- The dash sits in a tag-sized box (.tag-box,

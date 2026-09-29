@@ -1,8 +1,8 @@
 import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
-import { BehaviorSubject, Subscription, switchMap, takeWhile } from 'rxjs';
-import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
+import { BehaviorSubject, EMPTY, Subscription, catchError, map, switchMap, takeWhile } from 'rxjs';
+import { IncidentHistoryResponse, IncidentRangeResponse, IncidentRangeSelection, LookupsResponse } from '../incident-history.types';
 import { IncidentHistoryApiService } from './incident-history-api.service';
-import { formatDateParam, parseIsoDate } from '../../dashboardclone/services/date-utils';
+import { currentOperationalDay, formatDateParam, parseIsoDate } from '../../dashboardclone/services/date-utils';
 
 // Owns the single date selection for the incident history page and the live
 // snapshot that selection resolves to. Every selection opens the stream
@@ -17,9 +17,9 @@ import { formatDateParam, parseIsoDate } from '../../dashboardclone/services/dat
 export class IncidentHistoryDataService implements OnDestroy {
     private readonly api = inject(IncidentHistoryApiService);
 
-    // null = "whatever is current right now" - resolved server-side, never
-    // computed here.
-    private readonly selectedDateParam$ = new BehaviorSubject<string | null>(null);
+    // One day (date null = "whatever is current right now" - resolved
+    // server-side, never computed here), or several days / a range.
+    private readonly request$ = new BehaviorSubject<{ kind: 'day'; date: string | null } | IncidentRangeSelection>({ kind: 'day', date: null });
     private readonly subscription: Subscription;
 
     private readonly _history = signal<IncidentHistoryResponse | null>(null);
@@ -31,8 +31,23 @@ export class IncidentHistoryDataService implements OnDestroy {
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
 
+    // Set when a range is asked for, not when it arrives: the tables switch
+    // to the range columns (as skeletons) at once rather than showing the
+    // old day's numbers under range headings.
+    private readonly _rangeSelection = signal<IncidentRangeSelection | null>(null);
+    readonly rangeSelection = this._rangeSelection.asReadonly();
+    readonly isRange = computed(() => this._rangeSelection() !== null);
+    private readonly _range = signal<IncidentRangeResponse | null>(null);
+    readonly range = this._range.asReadonly();
+
     readonly context = computed(() => this._history()?.context ?? null);
-    readonly isCurrent = computed(() => this.context()?.is_current ?? true);
+    readonly isCurrent = computed(() => !this.isRange() && (this.context()?.is_current ?? true));
+    // Today as the centre counts it, from the server's clock in whichever
+    // answer came last (see currentOperationalDay).
+    readonly currentOperationalDay = computed<Date>(() =>
+        currentOperationalDay(this.isRange() ? this._range()?.context.server_now : this.context()?.server_now)
+    );
+
     readonly selectedDate = computed<Date>(() => {
         const day = this.context()?.operational_day;
         return day ? parseIsoDate(day) : new Date();
@@ -56,31 +71,56 @@ export class IncidentHistoryDataService implements OnDestroy {
     constructor() {
         this.api.getLookups().subscribe((lookups) => this._lookups.set(lookups));
 
-        this.subscription = this.selectedDateParam$
+        this.subscription = this.request$
             .pipe(
-                switchMap((dateParam) =>
-                    this.api.streamHistory(dateParam ?? undefined).pipe(
-                        // A finished day cannot change, so the connection is
-                        // dropped as soon as the server says the day is not
-                        // current. The `true` keeps that final frame rather
-                        // than discarding the data it carries.
-                        takeWhile((snapshot) => snapshot.context.is_current, true)
-                    )
+                switchMap((request) =>
+                    request.kind === 'day'
+                        ? this.api.streamHistory(request.date ?? undefined).pipe(
+                              // A finished day cannot change, so the connection is
+                              // dropped as soon as the server says the day is not
+                              // current. The `true` keeps that final frame rather
+                              // than discarding the data it carries.
+                              takeWhile((snapshot) => snapshot.context.is_current, true),
+                              map((snapshot) => ({ day: snapshot }))
+                          )
+                        : this.api.getRange(request).pipe(
+                              map((range) => ({ range })),
+                              // A failed request must not end the page's one
+                              // subscription; the skeleton just comes down.
+                              catchError(() => {
+                                  this._loading.set(false);
+                                  return EMPTY;
+                              })
+                          )
                 )
             )
-            .subscribe((snapshot) => {
-                this._history.set(snapshot);
+            .subscribe((result) => {
+                if ('day' in result) this._history.set(result.day);
+                else this._range.set(result.range);
                 this._loading.set(false);
-            });    }
+            });
+    }
 
     select(date: Date): void {
         this._loading.set(true);
-        this.selectedDateParam$.next(formatDateParam(date));
+        this._rangeSelection.set(null);
+        this.request$.next({ kind: 'day', date: formatDateParam(date) });
+    }
+
+    // Several days or a range. One day asked for either way is just a day,
+    // with the one-day view and its live stream.
+    selectRange(selection: IncidentRangeSelection): void {
+        const single = selection.kind === 'days' ? (selection.dates.length === 1 ? selection.dates[0] : null) : formatDateParam(selection.from) === formatDateParam(selection.to) ? selection.from : null;
+        if (single) return this.select(single);
+        this._loading.set(true);
+        this._rangeSelection.set(selection);
+        this.request$.next(selection);
     }
 
     selectCurrent(): void {
         this._loading.set(true);
-        this.selectedDateParam$.next(null);
+        this._rangeSelection.set(null);
+        this.request$.next({ kind: 'day', date: null });
     }
 
     ngOnDestroy(): void {

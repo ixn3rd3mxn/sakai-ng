@@ -17,7 +17,7 @@ import { AppUpdateService } from '@/app/core/app-update.service';
                 <i class="pi pi-bars"></i>
             </button>
             <a class="layout-topbar-logo" routerLink="/home">
-                <img src="demo/images/place/logo-512.png" alt="ศูนย์รับแจ้งเหตุและสั่งการการแพทย์ฉุกเฉิน อบจ.ปัตตานี" style="height: 35px; width: auto;" />
+                <!-- <img src="demo/images/place/logo-512.png" alt="ศูนย์รับแจ้งเหตุและสั่งการการแพทย์ฉุกเฉิน อบจ.ปัตตานี" style="height: 35px; width: auto;" /> -->
                 <span class="logo-text-full">ศูนย์รับแจ้งเหตุและสั่งการการแพทย์ฉุกเฉิน อบจ.ปัตตานี</span>
                 <span class="logo-text-short">ศูนย์รับแจ้งเหตุ</span>
             </a>

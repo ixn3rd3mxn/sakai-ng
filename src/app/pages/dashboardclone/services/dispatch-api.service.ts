@@ -2,7 +2,9 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { DashboardSummary, IncidentCreateRequest, IncidentCreateResponse, OperationalContext, ShiftCode } from '../dispatch.types';
+import { DashboardRangeSummary, DashboardSummary, IncidentCreateRequest, IncidentCreateResponse, OperationalContext, ShiftCode } from '../dispatch.types';
+import { IncidentRangeSelection } from '../../incident-history/incident-history.types';
+import { formatDateParam } from './date-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
 import { resilientEventSource } from '@/app/core/sse-reconnect';
 
@@ -28,6 +30,18 @@ export class DispatchApiService {
 
     getSummary(date?: string, shift?: ShiftCode): Observable<DashboardSummary> {
         return this.http.get<DashboardSummary>(`${API_BASE_URL}/dashboard/summary`, { params: this.buildParams(date, shift) });
+    }
+
+    // Several days or a range: a plain GET, since the days asked about are
+    // finished. Same parameters as the summary page's range request.
+    getSummaryRange(selection: IncidentRangeSelection): Observable<DashboardRangeSummary> {
+        let params = new HttpParams();
+        if (selection.kind === 'range') {
+            params = params.set('date_from', formatDateParam(selection.from)).set('date_to', formatDateParam(selection.to));
+        } else {
+            for (const day of selection.dates) params = params.append('dates', formatDateParam(day));
+        }
+        return this.http.get<DashboardRangeSummary>(`${API_BASE_URL}/dashboard/summary/range`, { params });
     }
 
     // Backend re-pushes the "dashboard" event whenever the aggregated

@@ -29,6 +29,7 @@ SUITES = (
     "test_agents",
     "test_call_log",
     "test_flood_cases",
+    "test_aggregations_range",
     "test_feed_health",
     "test_events",
     "test_live_feeds",

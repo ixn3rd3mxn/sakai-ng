@@ -24,6 +24,7 @@ import { FloodApiService } from '../services/flood-api.service';
 import { FloodDataService } from '../services/flood-data.service';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
 import { NoStrayAutofocusDirective } from '../../../shared/no-stray-autofocus.directive';
+import { OpenBelowDirective } from '../../../shared/open-below.directive';
 import { groupByRecent, OptionGroup, prependRecent } from '../../../shared/recent-picks';
 import { DiffSegment, diffText } from '../../../shared/text-diff';
 import { FloodDraftService } from '../services/flood-draft.service';
@@ -212,7 +213,7 @@ const SKELETON_CARDS: { title: string; fields: SkeletonField[] }[] = [
         fields: [
             { label: 'อำเภอ', cols: HALF, required: true },
             { label: 'ตำบล', cols: HALF, required: true },
-            { label: 'พิกัด / จุดสังเกต', cols: FULL, required: true }
+            { label: 'พิกัด & จุดสังเกต', cols: FULL, required: true }
         ]
     },
     {
@@ -266,6 +267,38 @@ const PAYLOAD_FIELDS: Record<FormField, (keyof FloodCaseInput)[]> = {
     remarks: ['remarks']
 };
 
+/** A form as the request body - for the save itself, and for its baseline. */
+function payloadOf(form: FormModel): FloodCaseInput {
+    // The two inputs are merged into one instant here - the form shows them
+    // apart because that is how a call goes, but every query on the
+    // collection is a time range.
+    const date = form.reported_date ?? new Date();
+    const time = form.reported_time ?? new Date();
+    const reportedAt = `${formatDateParam(date)}T${`${time.getHours()}`.padStart(2, '0')}:${`${time.getMinutes()}`.padStart(2, '0')}:00`;
+
+    return {
+        district: form.district_code ?? '',
+        subdistrict: form.subdistrict_code ?? '',
+        chief_complaint: form.chief_complaint.trim(),
+        reported_at: reportedAt,
+        shift: form.shift,
+        agent_id: form.agent_id,
+        channel_id: form.channel_id,
+        reporter: form.reporter?.trim() || null,
+        phone: form.phone?.trim() || null,
+        location_note: form.location_note?.trim() || null,
+        gender: form.gender,
+        age: form.age,
+        age_months: form.age === null ? null : form.age_months,
+        age_days: form.age === null || form.age_months === null ? null : form.age_days,
+        ddpm_coordination: form.ddpm_coordination?.trim() || null,
+        operating_unit: form.operating_unit?.trim() || null,
+        assistance: form.assistance?.trim() || null,
+        status: form.status,
+        remarks: form.remarks?.trim() || null
+    };
+}
+
 const FIELD_LABELS: Record<FormField, string> = {
     reported_date: 'วันที่',
     reported_time: 'เวลารับแจ้ง',
@@ -276,7 +309,7 @@ const FIELD_LABELS: Record<FormField, string> = {
     phone: 'เบอร์โทรศัพท์',
     district_code: 'อำเภอ',
     subdistrict_code: 'ตำบล',
-    location_note: 'พิกัด / จุดสังเกต',
+    location_note: 'พิกัด & จุดสังเกต',
     gender: 'เพศ',
     age: 'อายุ (ปี)',
     age_months: 'เดือน',
@@ -357,6 +390,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
         // otherwise render with a native autofocus attribute (PrimeNG bug),
         // and the browser hands the first of them focus on a fresh page load.
         NoStrayAutofocusDirective,
+        // Every select, autocomplete and date picker below opens its popup
+        // under the field - see the directive.
+        OpenBelowDirective,
         FloodDuplicateWarning
     ],
     styles: [
@@ -377,13 +413,16 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                that can vanish unanswered is a conflict decided by accident.
                Drawn with the theme's popover tokens so it looks like one;
                it floats over whatever sits below the field, and is only as
-               wide as what it says, not as wide as the field. */
+               wide as what it says, not as wide as the field.
+               No top: it opens where it sits in the markup, which is
+               straight after the input - over a field's shortcut badges
+               rather than below them, so the arrow points at the value in
+               question. The badges are back once the choice is made. */
             .grid > div:has(> .conflict-popover) {
                 position: relative;
             }
             .conflict-popover {
                 position: absolute;
-                top: 100%;
                 left: 0;
                 width: max-content;
                 min-width: 12rem;
@@ -448,6 +487,67 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
             .required::after {
                 content: ' *';
                 color: var(--red-500, #ef4444);
+            }
+            /* A field changed since the case was opened (isChanged). Before
+               the text, so it cannot be confused with the required star. */
+            .field-changed::before {
+                content: '';
+                display: inline-block;
+                width: 0.4rem;
+                height: 0.4rem;
+                border-radius: 50%;
+                background: var(--p-primary-color);
+                margin-inline-end: 0.35rem;
+                vertical-align: middle;
+            }
+            /* Status on the left, actions on the right - and in the same
+               column as the dots on the labels it explains. */
+            /* A field someone else's save just changed (isRemoteUpdated): the
+               input flashes the theme's highlight and a note fades at the
+               end of the label row - where the operator is looking, with
+               nothing to answer and nothing below it pushed down. Both last
+               REMOTE_MARK_MS. */
+            .remote-updated {
+                position: relative;
+            }
+            .remote-note {
+                position: absolute;
+                top: 0;
+                inset-inline-end: 0;
+                color: var(--p-primary-color);
+                pointer-events: none;
+                animation: remote-note 3s ease-out forwards;
+            }
+            @keyframes remote-note {
+                0% {
+                    opacity: 0;
+                }
+                10%,
+                75% {
+                    opacity: 1;
+                }
+                100% {
+                    opacity: 0;
+                }
+            }
+            .grid > div:has(> .remote-updated) ::ng-deep :is(.p-inputtext, .p-select, .p-textarea) {
+                animation: remote-flash 3s ease-out;
+            }
+            @keyframes remote-flash {
+                from {
+                    background-color: var(--p-highlight-background);
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .remote-note,
+                .grid > div:has(> .remote-updated) ::ng-deep :is(.p-inputtext, .p-select, .p-textarea) {
+                    animation: none;
+                }
+            }
+            .changed-legend {
+                font-size: 0.8rem;
+                color: var(--text-color-secondary);
+                margin-inline-end: auto;
             }
             /* Room for four or five saves; the ten-entry cap scrolls. On a
                short phone screen the viewport share wins, and the dialog's
@@ -538,14 +638,23 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                 background: color-mix(in srgb, var(--p-green-500) 22%, transparent);
             }
 
-            /* Always reachable without scrolling to the end of a long form. */
+            /* Always reachable without scrolling to the end of a long form.
+               The drawer's content has its stock bottom padding, and a sticky
+               bar stops at that padding - leaving a strip under it where the
+               form scrolled past in view. Pulled down over the padding (and
+               padded back by the same amount, so the buttons stay where they
+               were) it sits flush with the drawer's bottom edge. Above the
+               conflict popover (z-index 5), which would otherwise draw over
+               it on the way past. */
             .action-bar {
                 position: sticky;
-                bottom: 0;
+                bottom: calc(-1 * var(--p-overlay-modal-padding, 1.25rem));
+                z-index: 6;
                 background: var(--surface-overlay, var(--surface-card));
                 border-top: 1px solid var(--surface-border);
-                padding: 0.85rem 0;
+                padding: 0.85rem 0 calc(0.85rem + var(--p-overlay-modal-padding, 1.25rem));
                 margin-top: 0.5rem;
+                margin-bottom: calc(-1 * var(--p-overlay-modal-padding, 1.25rem));
             }
         `
     ],
@@ -645,8 +754,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                     <div class="form-card-title">ข้อมูลการรับแจ้ง</div>
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-12 md:col-span-4">
-                            <label class="field-label" data-field="reported_date">วันที่</label>
+                            <label class="field-label" data-field="reported_date" [class.field-changed]="isChanged('reported_date')" [class.remote-updated]="isRemoteUpdated('reported_date')">วันที่@if (isRemoteUpdated('reported_date')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-datepicker
+                                openBelow
                                 buddhistYear
                                 [(ngModel)]="form.reported_date"
                                 (ngModelChange)="onChanged()"
@@ -659,8 +769,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'reported_date' }" />
                         </div>
                         <div class="col-span-12 md:col-span-4">
-                            <label class="field-label" data-field="reported_time">เวลารับแจ้ง</label>
+                            <label class="field-label" data-field="reported_time" [class.field-changed]="isChanged('reported_time')" [class.remote-updated]="isRemoteUpdated('reported_time')">เวลารับแจ้ง@if (isRemoteUpdated('reported_time')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-datepicker
+                                openBelow
                                 [(ngModel)]="form.reported_time"
                                 (ngModelChange)="onTimeChanged()"
                                 [timeOnly]="true"
@@ -672,13 +783,14 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'reported_time' }" />
                         </div>
                         <div class="col-span-12 md:col-span-4">
-                            <label class="field-label" data-field="shift">เวร</label>
+                            <label class="field-label" data-field="shift" [class.field-changed]="isChanged('shift')" [class.remote-updated]="isRemoteUpdated('shift')">เวร@if (isRemoteUpdated('shift')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- Pre-selected from the report time above, which is
                                  what nearly every case wants, and it keeps
                                  following the time until the operator picks a
                                  shift: a call landing at 16:28 is regularly
                                  written up by the incoming team. -->
                             <p-select
+                                openBelow
                                 [(ngModel)]="form.shift"
                                 (ngModelChange)="onShiftChanged()"
                                 [options]="dataService.shifts()"
@@ -691,13 +803,14 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                         </div>
 
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="agent_id">เจ้าหน้าที่รับแจ้ง</label>
+                            <label class="field-label" data-field="agent_id" [class.field-changed]="isChanged('agent_id')" [class.remote-updated]="isRemoteUpdated('agent_id')">เจ้าหน้าที่รับแจ้ง@if (isRemoteUpdated('agent_id')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- The roster is ordered by roster number, which is
                                  the right order to read but a slow one to pick
                                  from: whoever is on this console picked their own
                                  name on the last call too, so the last three sit
                                  on top. Per browser, never sent anywhere. -->
                             <p-select
+                                openBelow
                                 #agentSelect
                                 [(ngModel)]="form.agent_id"
                                 (ngModelChange)="onAgentChanged()"
@@ -718,8 +831,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'agent_id' }" />
                         </div>
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="channel_id">ช่องทาง</label>
+                            <label class="field-label" data-field="channel_id" [class.field-changed]="isChanged('channel_id')" [class.remote-updated]="isRemoteUpdated('channel_id')">ช่องทาง@if (isRemoteUpdated('channel_id')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-select
+                                openBelow
                                 [(ngModel)]="form.channel_id"
                                 (ngModelChange)="onChanged()"
                                 [options]="dataService.channels()"
@@ -740,7 +854,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                     <div class="form-card-title">ผู้แจ้ง</div>
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="reporter">ผู้แจ้ง</label>
+                            <label class="field-label" data-field="reporter" [class.field-changed]="isChanged('reporter')" [class.remote-updated]="isRemoteUpdated('reporter')">ผู้แจ้ง@if (isRemoteUpdated('reporter')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- Free text with help, not a closed list: the real
                                  column holds an organisation type and a tail that
                                  is unpredictable. The dropdown offers every name
@@ -749,6 +863,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                                  value is the point, and that message reads as
                                  "not allowed". -->
                             <p-autocomplete
+                                openBelow
                                 #reporterInput
                                 (click)="openSuggestions($event, reporterInput)"
                                 (onClear)="onCleared(reporterInput)"
@@ -763,15 +878,16 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                                 [showEmptyMessage]="false"
                                 placeholder="เช่น ญาติ, จนท."
                                 styleClass="w-full"
+                                inputStyleClass="thai-input"
                                 appendTo="body"
                             />
+                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'reporter' }" />
                             <ng-container
                                 *ngTemplateOutlet="shortcuts; context: { $implicit: dataService.reporterShortcuts(), field: 'reporter', input: reporterInput }"
                             />
-                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'reporter' }" />
                         </div>
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="phone">เบอร์โทรศัพท์</label>
+                            <label class="field-label" data-field="phone" [class.field-changed]="isChanged('phone')" [class.remote-updated]="isRemoteUpdated('phone')">เบอร์โทรศัพท์@if (isRemoteUpdated('phone')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- Plain inputs have no clear button of their own;
                                  an icon field with a × on the right is the stock
                                  way to give them one. -->
@@ -804,8 +920,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                     <div class="form-card-title">สถานที่เกิดเหตุ</div>
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label required" data-field="district_code">อำเภอ</label>
+                            <label class="field-label required" data-field="district_code" [class.field-changed]="isChanged('district_code')" [class.remote-updated]="isRemoteUpdated('district_code')">อำเภอ@if (isRemoteUpdated('district_code')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-select
+                                openBelow
                                 [invalid]="isMissing('district_code')"
                                 [(ngModel)]="form.district_code"
                                 (ngModelChange)="onDistrictChanged($event)"
@@ -829,7 +946,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'district_code' }" />
                         </div>
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label required" data-field="subdistrict_code">ตำบล</label>
+                            <label class="field-label required" data-field="subdistrict_code" [class.field-changed]="isChanged('subdistrict_code')" [class.remote-updated]="isRemoteUpdated('subdistrict_code')">ตำบล@if (isRemoteUpdated('subdistrict_code')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- Narrowed by the chosen amphoe once there is one,
                                  so a tambon from the wrong amphoe cannot be picked;
                                  with none chosen it lists every tambon and fills
@@ -837,6 +954,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                                  the pair that reaches the server is consistent -
                                  it rejects a mismatched one anyway. -->
                             <p-select
+                                openBelow
                                 [invalid]="isMissing('subdistrict_code')"
                                 [(ngModel)]="form.subdistrict_code"
                                 (ngModelChange)="onSubdistrictChanged()"
@@ -860,13 +978,13 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'subdistrict_code' }" />
                         </div>
                         <div class="col-span-12">
-                            <label class="field-label required" data-field="location_note">พิกัด / จุดสังเกต</label>
+                            <label class="field-label required" data-field="location_note" [class.field-changed]="isChanged('location_note')" [class.remote-updated]="isRemoteUpdated('location_note')">พิกัด & จุดสังเกต@if (isRemoteUpdated('location_note')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-iconfield>
                                 <input
                                     #locationInput
                                     pInputText
                                     [invalid]="isMissing('location_note')"
-                                    class="w-full"
+                                    class="w-full thai-input"
                                     [(ngModel)]="form.location_note"
                                     (ngModelChange)="onLocationChanged()"
                                     placeholder="เช่น ม.2 บ้านบือราแง, ร้านขนมจีนเมืองคอน, 13/6 ม.8"
@@ -898,8 +1016,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                     <div class="form-card-title">ผู้ประสบภัย</div>
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-6 md:col-span-3">
-                            <label class="field-label" data-field="gender">เพศ</label>
+                            <label class="field-label" data-field="gender" [class.field-changed]="isChanged('gender')" [class.remote-updated]="isRemoteUpdated('gender')">เพศ@if (isRemoteUpdated('gender')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-select
+                                openBelow
                                 [(ngModel)]="form.gender"
                                 (ngModelChange)="onChanged()"
                                 [options]="dataService.genders()"
@@ -913,7 +1032,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'gender' }" />
                         </div>
                         <div class="col-span-6 md:col-span-3">
-                            <label class="field-label" data-field="age">อายุ (ปี)</label>
+                            <label class="field-label" data-field="age" [class.field-changed]="isChanged('age')" [class.remote-updated]="isRemoteUpdated('age')">อายุ (ปี)@if (isRemoteUpdated('age')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-iconfield>
                                 <p-inputnumber
                                     [(ngModel)]="form.age"
@@ -937,7 +1056,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                              months of nothing is not an age; the server refuses
                              the pair too. -->
                         <div class="col-span-6 md:col-span-3">
-                            <label class="field-label" data-field="age_months">เดือน</label>
+                            <label class="field-label" data-field="age_months" [class.field-changed]="isChanged('age_months')" [class.remote-updated]="isRemoteUpdated('age_months')">เดือน@if (isRemoteUpdated('age_months')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-iconfield>
                                 <p-inputnumber
                                     [(ngModel)]="form.age_months"
@@ -958,7 +1077,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                             <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'age_months' }" />
                         </div>
                         <div class="col-span-6 md:col-span-3">
-                            <label class="field-label" data-field="age_days">วัน</label>
+                            <label class="field-label" data-field="age_days" [class.field-changed]="isChanged('age_days')" [class.remote-updated]="isRemoteUpdated('age_days')">วัน@if (isRemoteUpdated('age_days')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-iconfield>
                                 <p-inputnumber
                                     [(ngModel)]="form.age_days"
@@ -980,7 +1099,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                         </div>
 
                         <div class="col-span-12">
-                            <label class="field-label required" data-field="chief_complaint">อาการสำคัญ / รายละเอียด</label>
+                            <label class="field-label required" data-field="chief_complaint" [class.field-changed]="isChanged('chief_complaint')" [class.remote-updated]="isRemoteUpdated('chief_complaint')">อาการสำคัญ / รายละเอียด@if (isRemoteUpdated('chief_complaint')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <textarea
                                 pTextarea
                                 [invalid]="isMissing('chief_complaint')"
@@ -1007,8 +1126,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
 
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="ddpm_coordination">ประสานงานทีม ปภ.อำเภอ</label>
+                            <label class="field-label" data-field="ddpm_coordination" [class.field-changed]="isChanged('ddpm_coordination')" [class.remote-updated]="isRemoteUpdated('ddpm_coordination')">ประสานงานทีม ปภ.อำเภอ@if (isRemoteUpdated('ddpm_coordination')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-autocomplete
+                                openBelow
                                 #ddpmInput
                                 (click)="openSuggestions($event, ddpmInput)"
                                 (onClear)="onCleared(ddpmInput)"
@@ -1023,19 +1143,21 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                                 [showEmptyMessage]="false"
                                 placeholder="เช่น ประสานกู้ชีพเต็กก่า"
                                 styleClass="w-full"
+                                inputStyleClass="thai-input"
                                 appendTo="body"
                             />
+                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'ddpm_coordination' }" />
                             <ng-container
                                 *ngTemplateOutlet="shortcuts; context: { $implicit: dataService.ddpmShortcuts(), field: 'ddpm_coordination', input: ddpmInput }"
                             />
-                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'ddpm_coordination' }" />
                         </div>
                         <div class="col-span-12 md:col-span-6">
-                            <label class="field-label" data-field="operating_unit">หน่วยปฏิบัติ</label>
+                            <label class="field-label" data-field="operating_unit" [class.field-changed]="isChanged('operating_unit')" [class.remote-updated]="isRemoteUpdated('operating_unit')">หน่วยปฏิบัติ@if (isRemoteUpdated('operating_unit')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <!-- One list for every unit, so the same unit is
                                  not typed three different ways across one
                                  flood. -->
                             <p-autocomplete
+                                openBelow
                                 #unitInput
                                 (click)="openSuggestions($event, unitInput)"
                                 (onClear)="onCleared(unitInput)"
@@ -1050,16 +1172,17 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                                 [showEmptyMessage]="false"
                                 placeholder="เช่น กู้ชีพเต็กก่า, อบต.ปากล่อ"
                                 styleClass="w-full"
+                                inputStyleClass="thai-input"
                                 appendTo="body"
                             />
+                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'operating_unit' }" />
                             <ng-container
                                 *ngTemplateOutlet="shortcuts; context: { $implicit: dataService.crewShortcuts(), field: 'operating_unit', input: unitInput }"
                             />
-                            <ng-container *ngTemplateOutlet="conflictCard; context: { $implicit: 'operating_unit' }" />
                         </div>
 
                         <div class="col-span-12">
-                            <label class="field-label" data-field="assistance">การช่วยเหลือ</label>
+                            <label class="field-label" data-field="assistance" [class.field-changed]="isChanged('assistance')" [class.remote-updated]="isRemoteUpdated('assistance')">การช่วยเหลือ@if (isRemoteUpdated('assistance')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <textarea
                                 pTextarea
                                 class="w-full"
@@ -1071,8 +1194,9 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                         </div>
 
                         <div class="col-span-12 md:col-span-4">
-                            <label class="field-label" data-field="status">สำเร็จ</label>
+                            <label class="field-label" data-field="status" [class.field-changed]="isChanged('status')" [class.remote-updated]="isRemoteUpdated('status')">สำเร็จ@if (isRemoteUpdated('status')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <p-select
+                                openBelow
                                 [(ngModel)]="form.status"
                                 (ngModelChange)="onChanged()"
                                 [options]="dataService.lookups()?.statuses ?? []"
@@ -1086,7 +1210,7 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
                         <div class="hidden md:block md:col-span-8"></div>
 
                         <div class="col-span-12">
-                            <label class="field-label" data-field="remarks">เพิ่มเติม</label>
+                            <label class="field-label" data-field="remarks" [class.field-changed]="isChanged('remarks')" [class.remote-updated]="isRemoteUpdated('remarks')">เพิ่มเติม@if (isRemoteUpdated('remarks')) {<span class="remote-note">อัปเดตโดยคนอื่น</span>}</label>
                             <textarea
                                 pTextarea
                                 class="w-full"
@@ -1105,6 +1229,12 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
             }
 
             <div class="action-bar flex flex-wrap items-center gap-2 justify-end">
+                <!-- Says what the dot on a label means, and only while one is
+                     on screen: it appears together with the first dot. Same
+                     class as the labels, so it is the same dot. -->
+                @if (anyChanged()) {
+                    <span class="field-changed changed-legend">= ช่องที่คุณแก้ไข</span>
+                }
                 <button
                     pButton
                     type="button"
@@ -1237,11 +1367,17 @@ const MASK_TEARDOWN_GRACE_MS = 1500;
         <ng-template #conflictCard let-field let-inflow="inflow">
             @if (conflictFor(field); as theirs) {
                 <div class="conflict-popover text-sm" [class.conflict-popover-inflow]="inflow">
-                    <div class="font-semibold mb-1">คนอื่นแก้ไขช่องนี้</div>
-                    <div class="mb-2 whitespace-pre-wrap break-words">{{ theirs }}</div>
+                    <!-- A cleared field has no value to point at, so it says
+                         what was done instead of showing "(ว่าง)". -->
+                    @if (conflictCleared(field)) {
+                        <div class="font-semibold mb-2">คนอื่นลบค่าในช่องนี้ออก</div>
+                    } @else {
+                        <div class="font-semibold mb-1">คนอื่นบันทึกค่านี้ไว้:</div>
+                        <div class="mb-2 whitespace-pre-wrap break-words">{{ theirs }}</div>
+                    }
                     <div class="flex gap-2 justify-end">
-                        <button pButton type="button" label="เก็บของฉัน" size="small" [text]="true" severity="warn" (click)="keepMine(field)"></button>
-                        <button pButton type="button" label="ใช้ของใหม่" size="small" severity="warn" (click)="useTheirs(field)"></button>
+                        <button pButton type="button" label="เก็บค่าของฉัน" size="small" [text]="true" severity="warn" (click)="keepMine(field)"></button>
+                        <button pButton type="button" [label]="conflictCleared(field) ? 'ลบออก' : 'ใช้ค่านี้'" size="small" severity="warn" (click)="useTheirs(field)"></button>
                     </div>
                 </div>
             }
@@ -1341,6 +1477,12 @@ export class FloodCaseFormDrawer {
     // Fields both sides changed since the baseline, with the other side's
     // value. Cleared by the operator choosing, one way or the other.
     readonly conflicts = signal<Partial<Record<FormField, unknown>>>({});
+    // Fields someone else's save just changed under the operator, marked on
+    // the field itself for a few seconds: the value changes where they are
+    // looking, so the reason should show there too, not only in a toast
+    // across the screen.
+    readonly remoteUpdated = signal<ReadonlySet<FormField>>(new Set());
+    private remoteUpdatedTimers = new Map<FormField, ReturnType<typeof setTimeout>>();
     // Whether a save has been attempted on this form. Required fields turn
     // red only after that: a form that opens red on every empty field during
     // a live call is noise, not help.
@@ -1451,6 +1593,7 @@ export class FloodCaseFormDrawer {
         this.submitted.set(false);
         this.dirty.set(false);
         this.conflicts.set({});
+        this.clearRemoteUpdated();
         this.baseline = null;
 
         if (id === 'new') {
@@ -1586,6 +1729,7 @@ export class FloodCaseFormDrawer {
 
     private teardown(): void {
         this.loadingCase.set(false);
+        this.clearRemoteUpdated();
         this.focusedOnOpen = false;
         this.historyOpen.set(false);
         this.history.set([]);
@@ -1854,6 +1998,24 @@ export class FloodCaseFormDrawer {
         return this.dirty() && this.changedFields().length > 0;
     }
 
+    /**
+     * Whether this operator has changed a field of a saved case - marked on
+     * its label, so a value changed by accident (a mouse wheel over a
+     * dropdown, the wrong amphoe) is seen before the save, not after. Not on
+     * a new case, where every filled field would be marked. What others
+     * saved in the meantime has moved the baseline, so only this operator's
+     * own changes show.
+     */
+    isChanged(field: FormField): boolean {
+        const baseline = this.baseline;
+        return !this.isNew() && !!baseline && !sameValue(field, this.form[field], baseline[field]);
+    }
+
+    /** Whether any label carries the changed dot - when its legend shows. */
+    anyChanged(): boolean {
+        return FORM_FIELDS.some((field) => this.isChanged(field));
+    }
+
     /** Form fields that differ from the baseline - what a save will send. */
     private changedFields(): FormField[] {
         const baseline = this.baseline;
@@ -1890,13 +2052,13 @@ export class FloodCaseFormDrawer {
         if (this.historyOpen()) this.loadHistory();
         const incoming = this.toForm(fresh);
         const conflicts = { ...this.conflicts() };
-        let applied = 0;
+        const applied: FormField[] = [];
         for (const field of FORM_FIELDS) {
             if (sameValue(field, incoming[field], baseline[field])) continue;
             const mineIsClean = sameValue(field, this.form[field], baseline[field]);
             if (mineIsClean) {
                 (this.form as Record<FormField, unknown>)[field] = incoming[field];
-                applied += 1;
+                applied.push(field);
             } else if (!sameValue(field, this.form[field], incoming[field])) {
                 conflicts[field] = incoming[field];
             }
@@ -1911,15 +2073,55 @@ export class FloodCaseFormDrawer {
             this.messageService.add({ severity: 'warn', summary: 'คนอื่นแก้ไขช่องที่คุณกำลังแก้อยู่', detail: 'เลือกค่าที่จะเก็บใต้ช่องนั้น', life: 5000 });
             this.scrollToFirstConflict();
         }
-        if (applied) {
-            this.messageService.add({ severity: 'info', summary: 'มีการอัปเดตจากคนอื่น', detail: `${applied} ช่องถูกอัปเดตแล้ว`, life: 3000 });
+        if (applied.length) {
+            this.markRemoteUpdated(applied);
+            this.messageService.add({ severity: 'info', summary: 'มีการอัปเดตจากคนอื่น', detail: `${applied.length} ช่องถูกอัปเดตแล้ว`, life: 3000 });
         }
+    }
+
+    /** Whether someone else's save changed this field a moment ago. */
+    isRemoteUpdated(field: FormField): boolean {
+        return this.remoteUpdated().has(field);
+    }
+
+    // As long as the note's fade (.remote-note); each field keeps its own
+    // timer, so a second update restarts that field's time.
+    private static readonly REMOTE_MARK_MS = 3000;
+
+    private markRemoteUpdated(fields: FormField[]): void {
+        const next = new Set(this.remoteUpdated());
+        for (const field of fields) {
+            next.add(field);
+            clearTimeout(this.remoteUpdatedTimers.get(field));
+            this.remoteUpdatedTimers.set(
+                field,
+                setTimeout(() => {
+                    this.remoteUpdatedTimers.delete(field);
+                    const rest = new Set(this.remoteUpdated());
+                    rest.delete(field);
+                    this.remoteUpdated.set(rest);
+                }, FloodCaseFormDrawer.REMOTE_MARK_MS)
+            );
+        }
+        this.remoteUpdated.set(next);
+    }
+
+    private clearRemoteUpdated(): void {
+        for (const timer of this.remoteUpdatedTimers.values()) clearTimeout(timer);
+        this.remoteUpdatedTimers.clear();
+        this.remoteUpdated.set(new Set());
     }
 
     /** The other side's value for a conflicted field, readable, or null. */
     conflictFor(field: FormField): string | null {
         const theirs = this.conflicts()[field];
         return theirs === undefined ? null : this.describe(field, theirs);
+    }
+
+    /** Whether the other side's value for a conflicted field is empty. */
+    conflictCleared(field: FormField): boolean {
+        const theirs = this.conflicts()[field];
+        return theirs === null || theirs === '';
     }
 
     /** Bring the first unsettled conflict into view once it is rendered. */
@@ -2009,10 +2211,7 @@ export class FloodCaseFormDrawer {
 
     private toPayload(): FloodCaseInput | null {
         this.submitted.set(true);
-        // The two codes are named here as well so the compiler sees them
-        // narrowed to strings for the payload below.
-        const { district_code: district, subdistrict_code: subdistrict } = this.form;
-        if (!district || !subdistrict || FloodCaseFormDrawer.REQUIRED.some((field) => this.isMissing(field))) {
+        if (FloodCaseFormDrawer.REQUIRED.some((field) => this.isMissing(field))) {
             this.messageService.add({
                 severity: 'warn',
                 summary: 'กรอกข้อมูลไม่ครบ',
@@ -2024,46 +2223,35 @@ export class FloodCaseFormDrawer {
             setTimeout(() => document.querySelector('.flood-drawer .p-invalid')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
             return null;
         }
-
-        // The two inputs are merged into one instant here - the form shows
-        // them apart because that is how a call goes, but every query on the
-        // collection is a time range.
-        const date = this.form.reported_date ?? new Date();
-        const time = this.form.reported_time ?? new Date();
-        const reportedAt = `${formatDateParam(date)}T${`${time.getHours()}`.padStart(2, '0')}:${`${time.getMinutes()}`.padStart(2, '0')}:00`;
-
-        return {
-            district,
-            subdistrict,
-            chief_complaint: this.form.chief_complaint.trim(),
-            reported_at: reportedAt,
-            shift: this.form.shift,
-            agent_id: this.form.agent_id,
-            channel_id: this.form.channel_id,
-            reporter: this.form.reporter?.trim() || null,
-            phone: this.form.phone?.trim() || null,
-            location_note: this.form.location_note?.trim() || null,
-            gender: this.form.gender,
-            age: this.form.age,
-            age_months: this.form.age === null ? null : this.form.age_months,
-            age_days: this.form.age === null || this.form.age_months === null ? null : this.form.age_days,
-            ddpm_coordination: this.form.ddpm_coordination?.trim() || null,
-            operating_unit: this.form.operating_unit?.trim() || null,
-            assistance: this.form.assistance?.trim() || null,
-            status: this.form.status,
-            remarks: this.form.remarks?.trim() || null
-        };
+        return payloadOf(this.form);
     }
 
-    /** The request fields of the form fields that changed - what an edit sends. */
+    /**
+     * The request fields of the form fields that changed - what an edit
+     * sends - with the baseline's values for the same fields, so the server
+     * can refuse to write over a change it has had since.
+     */
     private toPatch(full: FloodCaseInput): FloodCasePatch {
         const keys = new Set(this.changedFields().flatMap((field) => PAYLOAD_FIELDS[field]));
+        const started = this.baseline ? payloadOf(this.baseline) : null;
         const patch: FloodCasePatch = {};
-        for (const key of keys) (patch as Record<string, unknown>)[key] = full[key];
+        const base: Partial<FloodCaseInput> = {};
+        for (const key of keys) {
+            (patch as Record<string, unknown>)[key] = full[key];
+            if (started) (base as Record<string, unknown>)[key] = started[key];
+        }
+        if (started && keys.size) patch.base = base;
         return patch;
     }
 
-    save(andNext: boolean): void {
+    save(andNext: boolean, retried = false): void {
+        // An open conflict is a question the operator has not answered yet;
+        // saving past it would write their value over the other one unseen.
+        if (Object.keys(this.conflicts()).length) {
+            this.messageService.add({ severity: 'warn', summary: 'ยังมีช่องที่ถูกแก้ไขพร้อมกัน', detail: 'เลือกค่าที่จะเก็บก่อนบันทึก', life: 4000 });
+            this.scrollToFirstConflict();
+            return;
+        }
         const payload = this.toPayload();
         if (!payload) return;
         const key = this.caseId() ?? 'new';
@@ -2071,7 +2259,10 @@ export class FloodCaseFormDrawer {
         const patch = this.isNew() ? null : this.toPatch(payload);
         if (patch && Object.keys(patch).length === 0) {
             // Nothing of this operator's to write; whatever changed came from
-            // someone else and is already in the form.
+            // someone else and is already in the form. Said, not just closed:
+            // a drawer that vanishes without a word leaves the operator
+            // reopening the case to see whether it saved.
+            this.messageService.add({ severity: 'info', summary: 'ไม่มีการเปลี่ยนแปลง', life: 2500 });
             this.dirty.set(false);
             this.submitted.set(false);
             this.closed.emit();
@@ -2099,7 +2290,6 @@ export class FloodCaseFormDrawer {
                 this.messageService.add({
                     severity: 'success',
                     summary: 'บันทึกแล้ว',
-                    detail: `${saved.time} น. ต.${saved.subdistrict_name}`,
                     life: 2500
                 });
 
@@ -2117,6 +2307,20 @@ export class FloodCaseFormDrawer {
             },
             error: (err) => {
                 this.saving.set(false);
+                // Someone else changed a field this save also changes, and it
+                // reached the server first. Their copy comes back with the
+                // refusal; the ordinary merge puts the clash under its field.
+                // A 409 that leaves nothing to ask - a write that landed just
+                // after the check, on a field the form cannot show - has still
+                // moved the baseline on, so the save is simply sent again, once.
+                const stored: FloodCase | undefined = err?.status === 409 ? err.error?.detail?.case : undefined;
+                if (stored) {
+                    this.mergeRemote(stored);
+                    if (Object.keys(this.conflicts()).length) return;
+                    if (!retried) return this.save(andNext, true);
+                    this.messageService.add({ severity: 'error', summary: 'บันทึกไม่สำเร็จ', detail: 'มีการแก้ไขเคสนี้พร้อมกัน กรุณาลองใหม่', life: 6000 });
+                    return;
+                }
                 // A 400 is the server refusing the data - queueing it would
                 // retry the same rejection forever. Only a transport failure
                 // is worth holding on to.

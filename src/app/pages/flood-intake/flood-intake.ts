@@ -6,6 +6,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
+import { FloatLabelModule } from 'primeng/floatlabel';
 import { IconFieldModule } from 'primeng/iconfield';
 import { InputIconModule } from 'primeng/inputicon';
 import { InputTextModule } from 'primeng/inputtext';
@@ -15,13 +16,20 @@ import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { ToastModule } from 'primeng/toast';
 import { TooltipModule } from 'primeng/tooltip';
+import { groupByRecent, prependRecent } from '../../shared/recent-picks';
 import { parseIsoDate, toBuddhistYear } from '../dashboardclone/services/date-utils';
 import { FloodCaseFormDrawer } from './components/flood-case-form-drawer';
+import { FloodColumnSettings } from './components/flood-column-settings';
 import { FloodDateFilter } from './components/flood-date-filter';
-import { FloodCase, FloodTab } from './flood-intake.types';
+import { FloodAgent, FloodCase, FloodSortOrder, FloodTab } from './flood-intake.types';
 import { FloodApiService } from './services/flood-api.service';
+import { FloodColumnsService } from './services/flood-columns.service';
 import { FloodDataService } from './services/flood-data.service';
 import { FloodDraftService } from './services/flood-draft.service';
+import { TruncateTooltipDirective } from '../../shared/truncate-tooltip.directive';
+import { OpenBelowDirective } from '../../shared/open-below.directive';
+// Header drag-to-reorder is off for now - see the <p-table> in the template.
+// import { ReorderableColumnFixDirective } from '../../shared/reorderable-column-fix.directive';
 
 interface TabDefinition {
     key: FloodTab;
@@ -47,14 +55,26 @@ const OUTBOX_RETRY_MS = 20_000;
         IconFieldModule,
         InputIconModule,
         SelectModule,
+        FloatLabelModule,
         ToastModule,
         TooltipModule,
+        TruncateTooltipDirective,
+        OpenBelowDirective,
+        // ReorderableColumnFixDirective,
         FloodCaseFormDrawer,
+        FloodColumnSettings,
         FloodDateFilter
     ],
-    providers: [FloodDataService, FloodDraftService, MessageService, ConfirmationService],
+    providers: [FloodDataService, FloodDraftService, FloodColumnsService, MessageService, ConfirmationService],
     styles: [
         `
+            /* The header's ↻ for the date filter: a small round icon button is
+               taller than the text line it sits in, and would push everything
+               below down whenever a date is applied. */
+            :host ::ng-deep .date-reset {
+                margin-block: -0.5rem;
+            }
+
             /* Scoped to this component, never global: the operators scan this
                table for a duplicate while still on the phone, so it has to show
                8-10 rows on one screen. PrimeNG's default cell padding shows
@@ -76,14 +96,40 @@ const OUTBOX_RETRY_MS = 20_000;
                 white-space: nowrap;
             }
 
+            /* The arrows above and below the gap a dragged header will drop
+               into. PrimeNG's 1rem icon crowded the short header row. It
+               measures the arrows on every dragstart to place them, so they
+               stay centred on the gap at this size. */
+            // :host ::ng-deep .flood-table .p-datatable-row-reorder-indicator-up .p-icon,
+            // :host ::ng-deep .flood-table .p-datatable-row-reorder-indicator-down .p-icon {
+            //     width: 0.35rem;
+            //     height: 0.35rem;
+            // }
+
+            // /* The top arrow, raised a little off the header's top edge, which
+            //    PrimeNG sits 1px into. PrimeNG sets its top inline on every
+            //    drag, so the margin adds to that instead of fighting it. The
+            //    z-index keeps it drawn over the header cells; 1 is enough there
+            //    and stays under the topbar when the page is scrolled. */
+            // :host ::ng-deep .flood-table .p-datatable-row-reorder-indicator-up {
+            //     margin-top: -0.25rem;
+            //     z-index: 1;
+            // }
+
             /* The longest field on the row. One line, then an ellipsis - the
-               full text is one click away in the drawer, and letting it wrap
+               full text is in a tooltip and the drawer, and letting it wrap
                freely is what costs the other six rows. The unit line below it
-               gets the same treatment so the cell never exceeds two rows. */
+               gets the same treatment so the cell never exceeds two rows.
+
+               padding-block / margin-block: room for Thai marks inside the
+               clip without changing the row - see "Thai marks and clipped
+               text" in layout/_utils.scss. */
             .clamp-1 {
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                padding-block: 0.4em;
+                margin-block: -0.4em;
             }
 
             /* Auto table layout sizes a column to its widest nowrap content,
@@ -92,6 +138,52 @@ const OUTBOX_RETRY_MS = 20_000;
                the header's min-width plus its share of the free space. */
             .clamp-cell {
                 max-width: 0;
+            }
+
+            /* The เจ้าหน้าที่รับแจ้ง filter's list, exactly as wide as the
+               field (w-52, 13rem) rather than growing to its longest name;
+               a name that does not fit ends in an ellipsis. Pure CSS so
+               PrimeNG's own positioning is untouched. The list renders
+               inside the select (no appendTo), so :host reaches it.
+
+               > span: PrimeNG renders the option text in a bare flex-item
+               span, which will not shrink below its text without
+               min-width: 0. padding-block / margin-block as on .clamp-1. */
+            /* Where a filter's list starts out, in the moment between
+               PrimeNG inserting it and positioning it. It renders inside the
+               select, and until PrimeNG writes its left it sits at its static
+               position - the select's right end - so a list wider than the
+               room past that end sticks out of the screen for that moment
+               (เจ้าหน้าที่รับแจ้ง, เรียงลำดับข้อมูล on a phone). A phone
+               browser answers an overflowing page by zooming it out, which
+               shortens how far the page can scroll: scrolled down, the page
+               was pulled up by up to ~120px each time the list opened.
+               Starting it at the select's left edge keeps it on screen;
+               PrimeNG's own inline left replaces this once it places the
+               list. */
+            :host ::ng-deep .p-select > p-overlay > .p-overlay {
+                inset-inline-start: 0;
+            }
+
+            :host ::ng-deep .p-select-overlay.agent-filter-panel {
+                width: 13rem;
+            }
+            :host ::ng-deep .agent-filter-panel .p-select-option > span {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                padding-block: 0.4em;
+                margin-block: -0.4em;
+            }
+
+            /* Short values that must never wrap: the column widens to fit
+               instead. A full age ("123 ปี 11 เดือน 30 วัน") is wider than
+               its column's min-width and would otherwise break onto a third
+               line, which the fixed row height cannot hold. Not an ellipsis
+               like .clamp-1 - an age or a name cut short is a wrong one. */
+            .cell-nowrap {
+                white-space: nowrap;
             }
 
             .cell-sub {
@@ -144,12 +236,45 @@ const OUTBOX_RETRY_MS = 20_000;
             <div class="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
                     <div class="font-semibold text-xl">รับแจ้งขอความช่วยเหลืออุทกภัย</div>
-                    <div class="text-sm text-surface-500 dark:text-surface-400 mt-1 flex items-center gap-1">
+                    <div class="text-sm text-surface-500 dark:text-surface-400 mt-1 flex flex-wrap items-center gap-x-1">
                         <span>วันปฏิบัติการ</span>
                         @if (dataService.context(); as ctx) {
                             <span>{{ formatDay(ctx.operational_day) }} · เวร{{ ctx.shift_label }}</span>
                         } @else {
                             <p-skeleton width="9.5rem" height="0.875rem" />
+                        }
+                        <!-- What the date filter is set to. The วันที่ button
+                             keeps its label so the filter row never reflows;
+                             the day and shift before this stay, since the
+                             วันนี้ / เวรนี้ tabs count from them. The ↻ clears
+                             the dates only - ล้างตัวกรอง clears everything. -->
+                        @if (dateFilter.summary() ?? clearingDates(); as dates) {
+                            <!-- Its own line on a phone, where it would wrap
+                                 anyway - and there without the joining dot,
+                                 which would otherwise start the line. -->
+                            <span class="inline-flex items-center gap-1 basis-full sm:basis-auto">
+                                <!-- "เฉพาะ" and the amber of /report/dashboard's
+                                     back-dated line mark it as a filter on the
+                                     table, not a second "today" beside the
+                                     grey context before it. -->
+                                <span
+                                    ><span class="hidden sm:inline">· </span
+                                    ><span class="text-amber-600 dark:text-amber-400 font-medium">แสดงเฉพาะวันที่ {{ dates }}</span></span
+                                >
+                                <p-button
+                                    icon="pi pi-refresh"
+                                    severity="warn"
+                                    [text]="true"
+                                    [rounded]="true"
+                                    size="small"
+                                    ariaLabel="ล้างวันที่"
+                                    pTooltip="ล้างวันที่"
+                                    tooltipPosition="bottom"
+                                    styleClass="date-reset"
+                                    [loading]="!!clearingDates()"
+                                    (onClick)="clearDates()"
+                                />
+                            </span>
                         }
                     </div>
                 </div>
@@ -158,6 +283,7 @@ const OUTBOX_RETRY_MS = 20_000;
                      call is the darkest and sits furthest right, where the
                      hand already is. -->
                 <div class="flex items-center gap-2">
+                    <flood-column-settings />
                     <button
                         pButton
                         type="button"
@@ -192,53 +318,130 @@ const OUTBOX_RETRY_MS = 20_000;
                         #searchInput
                         pInputText
                         type="text"
-                        class="w-full"
+                        class="w-full thai-input"
                         placeholder="ค้นหา เบอร์โทร ตำบล ผู้แจ้ง อาการ หน่วยปฏิบัติ"
                         [ngModel]="dataService.filters().search"
                         (ngModelChange)="dataService.setSearch($event)"
                     />
+                    <!-- Same × as the drawer's text fields: only while there
+                         is something to clear, and focus stays in the box so
+                         the next search can be typed straight away. -->
+                    @if (dataService.filters().search) {
+                        <p-inputicon class="pi pi-times cursor-pointer" (click)="dataService.setSearch(''); searchInput.focus()" />
+                    }
                 </p-iconfield>
 
-                <flood-date-filter />
+                <flood-date-filter #dateFilter />
 
-                <p-select
-                    [ngModel]="dataService.filters().districtCode"
-                    (ngModelChange)="dataService.setDistrict($event)"
-                    [options]="dataService.districtOptions()"
-                    optionLabel="label"
-                    optionValue="value"
-                    placeholder="อำเภอ"
-                    [showClear]="true"
-                    [filter]="true"
-                    [resetFilterOnHide]="true"
-                    filterBy="label"
-                    styleClass="w-40"
-                />
+                <!-- Never empty: newest first is the default, and ล้างตัวกรอง
+                     puts it back. -->
+                <p-floatlabel variant="on">
+                    <p-select
+                        openBelow
+                        inputId="flood_order"
+                        [ngModel]="dataService.filters().order"
+                        (ngModelChange)="dataService.setOrder($event)"
+                        [options]="orderOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        styleClass="w-44"
+                    />
+                    <label for="flood_order">เรียงลำดับข้อมูล</label>
+                </p-floatlabel>
 
-                <p-select
-                    [ngModel]="dataService.filters().shift"
-                    (ngModelChange)="dataService.setShift($event)"
-                    [options]="dataService.shifts()"
-                    optionLabel="label"
-                    optionValue="code"
-                    placeholder="เวร"
-                    [showClear]="true"
-                    styleClass="w-32"
-                />
+                <p-floatlabel variant="on">
+                    <p-select
+                        openBelow
+                        inputId="flood_district"
+                        [ngModel]="dataService.filters().districtCode"
+                        (ngModelChange)="dataService.setDistrict($event)"
+                        [options]="districtGroups()"
+                        [group]="true"
+                        optionGroupLabel="label"
+                        optionGroupChildren="items"
+                        optionLabel="label"
+                        optionValue="value"
+                        [showClear]="true"
+                        [filter]="true"
+                        [resetFilterOnHide]="true"
+                        filterBy="label"
+                        styleClass="w-40"
+                    />
+                    <label for="flood_district">อำเภอ</label>
+                </p-floatlabel>
 
-                <p-select
-                    [ngModel]="dataService.filters().agentId"
-                    (ngModelChange)="dataService.setAgent($event)"
-                    [options]="dataService.agents()"
-                    optionLabel="agent_name"
-                    optionValue="agent_id"
-                    placeholder="เจ้าหน้าที่รับแจ้ง"
-                    [showClear]="true"
-                    [filter]="true"
-                    [resetFilterOnHide]="true"
-                    filterBy="agent_name"
-                    styleClass="w-52"
-                />
+                <!-- Narrowed to the chosen amphoe; with none it lists every
+                     tambon under its amphoe's header and picking one fills
+                     the amphoe in - the same pair behaviour as the drawer. -->
+                <p-floatlabel variant="on">
+                    <p-select
+                        openBelow
+                        inputId="flood_subdistrict"
+                        [ngModel]="dataService.filters().subdistrictCode"
+                        (ngModelChange)="dataService.setSubdistrict($event)"
+                        [options]="subdistrictGroups()"
+                        [group]="true"
+                        optionGroupLabel="label"
+                        optionGroupChildren="items"
+                        optionLabel="label"
+                        optionValue="value"
+                        [showClear]="true"
+                        [filter]="true"
+                        [resetFilterOnHide]="true"
+                        filterBy="label"
+                        styleClass="w-40"
+                    />
+                    <label for="flood_subdistrict">ตำบล</label>
+                </p-floatlabel>
+
+                <p-floatlabel variant="on">
+                    <p-select
+                        openBelow
+                        inputId="flood_shift"
+                        [ngModel]="dataService.filters().shift"
+                        (ngModelChange)="dataService.setShift($event)"
+                        [options]="dataService.shifts()"
+                        optionLabel="label"
+                        optionValue="code"
+                        [showClear]="true"
+                        styleClass="w-32"
+                    />
+                    <label for="flood_shift">เวร</label>
+                </p-floatlabel>
+
+                <p-floatlabel variant="on">
+                    <p-select
+                        openBelow
+                        inputId="flood_agent"
+                        [ngModel]="dataService.filters().agentId"
+                        (ngModelChange)="dataService.setAgent($event)"
+                        [options]="agentGroups()"
+                        [group]="true"
+                        optionGroupLabel="label"
+                        optionGroupChildren="items"
+                        optionLabel="agent_name"
+                        optionValue="agent_id"
+                        [showClear]="true"
+                        [filter]="true"
+                        [resetFilterOnHide]="true"
+                        filterBy="agent_name"
+                        styleClass="w-52"
+                        panelStyleClass="agent-filter-panel"
+                    >
+                        <!-- Same bare span PrimeNG renders (.agent-filter-panel cuts
+                             it), plus the tooltip for a name that does not fit. -->
+                        <ng-template #item let-option>
+                            <span [appTruncateTooltip]="option.agent_name">{{ option.agent_name }}</span>
+                        </ng-template>
+                        <!-- The chosen name in the closed field: same ellipsis as
+                             PrimeNG's own, plus the tooltip when it is cut
+                             (.select-value, layout/_utils.scss). -->
+                        <ng-template #selectedItem let-option>
+                            <span class="select-value" [appTruncateTooltip]="option.agent_name">{{ option.agent_name }}</span>
+                        </ng-template>
+                    </p-select>
+                    <label for="flood_agent">เจ้าหน้าที่รับแจ้ง</label>
+                </p-floatlabel>
 
                 <!-- Always in the row and always live, so the controls do not
                      shift when the first filter is set and a click never has
@@ -321,16 +524,25 @@ const OUTBOX_RETRY_MS = 20_000;
                 currentPageReportTemplate="แสดง {first} - {last} จาก {totalRecords} เคส"
                 responsiveLayout="scroll"
             >
+                <!-- Header drag-to-reorder is off for now: the order is
+                     changed in the ตั้งค่าคอลัมน์ popover only. To turn it
+                     back on, put these two back on <p-table> above:
+                         [reorderableColumns]="true"
+                         (onColReorder)="columns.moveVisible($event.dragIndex!, $event.dropIndex!)"
+                     and pReorderableColumn back on the <th> below, and
+                     uncomment ReorderableColumnFixDirective in the imports. -->
                 <ng-template #header>
                     <tr>
                         <th style="width: 3rem">
                             <p-tableHeaderCheckbox />
                         </th>
                         <th style="width: 4rem">ลำดับ</th>
-                        <th style="min-width: 8rem">เวลา / วันที่</th>
-                        <th style="min-width: 10rem">อำเภอ / ตำบล</th>
-                        <th style="min-width: 10rem">ผู้แจ้ง</th>
-                        <th style="min-width: 18rem">อาการสำคัญ</th>
+                        <!-- Only these can be dragged or dropped on; the drop
+                             lands in the same saved order as the settings list. -->
+                        @for (column of columns.visible(); track column.key) {
+                            <!-- <th pReorderableColumn [style.min-width]="column.minWidth">{{ column.label }}</th> -->
+                            <th [style.min-width]="column.minWidth">{{ column.label }}</th>
+                        }
                         <th style="min-width: 8rem">สถานะ</th>
                         <th style="width: 6rem">จัดการ</th>
                     </tr>
@@ -341,10 +553,9 @@ const OUTBOX_RETRY_MS = 20_000;
                         <tr>
                             <td><p-skeleton width="1.2rem" /></td>
                             <td><p-skeleton width="1.5rem" /></td>
-                            <td><p-skeleton width="min(5rem, 80%)" /></td>
-                            <td><p-skeleton width="min(7rem, 80%)" /></td>
-                            <td><p-skeleton width="min(7rem, 80%)" /></td>
-                            <td><p-skeleton width="min(16rem, 90%)" /></td>
+                            @for (column of columns.visible(); track column.key) {
+                                <td><p-skeleton [width]="column.skeletonWidth" /></td>
+                            }
                             <td><p-skeleton width="min(5rem, 80%)" /></td>
                             <td><p-skeleton width="2rem" /></td>
                         </tr>
@@ -360,27 +571,81 @@ const OUTBOX_RETRY_MS = 20_000;
                                  two operators were saving at the same moment. -->
                             <td class="tabular text-surface-500">{{ dataService.offset() + rowIndex + 1 }}</td>
 
-                            <td>
-                                <div class="tabular">{{ item.time }}</div>
-                                <div class="cell-sub tabular">{{ formatDay(item.date) }}</div>
-                            </td>
-
-                            <td>
-                                <div>{{ item.district_name }}</div>
-                                <div class="cell-sub">ต.{{ item.subdistrict_name }}</div>
-                            </td>
-
-                            <td>
-                                <div>{{ item.reporter || '-' }}</div>
-                                <div class="cell-sub tabular">{{ item.phone_display || '-' }}</div>
-                            </td>
-
-                            <td class="clamp-cell">
-                                <div class="clamp-1">{{ item.chief_complaint }}</div>
-                                @if (item.operating_unit) {
-                                    <div class="cell-sub clamp-1">หน่วย: {{ item.operating_unit }}</div>
+                            <!-- Chosen per browser in flood-column-settings.
+                                 A pair is two lines at most, as the fixed row
+                                 height needs; long text is one line and an
+                                 ellipsis - the drawer has the rest. -->
+                            @for (column of columns.visible(); track column.key) {
+                                @switch (column.key) {
+                                    @case ('time') {
+                                        <td>
+                                            <div class="tabular">{{ item.time }}</div>
+                                            <div class="cell-sub tabular">{{ formatDay(item.date) }}</div>
+                                        </td>
+                                    }
+                                    @case ('area') {
+                                        <td>
+                                            <div>{{ item.subdistrict_name }}</div>
+                                            <div class="cell-sub">อ.{{ item.district_name }}</div>
+                                        </td>
+                                    }
+                                    @case ('location') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.location_note">{{ item.location_note || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('reporter') {
+                                        <!-- The reporter is free text and can run
+                                             long; it gets the ellipsis, the phone
+                                             never does - at most 11 characters,
+                                             well inside the column's min-width. -->
+                                        <td class="clamp-cell">
+                                            <div class="tabular">{{ item.phone_display || '-' }}</div>
+                                            <div class="cell-sub clamp-1" [appTruncateTooltip]="item.reporter">{{ item.reporter || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('complaint') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.chief_complaint">{{ item.chief_complaint || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('unit') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.operating_unit">{{ item.operating_unit || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('shift') {
+                                        <td>{{ item.shift_label || '-' }}</td>
+                                    }
+                                    @case ('agent') {
+                                        <td class="cell-nowrap">
+                                            <div>{{ item.agent_name || '-' }}</div>
+                                            <div class="cell-sub">{{ item.channel_label || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('patient') {
+                                        <td class="cell-nowrap">
+                                            <div>{{ ageText(item) }}</div>
+                                            <div class="cell-sub">{{ item.gender_label || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('ddpm') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.ddpm_coordination">{{ item.ddpm_coordination || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('assistance') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.assistance">{{ item.assistance || '-' }}</div>
+                                        </td>
+                                    }
+                                    @case ('remarks') {
+                                        <td class="clamp-cell">
+                                            <div class="clamp-1" [appTruncateTooltip]="item.remarks">{{ item.remarks || '-' }}</div>
+                                        </td>
+                                    }
                                 }
-                            </td>
+                            }
 
                             <td>
                                 <p-tag
@@ -410,7 +675,8 @@ const OUTBOX_RETRY_MS = 20_000;
 
                 <ng-template #emptymessage>
                     <tr>
-                        <td colspan="8" class="text-center py-6 text-surface-500">
+                        <!-- The four fixed columns plus whatever is shown. -->
+                        <td [attr.colspan]="columns.visible().length + 4" class="text-center py-6 text-surface-500">
                             @if (dataService.hasActiveFilters()) {
                                 ไม่พบเคสที่ตรงกับตัวกรอง
                             } @else {
@@ -433,6 +699,7 @@ const OUTBOX_RETRY_MS = 20_000;
 export class FloodIntakeComponent implements OnInit, OnDestroy {
     readonly dataService = inject(FloodDataService);
     readonly drafts = inject(FloodDraftService);
+    readonly columns = inject(FloodColumnsService);
     private readonly api = inject(FloodApiService);
     private readonly messageService = inject(MessageService);
     private readonly router = inject(Router);
@@ -445,20 +712,61 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
         initialValue: null
     });
 
+    // Sectioned like the drawer's dropdowns, from the same per-browser
+    // shortlists: the names and areas this console records calls under are
+    // the ones it filters by.
+    readonly agentGroups = computed(() =>
+        groupByRecent<FloodAgent>(this.dataService.agents(), this.drafts.recentOf('agent'), (a) => a.agent_id)
+    );
+
+    readonly districtGroups = computed(() =>
+        groupByRecent(this.dataService.districtOptions(), this.drafts.recentOf('district'), (o) => o.value)
+    );
+
+    // Grouped by amphoe as in the drawer: with no amphoe chosen the header is
+    // what tells two tambon of the same name apart.
+    readonly subdistrictGroups = computed(() =>
+        prependRecent(
+            this.dataService.subdistrictGroupsFor(this.dataService.filters().districtCode),
+            this.drafts.recentOf('subdistrict'),
+            (o) => o.value
+        )
+    );
+
     private readonly searchInput = viewChild<any>('searchInput');
     private readonly drawer = viewChild(FloodCaseFormDrawer);
+    private readonly dateFilterRef = viewChild.required(FloodDateFilter);
+
+    // The header's date line while its ↻ is clearing it: kept on screen, with
+    // the ↻ spinning, until the table has reloaded without the dates - the
+    // same wait the report pages' ↻ shows - rather than vanishing on the
+    // click while the table is still loading.
+    readonly clearingDates = signal<string | null>(null);
+
+    clearDates(): void {
+        if (this.clearingDates()) return;
+        this.clearingDates.set(this.dateFilterRef().summary());
+        this.dateFilterRef().clear();
+    }
 
     /** For the route guard: may the open drawer, if any, be discarded? */
     canLeave(): Promise<boolean> {
         return this.drawer()?.confirmDiscard() ?? Promise.resolve(true);
     }
 
+    // วันนี้ and เวรนี้ last: they are the pair that drops out (visibleTabs),
+    // so the tabs that always stay keep their places when they go.
     readonly tabs: TabDefinition[] = [
         { key: 'all', label: 'ทั้งหมด' },
-        { key: 'today', label: 'วันนี้' },
-        { key: 'current_shift', label: 'เวรนี้' },
         { key: 'pending', label: 'ยังไม่สำเร็จ' },
-        { key: 'success', label: 'สำเร็จ' }
+        { key: 'success', label: 'สำเร็จ' },
+        { key: 'today', label: 'วันนี้' },
+        { key: 'current_shift', label: 'เวรนี้' }
+    ];
+
+    readonly orderOptions: { label: string; value: FloodSortOrder }[] = [
+        { label: 'ใหม่ > เก่า', value: 'desc' },
+        { label: 'เก่า > ใหม่', value: 'asc' }
     ];
 
     // "วันนี้" and "เวรนี้" are live-event views. They go when the server says
@@ -479,6 +787,12 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
     private readonly onlineHandler = () => this.flushOutbox();
 
     constructor() {
+        // The reload a ↻ started has landed (or there was nothing to reload):
+        // the date line can go.
+        effect(() => {
+            if (this.clearingDates() && !this.dataService.loading()) this.clearingDates.set(null);
+        });
+
         // A row that disappears from the stream (somebody else deleted or
         // filtered it away) must not stay selected, or a bulk update would
         // act on a case no longer on screen.
@@ -594,6 +908,15 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
         const day = `${date.getDate()}`.padStart(2, '0');
         const month = `${date.getMonth() + 1}`.padStart(2, '0');
         return `${day}/${month}/${toBuddhistYear(date)}`;
+    }
+
+    // The server's age_label is a bare "45" when only years were recorded -
+    // on purpose, so the export matches the old spreadsheet. A table column
+    // headed "อายุ / เพศ" needs the unit, so it is added here only; labels
+    // with months or days already carry their words.
+    ageText(item: FloodCase): string {
+        if (item.age === null) return '-';
+        return item.age_months === null ? `${item.age} ปี` : item.age_label || '-';
     }
 
     // The drawer is addressed by query parameter so a refresh keeps the case

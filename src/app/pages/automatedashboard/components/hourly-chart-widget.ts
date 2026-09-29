@@ -6,6 +6,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { HourlyDataService } from '../services/hourly-data.service';
 import { HourlyBucket } from '../call-stats.types';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 /** True when two payloads describe the same 24 hours.
  *
@@ -47,13 +48,13 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
 @Component({
     standalone: true,
     selector: 'app-hourly-chart',
-    imports: [ChartModule, SkeletonModule, ButtonModule, TooltipModule],
+    imports: [ChartModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <div class="flex items-baseline gap-2 min-w-0">
                 <div class="font-semibold text-xl">สถิติจำนวนการใช้บริการตามเวลา</div>
                 @if (enabled() && health()) {
-                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
+                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate" [appTruncateTooltip]="health()">{{ health() }}</span>
                 }
             </div>
             <!-- Same switch as the two tables below, and since the chart got a
@@ -340,6 +341,14 @@ export class HourlyChartWidget {
                 },
                 tooltip: {
                     callbacks: {
+                        // The whole hour, "14:00–14:59 น.", rather than the
+                        // axis's "14:00" - the same as /report/summary's
+                        // สถิติจำนวนเหตุการณ์ตามเวลา. Read off the item's own
+                        // label, so these options need no data of their own.
+                        title: (items: any[]) => {
+                            const hour = String(items[0]?.label ?? '').slice(0, 2);
+                            return hour ? `${hour}:00–${hour}:59 น.` : '';
+                        },
                         // The total is the one number the stack does not state
                         // outright, and it is the headline for the hour.
                         footer: (items: any[]) => `สายเข้าทั้งหมด ${items.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0)}`

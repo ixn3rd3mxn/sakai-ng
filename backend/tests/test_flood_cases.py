@@ -653,6 +653,21 @@ def test_list_orders_newest_first_and_numbers_nothing():
     assert all("seq" not in c for c in result["cases"])
 
 
+def test_oldest_first_is_sorted_before_the_limit_not_after():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [
+        _case(reported_at=datetime(2025, 11, 23, 10, 0)),
+        _case(reported_at=datetime(2025, 11, 23, 12, 0)),
+        _case(reported_at=datetime(2025, 11, 23, 9, 0)),
+    ])
+    result = fc.list_cases(fc.CaseFilters(order=fc.ORDER_ASC, limit=2), now=NOW)
+    assert [c["time"] for c in result["cases"]] == ["09.00", "10.00"]
+    # Anything but "asc" is the default, never an error.
+    result = fc.list_cases(fc.CaseFilters(order="sideways"), now=NOW)
+    assert [c["time"] for c in result["cases"]] == ["12.00", "10.00", "09.00"]
+
+
 def test_every_filter_narrows_and_the_count_follows():
     setup()
     col = _use_fake_collection()
@@ -664,6 +679,11 @@ def test_every_filter_narrows_and_the_count_follows():
     assert fc.list_cases(fc.CaseFilters(), now=NOW)["total"] == 3
     assert fc.list_cases(fc.CaseFilters(district_code="9401"), now=NOW)["total"] == 2
     assert fc.list_cases(fc.CaseFilters(district_code="9402"), now=NOW)["total"] == 1
+    assert fc.list_cases(fc.CaseFilters(subdistrict_code="940110"), now=NOW)["total"] == 1
+    assert fc.list_cases(fc.CaseFilters(district_code="9401", subdistrict_code="940106"), now=NOW)["total"] == 1
+    # A tambon from another amphoe, or an unknown code: nothing, never everything.
+    assert fc.list_cases(fc.CaseFilters(district_code="9402", subdistrict_code="940110"), now=NOW)["total"] == 0
+    assert fc.list_cases(fc.CaseFilters(subdistrict_code="000000"), now=NOW)["total"] == 0
     assert fc.list_cases(fc.CaseFilters(status="สำเร็จ"), now=NOW)["total"] == 1
     assert fc.list_cases(fc.CaseFilters(tab=fc.TAB_PENDING), now=NOW)["total"] == 2
 
@@ -1100,6 +1120,96 @@ def test_the_update_model_tells_absent_from_null():
     body = FloodCaseUpdateIn(remarks=None)
     assert body.model_dump(exclude_unset=True) == {"remarks": None}
     assert FloodCaseUpdateIn().model_dump(exclude_unset=True) == {}
+
+
+# --- two hands on one field ---------------------------------------------------
+
+
+def test_a_field_changed_since_the_form_loaded_is_refused_not_overwritten():
+    # Both open the case at "1". A saves "123"; B, still holding "1" as the
+    # starting point, saves "12". B's save must not erase A's.
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(chief_complaint="1")])
+    case_id = col.docs[0]["case_id"]
+
+    fc.apply_update(case_id, {"chief_complaint": "123"}, base={"chief_complaint": "1"}, now=NOW)
+    conflict = _raises(fc.apply_update, case_id, {"chief_complaint": "12"}, base={"chief_complaint": "1"}, now=NOW)
+    assert isinstance(conflict, fc.FloodCaseConflict)
+    assert conflict.fields == ["อาการสำคัญ / รายละเอียด"]
+    assert conflict.case["chief_complaint"] == "123"
+    assert col.docs[0]["chief_complaint"] == "123"
+
+    # B has now seen "123" and chosen to keep "12": that save goes through.
+    fc.apply_update(case_id, {"chief_complaint": "12"}, base={"chief_complaint": "123"}, now=NOW)
+    assert col.docs[0]["chief_complaint"] == "12"
+
+
+def test_a_stale_base_on_a_field_nobody_else_touched_is_no_conflict():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(remarks="เดิม")])
+    case_id = col.docs[0]["case_id"]
+
+    fc.apply_update(case_id, {"assistance": "ขนย้ายแล้ว"}, base={"assistance": None}, now=NOW)
+    fc.apply_update(case_id, {"remarks": "ใหม่"}, base={"remarks": "เดิม"}, now=NOW)
+    assert (col.docs[0]["assistance"], col.docs[0]["remarks"]) == ("ขนย้ายแล้ว", "ใหม่")
+
+
+def test_both_hands_typing_the_same_value_is_no_conflict():
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(chief_complaint="1")])
+    case_id = col.docs[0]["case_id"]
+    fc.apply_update(case_id, {"chief_complaint": "123"}, base={"chief_complaint": "1"}, now=NOW)
+    fc.apply_update(case_id, {"chief_complaint": " 123 "}, base={"chief_complaint": "1"}, now=NOW)
+    assert col.docs[0]["chief_complaint"] == "123"
+
+
+def test_the_base_is_compared_as_the_form_shows_it():
+    # Stored with seconds and phone digits; the form knows whole minutes and
+    # the formatted number. Neither is a change by someone else.
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(reported_at=datetime(2025, 11, 23, 12, 0, 37), phone="0812345678")])
+    case_id = col.docs[0]["case_id"]
+    fc.apply_update(
+        case_id,
+        {"reported_at": datetime(2025, 11, 23, 12, 5), "phone": "0899999999"},
+        base={"reported_at": datetime(2025, 11, 23, 12, 0), "phone": "081-234-5678"},
+        now=NOW,
+    )
+    assert col.docs[0]["reported_at"] == datetime(2025, 11, 23, 12, 5)
+    assert col.docs[0]["phone"] == "0899999999"
+
+
+def test_a_save_landing_between_the_check_and_the_write_is_caught():
+    # A's write lands after B's save has read the case but before B writes.
+    # B's write must not go through on the copy it checked.
+    setup()
+    col = _use_fake_collection()
+    _seed(col, [_case(chief_complaint="1")])
+    case_id = col.docs[0]["case_id"]
+
+    real_update = col.update_one
+
+    def a_gets_there_first(query, update):
+        col.update_one = real_update
+        real_update({"case_id": case_id}, {"$set": {"chief_complaint": "123", "updated_at": NOW + timedelta(seconds=1)}})
+        return real_update(query, update)
+
+    col.update_one = a_gets_there_first
+    conflict = _raises(fc.apply_update, case_id, {"chief_complaint": "12"}, base={"chief_complaint": "1"}, now=NOW)
+    assert isinstance(conflict, fc.FloodCaseConflict)
+    assert col.docs[0]["chief_complaint"] == "123"
+
+
+def test_the_update_model_carries_the_base_apart_from_the_fields():
+    from libs.models import FloodCaseUpdateIn
+    body = FloodCaseUpdateIn(chief_complaint="12", base={"chief_complaint": "1"})
+    payload = body.model_dump(exclude_unset=True)
+    assert payload.pop("base") == {"chief_complaint": "1"}
+    assert payload == {"chief_complaint": "12"}
 
 
 # --- export -----------------------------------------------------------------

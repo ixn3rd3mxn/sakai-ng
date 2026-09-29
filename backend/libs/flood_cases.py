@@ -92,6 +92,18 @@ class FloodCaseError(ValueError):
     """
 
 
+class FloodCaseConflict(Exception):
+    """An edit would overwrite a field someone else changed after the sender
+    loaded the case. Carries the case as stored now, so the sender can fold
+    it in and let the operator choose, and the labels of the fields that
+    collided."""
+
+    def __init__(self, case: dict, fields: list[str]):
+        super().__init__("มีคนอื่นแก้ไขเคสนี้ก่อน")
+        self.case = case
+        self.fields = fields
+
+
 # --- field normalisation ----------------------------------------------------
 
 _NON_DIGITS = re.compile(r"\D")
@@ -397,6 +409,11 @@ TAB_PENDING = "pending"
 TAB_SUCCESS = "success"
 TABS: tuple[str, ...] = (TAB_ALL, TAB_TODAY, TAB_CURRENT_SHIFT, TAB_PENDING, TAB_SUCCESS)
 
+# Which way the table runs by time. Newest first is the default: an operator
+# on a call is looking for what just came in.
+ORDER_DESC = "desc"
+ORDER_ASC = "asc"
+
 # The table sends the whole filtered set to the browser and paginates there,
 # so the "ลำดับ" column can be a plain array index - continuous across pages
 # and restarting at 1 whenever the filter changes, which is the entire reason
@@ -437,10 +454,12 @@ class CaseFilters:
     # come from one control that is in one mode at a time.
     dates: Optional[list[date_cls]] = None
     district_code: Optional[str] = None
+    subdistrict_code: Optional[str] = None
     shift: Optional[str] = None
     agent_id: Optional[str] = None
     status: Optional[str] = None
     search: Optional[str] = None
+    order: str = ORDER_DESC
     limit: int = DEFAULT_LIMIT
     offset: int = 0
 
@@ -453,10 +472,12 @@ class CaseFilters:
             date_to=self.date_to,
             dates=sorted(set(self.dates)) if self.dates else None,
             district_code=_clean_text(self.district_code) or None,
+            subdistrict_code=_clean_text(self.subdistrict_code) or None,
             shift=_clean_text(self.shift) or None,
             agent_id=_clean_text(self.agent_id) or None,
             status=_clean_text(self.status) or None,
             search=_clean_text(self.search) or None,
+            order=ORDER_ASC if self.order == ORDER_ASC else ORDER_DESC,
             limit=limit,
             offset=max(0, int(self.offset or 0)),
         )
@@ -533,6 +554,10 @@ def build_query(filters: CaseFilters, *, now: Optional[datetime] = None) -> dict
         # The filter arrives as the official code; the document holds the id.
         # -1 for an unknown code: match nothing, never everything.
         query["district_id"] = flood_lookups.district_id_for_code(filters.district_code) or -1
+    if filters.subdistrict_code:
+        # Same code-to-id step. Applied alongside the amphoe, never instead
+        # of it: a tambon from another amphoe matches nothing.
+        query["subdistrict_id"] = flood_lookups.subdistrict_id_for_code(filters.subdistrict_code) or -1
     if filters.shift:
         query["shift"] = resolve_shift(filters.shift, now)
     if filters.agent_id:
@@ -639,10 +664,13 @@ def list_cases(filters: CaseFilters, *, now: Optional[datetime] = None) -> dict:
     query = build_query(filters, now=now)
 
     total = db[COLLECTION].count_documents(query)
+    # Sorted here, not in the browser: past the limit the browser only holds
+    # one end of the set, and "oldest first" has to mean the oldest overall.
+    direction = 1 if filters.order == ORDER_ASC else -1
     cursor = (
         db[COLLECTION]
         .find(query, {"_id": 0})
-        .sort([("reported_at", -1), ("case_id", -1)])
+        .sort([("reported_at", direction), ("case_id", direction)])
         .skip(filters.offset)
         .limit(filters.limit)
     )
@@ -824,7 +852,7 @@ HISTORY_FIELDS: tuple[tuple[str, str], ...] = (
     ("phone_display", "เบอร์โทรศัพท์"),
     ("district_name", "อำเภอ"),
     ("subdistrict_name", "ตำบล"),
-    ("location_note", "พิกัด / จุดสังเกต"),
+    ("location_note", "พิกัด & จุดสังเกต"),
     ("gender_label", "เพศ"),
     ("age_label", "อายุ"),
     ("chief_complaint", "อาการสำคัญ / รายละเอียด"),
@@ -905,7 +933,9 @@ def _existing_as_payload(existing: dict) -> dict:
     return payload
 
 
-def apply_update(case_id: str, payload: dict, *, now: Optional[datetime] = None) -> Optional[dict]:
+def apply_update(
+    case_id: str, payload: dict, *, base: Optional[dict] = None, now: Optional[datetime] = None
+) -> Optional[dict]:
     """Write the fields a form sent - and only those - onto a saved case.
 
     A case is saved early and finished by several hands: one operator fills
@@ -924,42 +954,89 @@ def apply_update(case_id: str, payload: dict, *, now: Optional[datetime] = None)
     re-derived with it so a corrected time cannot leave the case filed under
     the wrong day.
 
+    `base` is what the sender's form started from for those same fields.
+    Two operators who both change one field are a decision, not a race: if
+    a field sent here has been changed by someone else since the sender
+    loaded it, and this save would change it again, `FloodCaseConflict` is
+    raised and nothing is written. The write itself only lands on the copy
+    that check read, so two saves arriving together cannot both pass it.
+
     Returns the case as stored plus the names of the request fields that
     were applied.
     """
     now = now or now_local()
-    existing = db[COLLECTION].find_one({"case_id": case_id})
-    if existing is None:
-        return None
-
     # Only keys actually in the body count as sent - the endpoint dumps the
     # model with exclude_unset, so a null here is a deliberate "clear this".
     sent = set(payload)
+    keys: list[str] = []
+    for fields, stored in UPDATE_GROUPS:
+        if fields & sent:
+            keys.extend(stored)
+    keys.extend(field for field in UPDATE_SINGLE_FIELDS if field in sent)
+
+    # A write that loses the race to another retries on the fresh copy; one
+    # that keeps losing is reported as a conflict rather than looping.
+    for _ in range(3):
+        existing = db[COLLECTION].find_one({"case_id": case_id})
+        if existing is None:
+            return None
+
+        document = build_case_document(_merge_onto(existing, payload), now=now)
+        if not keys:
+            return {"case": serialise_case(existing), "changed": []}
+
+        changes = {key: document[key] for key in keys}
+        if base:
+            seen = build_case_document(_merge_onto(existing, base), now=now)
+            stale = _stale_fields(existing, changes, {key: seen[key] for key in keys})
+            if stale:
+                raise FloodCaseConflict(serialise_case(existing), stale)
+
+        changes["updated_at"] = now
+        stored_now = dict(existing)
+        stored_now.update(changes)
+        entry = history_entry(existing, stored_now, now=now)
+        written = db[COLLECTION].update_one(
+            {"case_id": case_id, "updated_at": existing.get("updated_at")},
+            _with_history({"$set": changes}, entry),
+        )
+        if written.matched_count:
+            return {"case": serialise_case(stored_now), "changed": sorted(sent)}
+
+    latest = db[COLLECTION].find_one({"case_id": case_id})
+    if latest is None:
+        return None
+    raise FloodCaseConflict(serialise_case(latest), [])
+
+
+def _merge_onto(existing: dict, payload: dict) -> dict:
+    """A partial body filled out with the stored case, ready to validate."""
     merged = _existing_as_payload(existing)
     merged.update(payload)
     if not merged.get("reported_at"):
         merged["reported_at"] = existing["reported_at"]
     if merged.get("shift") is None:
         merged["shift"] = existing.get("shift")
+    return merged
 
-    document = build_case_document(merged, now=now)
 
-    keys: list[str] = []
-    for fields, stored in UPDATE_GROUPS:
-        if fields & sent:
-            keys.extend(stored)
-    keys.extend(field for field in UPDATE_SINGLE_FIELDS if field in sent)
-    if not keys:
-        return {"case": serialise_case(existing), "changed": []}
+def _stale_fields(existing: dict, changes: dict, seen: dict) -> list[str]:
+    """Labels of the fields that moved under the sender and would move again.
 
-    changes = {key: document[key] for key in keys}
-    changes["updated_at"] = now
-    stored_now = dict(existing)
-    stored_now.update(changes)
-    entry = history_entry(existing, stored_now, now=now)
-    db[COLLECTION].update_one({"case_id": case_id}, _with_history({"$set": changes}, entry))
-
-    return {"case": serialise_case(stored_now), "changed": sorted(sent)}
+    Compared as the table shows them, the way the history is: a stored
+    instant with seconds against the form's whole minutes, or a phone as
+    typed against its digits, is the same value to everyone reading it.
+    A field the sender is setting to what is already stored is no conflict -
+    both hands agree.
+    """
+    stored = serialise_case(existing)
+    was = serialise_case({**existing, **seen})
+    will = serialise_case({**existing, **changes})
+    return [
+        label
+        for key, label in HISTORY_FIELDS
+        if (was.get(key) or "") != (stored.get(key) or "") and (will.get(key) or "") != (stored.get(key) or "")
+    ]
 
 
 

@@ -1,5 +1,7 @@
 import { Component, OnInit, computed, effect, inject, viewChild } from '@angular/core';
 import { ScrollTopModule } from 'primeng/scrolltop';
+import { ToastModule } from 'primeng/toast';
+import { MessageService } from 'primeng/api';
 import { MultiSelectModule } from 'primeng/multiselect';
 import { Table, TableModule } from 'primeng/table';
 import { SkeletonModule } from 'primeng/skeleton';
@@ -7,12 +9,26 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { IncidentHistoryItem, IncidentStatItem, TopDayItem } from './incident-history.types';
+import { IncidentHistoryItem, IncidentRangeStatItem, IncidentStatItem, TopDayItem } from './incident-history.types';
 import { IncidentHistoryDataService } from './services/incident-history-data.service';
 import { IncidentHistoryDateDial } from './components/incident-history-date-dial';
+import { IncidentRangeTrend } from './components/incident-range-trend';
+import { IncidentHourlyChart } from './components/incident-hourly-chart';
 import { TooltipModule } from 'primeng/tooltip';
-import { formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashboardclone/services/date-utils';
+import { TruncateTooltipDirective } from '../../shared/truncate-tooltip.directive';
+import { formatBuddhistDay, formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashboardclone/services/date-utils';
 import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboardclone/services/page-filler';
+
+// A breakdown-table row in either view: the name plus whichever numeric
+// columns statColumns() lists.
+type StatRow = (IncidentStatItem | IncidentRangeStatItem) & Record<string, string | number>;
+
+// A row of the CBD ranking: the count and its share, e.g. "18.2%".
+interface CbdRankRow {
+    name: string;
+    count: number;
+    share: string;
+}
 
 @Component({
     selector: 'app-incident-history',
@@ -25,11 +41,17 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         FormsModule,
         ButtonModule,
         IncidentHistoryDateDial,
+        IncidentRangeTrend,
+        IncidentHourlyChart,
         TooltipModule,
+        TruncateTooltipDirective,
         ScrollTopModule,
-        SkeletonModule
+        SkeletonModule,
+        ToastModule
     ],
-    providers: [IncidentHistoryDataService],
+    // One toast for the page: the date dial, the header refresh button and
+    // the top-days list all report through it.
+    providers: [IncidentHistoryDataService, MessageService],
     template: `
         <!-- Same header row the dashboard puts above its grid (see
              incident-type-stats-widget.ts): the day being shown, and the
@@ -38,7 +60,23 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
              day-scoped (see incident-history-date-dial.ts). -->
         <div class="flex flex-wrap items-baseline gap-x-2 mb-4">
             <span class="font-semibold text-xl">สรุปผลทั้งหมด</span>
-            @if (!dataService.isCurrent()) {
+            @if (dataService.isRange()) {
+                <!-- Several days or a range: the same warning colour and the
+                     same way back as a back-dated day. -->
+                <span class="text-amber-600 dark:text-amber-400 font-medium"> กำลังดูข้อมูล {{ rangeLabel() }}</span>
+                <p-button
+                    icon="pi pi-refresh"
+                    severity="warn"
+                    [text]="true"
+                    [rounded]="true"
+                    size="small"
+                    pTooltip="กลับไปวันปัจจุบัน"
+                    tooltipPosition="bottom"
+                    ariaLabel="กลับไปวันปัจจุบัน"
+                    [loading]="dataService.loading()"
+                    (onClick)="resetToCurrent()"
+                />
+            } @else if (!dataService.isCurrent()) {
                 <span class="text-amber-600 dark:text-amber-400 font-medium">
                     <span class="hidden lg:inline"> กำลังดูประวัติวันที่ {{ longDate() }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน</span>
                     <span class="lg:hidden"> กำลังดูข้อมูลย้อนหลัง: {{ shortDate() }}</span>
@@ -52,16 +90,43 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                     pTooltip="กลับไปวันปัจจุบัน"
                     tooltipPosition="bottom"
                     ariaLabel="กลับไปวันปัจจุบัน"
-                    (onClick)="dataService.selectCurrent()"
+                    [loading]="dataService.loading()"
+                    (onClick)="resetToCurrent()"
                 />
             } @else {
                 <span class="text-muted-color whitespace-nowrap">{{ longDate() }}</span>
             }
+            <!-- Export is off for now, until someone asks for it. exportCsv()
+                 below is kept whole; to turn it back on, uncomment this:
+            <span class="ml-auto">
+                <p-button label="Export" icon="pi pi-download" [outlined]="true" [disabled]="dataService.loading()" (onClick)="exportCsv()" />
+            </span>
+            -->
         </div>
+
+        <!-- The headline chart: across the days for several, across the
+             hours for one. -->
+        @if (dataService.isRange()) {
+            <app-incident-range-trend
+                [days]="dataService.range()?.per_day ?? []"
+                [continuous]="dataService.rangeSelection()?.kind === 'range'"
+                [loading]="dataService.loading()"
+            />
+        } @else {
+            <app-incident-hourly-chart [incidents]="dataService.history()?.incidents ?? []" [loading]="dataService.loading()" />
+        }
 
         <div class="card" style="margin-bottom: 0.25rem">
             <div class="flex justify-between items-center mb-4">
-                <div class="font-semibold text-xl">รายการเหตุการณ์</div>
+                <div>
+                    <div class="font-semibold text-xl">รายการเหตุการณ์</div>
+                    <!-- A long range is cut server-side (RANGE_INCIDENT_LIMIT);
+                         saying so keeps the list from passing for all of it.
+                         Every count on the page still covers every incident. -->
+                    @if (listCut(); as cut) {
+                        <div class="text-sm text-muted-color mt-1">แสดง {{ cut.shown | number }} รายการแรกจาก {{ cut.total | number }} รายการ · ตัวเลขสถิตินับครบทุกรายการ</div>
+                    }
+                </div>
                 <button pButton label="ล้างตัวกรอง" class="p-button-outlined" icon="pi pi-filter-slash" (click)="clear(incidentTable)"></button>
             </div>
             <p-table
@@ -79,7 +144,7 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                     <tr>
                         <th style="min-width: 8rem">
                             <div class="flex justify-between items-center">
-                                เวลา
+                                {{ dataService.isRange() ? 'วันที่ / เวลา' : 'เวลา' }}
                                 <p-columnFilter field="hour" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
                                     <ng-template #filter let-value let-filter="filterCallback">
                                         <p-multiselect
@@ -239,16 +304,24 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                         </tr>
                     } @else {
                     <tr>
-                        <td>{{ incident.time }}</td>
+                        <!-- Over several days the time alone no longer says which
+                             day a row is from. One line, so a row is as tall
+                             as it is in the one-day view. -->
+                        <td class="whitespace-nowrap">
+                            @if (dataService.isRange() && incident.date) {
+                                <span class="text-muted-color">{{ shortIsoDate(incident.date) }}</span>
+                            }
+                            {{ incident.time }}
+                        </td>
                         <td>{{ incident.call_type }}</td>
                         <td>{{ incident.reporting_channel }}</td>
                         <td>{{ incident.case_type }}</td>
                         <!-- Full "CBD7 <description>" label, cut with an ellipsis at
-                             the column's width; the title carries the whole thing.
+                             the column's width; the tooltip carries the whole thing.
                              A block span rather than styles on the td: an auto-layout
                              table does not honour max-width on a cell, but it does
                              size the cell to a block child that has one. -->
-                        <td><span class="cbd-label" [title]="dataService.cbdLabel(incident.cbd)">{{ dataService.cbdLabel(incident.cbd) }}</span></td>
+                        <td><span class="cbd-label" [appTruncateTooltip]="dataService.cbdLabel(incident.cbd)">{{ dataService.cbdLabel(incident.cbd) }}</span></td>
                         <td>
                             @if (incident.severity === '-') {
                                 <!-- The dash sits in a tag-sized box (.tag-box,
@@ -272,16 +345,14 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         </div>
 
     <div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">วันที่บันทึกสูงสุดในเดือนนี้</div>
+        <div class="font-semibold text-xl mb-4">{{ dataService.isRange() ? 'วันที่บันทึกสูงสุดในช่วงที่เลือก' : 'วันที่บันทึกสูงสุดในเดือนนี้' }}</div>
         <p-table [value]="dataService.loading() ? skeletonDayRows : topDays()" stripedRows [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width: 7rem">อันดับ</th>
                     <th style="min-width: 13rem">วันที่</th>
                     <th style="min-width: 13rem">จำนวน</th>
-                    <!-- Switch-to-day control; a heading would only repeat the
-                         button's tooltip. -->
-                    <th style="min-width: 6rem"></th>
+                    <th style="min-width: 6rem">สลับเวลา</th>
                 </tr>
             </ng-template>
             <ng-template #body let-item let-rowIndex="rowIndex">
@@ -297,11 +368,9 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
                         <td>{{ rowIndex + 1 }}</td>
                         <td>{{ formatDay(item.operational_day) }}</td>
                         <td>{{ item.count }}</td>
-                        <!-- Inline, not Tailwind's text-right: PrimeNG's own
-                             td { text-align: start } is unlayered CSS, and this
-                             project loads Tailwind's utilities in a layer, so any
-                             utility loses to it. -->
-                        <td style="text-align: right">
+                        <!-- Left-aligned under its heading, as on the flood intake
+                             table's จัดการ column. -->
+                        <td>
                             <!-- The day on screen gets a marker instead of a button:
                                  the list is for this same month, so the row for the
                                  day being viewed is nearly always in it. -->
@@ -332,40 +401,73 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         </p-table>
     </div>
 
+    <!-- Which CBDs came up most - on the day shown, or over the days asked
+         about: read off the CBD 25 table below, but ranked, and without the
+         ones that never happened. -->
+    <div class="card" style="margin-bottom: 0.25rem">
+        <div class="font-semibold text-xl mb-4">CBD ที่มีเหตุเกิดมากที่สุด</div>
+        <p-table [value]="dataService.loading() ? skeletonCbdRankRows : cbdRanking()" stripedRows [rowHover]="true" styleClass="mt-4">
+            <ng-template #header>
+                <tr>
+                    <th style="min-width: 7rem">อันดับ</th>
+                    <th style="min-width: 13rem">CBD</th>
+                    <th style="min-width: 7rem">จำนวน</th>
+                    <th style="min-width: 7rem">สัดส่วน</th>
+                </tr>
+            </ng-template>
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (dataService.loading()) {
+                    <tr>
+                        <td><p-skeleton width="1.5rem" /></td>
+                        <td><p-skeleton width="min(14rem, 90%)" /></td>
+                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        <td><p-skeleton width="min(3rem, 80%)" /></td>
+                    </tr>
+                } @else {
+                    <tr>
+                        <td>{{ rowIndex + 1 }}</td>
+                        <!-- As the CBD 25 table's names: the whole width the
+                             column gets, cut with the tooltip only past it -
+                             not the incident list's fixed 14rem. -->
+                        <td><span class="cbd-name-label" [appTruncateTooltip]="item.name">{{ item.name }}</span></td>
+                        <td>{{ item.count }}</td>
+                        <td>{{ item.share }}</td>
+                    </tr>
+                }
+            </ng-template>
+            <ng-template #emptymessage>
+                <tr>
+                    <td colspan="4">ไม่มีเหตุการณ์ที่ระบุ CBD</td>
+                </tr>
+            </ng-template>
+        </p-table>
+    </div>
+
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ประเภท</div>
         <p-table [value]="dataService.loading() ? skeletonCallTypeRows : callTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:101px">ต่อเวรบ่าย</th>
-                    <th style="min-width:100px">ต่อเวรดึก</th>
-                    <th style="min-width:100px">ต่อวัน</th>
-                    <th style="min-width:100px">ต่อสัปดาห์</th>
-                    <th style="min-width:100px">ต่อเดือน</th>
+                    <th style="min-width:206px">ชื่อ</th>
+                    @for (column of statColumns(); track column.key) {
+                        <th style="min-width:100px">{{ column.label }}</th>
+                    }
                 </tr>
             </ng-template>
             <ng-template #body let-item>
                 @if (dataService.loading()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        }
                     </tr>
                 } @else {
                     <tr>
                         <td>{{ item.name }}</td>
-                        <td>{{ item.shift_morning }}</td>
-                        <td>{{ item.shift_afternoon }}</td>
-                        <td>{{ item.shift_night }}</td>
-                        <td>{{ item.daily }}</td>
-                        <td>{{ item.weekly }}</td>
-                        <td>{{ item.monthly }}</td>
+                        @for (column of statColumns(); track column.key) {
+                            <td>{{ item[column.key] }}</td>
+                        }
                     </tr>
                 }
             </ng-template>
@@ -377,35 +479,26 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         <p-table [value]="dataService.loading() ? skeletonChannelRows : reportingChannelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:101px">ต่อเวรบ่าย</th>
-                    <th style="min-width:100px">ต่อเวรดึก</th>
-                    <th style="min-width:100px">ต่อวัน</th>
-                    <th style="min-width:100px">ต่อสัปดาห์</th>
-                    <th style="min-width:100px">ต่อเดือน</th>
+                    <th style="min-width:206px">ชื่อ</th>
+                    @for (column of statColumns(); track column.key) {
+                        <th style="min-width:100px">{{ column.label }}</th>
+                    }
                 </tr>
             </ng-template>
             <ng-template #body let-item>
                 @if (dataService.loading()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        }
                     </tr>
                 } @else {
                     <tr>
                         <td>{{ item.name }}</td>
-                        <td>{{ item.shift_morning }}</td>
-                        <td>{{ item.shift_afternoon }}</td>
-                        <td>{{ item.shift_night }}</td>
-                        <td>{{ item.daily }}</td>
-                        <td>{{ item.weekly }}</td>
-                        <td>{{ item.monthly }}</td>
+                        @for (column of statColumns(); track column.key) {
+                            <td>{{ item[column.key] }}</td>
+                        }
                     </tr>
                 }
             </ng-template>
@@ -417,35 +510,26 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         <p-table [value]="dataService.loading() ? skeletonCaseTypeRows : caseTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:101px">ต่อเวรบ่าย</th>
-                    <th style="min-width:100px">ต่อเวรดึก</th>
-                    <th style="min-width:100px">ต่อวัน</th>
-                    <th style="min-width:100px">ต่อสัปดาห์</th>
-                    <th style="min-width:100px">ต่อเดือน</th>
+                    <th style="min-width:206px">ชื่อ</th>
+                    @for (column of statColumns(); track column.key) {
+                        <th style="min-width:100px">{{ column.label }}</th>
+                    }
                 </tr>
             </ng-template>
             <ng-template #body let-item>
                 @if (dataService.loading()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        }
                     </tr>
                 } @else {
                     <tr>
                         <td>{{ item.name }}</td>
-                        <td>{{ item.shift_morning }}</td>
-                        <td>{{ item.shift_afternoon }}</td>
-                        <td>{{ item.shift_night }}</td>
-                        <td>{{ item.daily }}</td>
-                        <td>{{ item.weekly }}</td>
-                        <td>{{ item.monthly }}</td>
+                        @for (column of statColumns(); track column.key) {
+                            <td>{{ item[column.key] }}</td>
+                        }
                     </tr>
                 }
             </ng-template>
@@ -457,35 +541,26 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         <p-table [value]="dataService.loading() ? skeletonSeverityRows : severityLevelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:101px">ต่อเวรบ่าย</th>
-                    <th style="min-width:100px">ต่อเวรดึก</th>
-                    <th style="min-width:100px">ต่อวัน</th>
-                    <th style="min-width:100px">ต่อสัปดาห์</th>
-                    <th style="min-width:100px">ต่อเดือน</th>
+                    <th style="min-width:206px">ชื่อ</th>
+                    @for (column of statColumns(); track column.key) {
+                        <th style="min-width:100px">{{ column.label }}</th>
+                    }
                 </tr>
             </ng-template>
             <ng-template #body let-item>
                 @if (dataService.loading()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        }
                     </tr>
                 } @else {
                     <tr>
                         <td>{{ item.name }}</td>
-                        <td>{{ item.shift_morning }}</td>
-                        <td>{{ item.shift_afternoon }}</td>
-                        <td>{{ item.shift_night }}</td>
-                        <td>{{ item.daily }}</td>
-                        <td>{{ item.weekly }}</td>
-                        <td>{{ item.monthly }}</td>
+                        @for (column of statColumns(); track column.key) {
+                            <td>{{ item[column.key] }}</td>
+                        }
                     </tr>
                 }
             </ng-template>
@@ -497,40 +572,34 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         <p-table [value]="dataService.loading() ? skeletonCbdRows : cbdCategoryStatistics()" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
-                    <th style="min-width:356px">ชื่อ</th>
-                    <th style="min-width:100px">ต่อเวรเช้า</th>
-                    <th style="min-width:101px">ต่อเวรบ่าย</th>
-                    <th style="min-width:100px">ต่อเวรดึก</th>
-                    <th style="min-width:100px">ต่อวัน</th>
-                    <th style="min-width:100px">ต่อสัปดาห์</th>
-                    <th style="min-width:100px">ต่อเดือน</th>
+                    <th style="min-width:206px">ชื่อ</th>
+                    @for (column of statColumns(); track column.key) {
+                        <th style="min-width:100px">{{ column.label }}</th>
+                    }
                 </tr>
             </ng-template>
             <ng-template #body let-item>
                 @if (dataService.loading()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
-                        <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td><p-skeleton width="min(2.5rem, 80%)" /></td>
+                        }
                     </tr>
                 } @else {
                     <tr>
-                        <td>{{ item.name }}</td>
-                        <td>{{ item.shift_morning }}</td>
-                        <td>{{ item.shift_afternoon }}</td>
-                        <td>{{ item.shift_night }}</td>
-                        <td>{{ item.daily }}</td>
-                        <td>{{ item.weekly }}</td>
-                        <td>{{ item.monthly }}</td>
+                        <!-- Cut with an ellipsis once it runs past the column; the
+                             tooltip carries the whole name. -->
+                        <td><span class="cbd-name-label" [appTruncateTooltip]="item.name">{{ item.name }}</span></td>
+                        @for (column of statColumns(); track column.key) {
+                            <td>{{ item[column.key] }}</td>
+                        }
                     </tr>
                 }
             </ng-template>
         </p-table>
     </div>
+    <p-toast />
     <p-scrolltop />
     <app-incident-history-date-dial />
     `,
@@ -555,7 +624,8 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
         /* Caps the CBD column: labels longer than this truncate instead of
            widening it. The header's min-width is the same figure so short
            labels do not narrow it either. */
-        .cbd-label {
+        .cbd-label,
+        .cbd-name-label {
             display: block;
             max-width: 14rem;
             overflow: hidden;
@@ -569,6 +639,18 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
             margin-block: -0.25em;
         }
 
+        /* CBD 25 card's ชื่อ column: fills whatever width the column ends
+           up with and truncates past that. width: 0 keeps the name out of
+           the table's column sizing, so the column is never narrower than
+           the header's 356px min-width, and on a wide screen it takes its
+           share of the spare width like today - min-width: 100% then
+           stretches the text across all of it rather than leaving a gap
+           before the numbers. */
+        .cbd-name-label {
+            max-width: none;
+            width: 0;
+            min-width: 100%;
+        }
         .p-datatable-frozen-tbody {
             font-weight: bold;
         }
@@ -580,13 +662,84 @@ import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboar
 })
 export class IncidentHistoryComponent implements OnInit {
     protected dataService = inject(IncidentHistoryDataService);
+    private messageService = inject(MessageService);
 
-    protected callTypeStatistics = computed(() => this.dataService.history()?.statistics.call_type ?? []);
-    protected reportingChannelStatistics = computed(() => this.dataService.history()?.statistics.reporting_channel ?? []);
-    protected caseTypeStatistics = computed(() => this.dataService.history()?.statistics.case_type ?? []);
-    protected severityLevelStatistics = computed(() => this.dataService.history()?.statistics.severity ?? []);
-    protected cbdCategoryStatistics = computed(() => this.dataService.history()?.statistics.cbd ?? []);
-    protected topDays = computed(() => this.dataService.history()?.top_days ?? []);
+    // The five breakdown tables share their columns. One day: that day's
+    // shifts, then the day, its week and its month. Several days: each shift
+    // summed over them and the total - a week or a
+    // month column means nothing for "the 23rd to the 25th".
+    protected readonly statColumns = computed<{ key: string; label: string }[]>(() =>
+        this.dataService.isRange()
+            ? [
+                  { key: 'shift_morning', label: 'เวรเช้า' },
+                  { key: 'shift_afternoon', label: 'เวรบ่าย' },
+                  { key: 'shift_night', label: 'เวรดึก' },
+                  { key: 'total', label: 'รวม' }
+              ]
+            : [
+                  { key: 'shift_morning', label: 'ต่อเวรเช้า' },
+                  { key: 'shift_afternoon', label: 'ต่อเวรบ่าย' },
+                  { key: 'shift_night', label: 'ต่อเวรดึก' },
+                  { key: 'daily', label: 'ต่อวัน' },
+                  { key: 'weekly', label: 'ต่อสัปดาห์' },
+                  { key: 'monthly', label: 'ต่อเดือน' }
+              ]
+    );
+
+    private readonly statistics = computed(() => (this.dataService.isRange() ? this.dataService.range()?.statistics : this.dataService.history()?.statistics));
+    protected callTypeStatistics = computed<StatRow[]>(() => (this.statistics()?.call_type ?? []) as StatRow[]);
+    protected reportingChannelStatistics = computed<StatRow[]>(() => (this.statistics()?.reporting_channel ?? []) as StatRow[]);
+    protected caseTypeStatistics = computed<StatRow[]>(() => (this.statistics()?.case_type ?? []) as StatRow[]);
+    protected severityLevelStatistics = computed<StatRow[]>(() => (this.statistics()?.severity ?? []) as StatRow[]);
+    protected cbdCategoryStatistics = computed<StatRow[]>(() => (this.statistics()?.cbd ?? []) as StatRow[]);
+    protected topDays = computed(() => (this.dataService.isRange() ? this.dataService.range()?.top_days : this.dataService.history()?.top_days) ?? []);
+    // The CBDs that happened, most first, top ten: over the days chosen, or
+    // on the one day shown (the CBD 25 table's ต่อวัน). Ties keep that
+    // table's order (CBD1 before CBD2), since sort is stable.
+    // `share` is the part of every CBD-coded incident in the view - all of
+    // them, not only the ten listed - so it means the same thing however
+    // long the list is, and a month compares with a quarter.
+    protected readonly cbdRanking = computed<CbdRankRow[]>(() => {
+        const rows = this.dataService.isRange()
+            ? (this.dataService.range()?.statistics.cbd ?? []).map((row) => ({ name: row.name, count: row.total }))
+            : (this.dataService.history()?.statistics.cbd ?? []).map((row) => ({ name: row.name, count: row.daily }));
+        const total = rows.reduce((sum, row) => sum + row.count, 0);
+        return rows
+            .filter((row) => row.count > 0)
+            .sort((a, b) => b.count - a.count)
+            .slice(0, IncidentHistoryComponent.CBD_RANK_LIMIT)
+            .map((row) => ({ ...row, share: `${((row.count / total) * 100).toFixed(1)}%` }));
+    });
+    private static readonly CBD_RANK_LIMIT = 10;
+    protected readonly skeletonCbdRankRows = IncidentHistoryComponent.placeholders<CbdRankRow>(IncidentHistoryComponent.CBD_RANK_LIMIT);
+
+    private readonly incidents = computed(() => (this.dataService.isRange() ? this.dataService.range()?.incidents : this.dataService.history()?.incidents) ?? []);
+
+    // Set only when a range's list was cut short.
+    protected readonly listCut = computed(() => {
+        const range = this.dataService.isRange() && !this.dataService.loading() ? this.dataService.range() : null;
+        return range && range.incidents_total > range.incidents.length ? { shown: range.incidents.length, total: range.incidents_total } : null;
+    });
+
+    // The header's words for what is chosen, e.g. "01/01/2569 – 31/03/2569
+    // (90 วัน)" or "วันที่ 23, 24, 25/09/2569".
+    protected readonly rangeLabel = computed(() => {
+        const selection = this.dataService.rangeSelection();
+        if (!selection) return '';
+        if (selection.kind === 'range') {
+            const days = Math.round((selection.to.getTime() - selection.from.getTime()) / 86_400_000) + 1;
+            return `${formatBuddhistDay(selection.from)} – ${formatBuddhistDay(selection.to)} (${days} วัน)`;
+        }
+        const dates = selection.dates;
+        const first = dates[0];
+        const sameMonth = dates.every((d) => d.getMonth() === first.getMonth() && d.getFullYear() === first.getFullYear());
+        if (sameMonth && dates.length <= 5) return `วันที่ ${dates.map((d) => d.getDate()).join(', ')}/${formatBuddhistDay(first).slice(3)}`;
+        return `${dates.length} วัน (${formatBuddhistDay(first)} – ${formatBuddhistDay(dates[dates.length - 1])})`;
+    });
+
+    protected shortIsoDate(isoDate: string): string {
+        return formatBuddhistDay(parseIsoDate(isoDate));
+    }
 
     // Placeholder rows shown while the stream has not delivered a snapshot.
     // Without them these tables render bare headers, and the top-days table
@@ -611,7 +764,7 @@ export class IncidentHistoryComponent implements OnInit {
     // column filters run inside the table and drop fillers, whose fields
     // match nothing, so a filtered result is padded in padFilteredRows.
     protected readonly incidentRows = computed<(IncidentHistoryItem | PageFillerRow)[]>(() =>
-        this.dataService.loading() ? this.skeletonIncidentRows : padToPage(this.dataService.history()?.incidents ?? [], this.PAGE_SIZE)
+        this.dataService.loading() ? this.skeletonIncidentRows : padToPage(this.incidents(), this.PAGE_SIZE)
     );
 
     // Runs after the table has filtered but before it renders (onFilter is
@@ -624,11 +777,11 @@ export class IncidentHistoryComponent implements OnInit {
         if (filtered?.length) filtered.push(...pageFillers(filtered.length, this.PAGE_SIZE));
     }
     protected readonly skeletonDayRows = IncidentHistoryComponent.placeholders<TopDayItem>(5); // top_days limit
-    protected readonly skeletonCallTypeRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(6); // 5 call types + total
-    protected readonly skeletonChannelRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(3);
-    protected readonly skeletonCaseTypeRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(2);
-    protected readonly skeletonSeverityRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(5);
-    protected readonly skeletonCbdRows = IncidentHistoryComponent.placeholders<IncidentStatItem>(25);
+    protected readonly skeletonCallTypeRows = IncidentHistoryComponent.placeholders<StatRow>(6); // 5 call types + total
+    protected readonly skeletonChannelRows = IncidentHistoryComponent.placeholders<StatRow>(3);
+    protected readonly skeletonCaseTypeRows = IncidentHistoryComponent.placeholders<StatRow>(2);
+    protected readonly skeletonSeverityRows = IncidentHistoryComponent.placeholders<StatRow>(5);
+    protected readonly skeletonCbdRows = IncidentHistoryComponent.placeholders<StatRow>(25);
 
     hourOptions: { label: string; value: string }[] = [];
 
@@ -656,16 +809,23 @@ export class IncidentHistoryComponent implements OnInit {
         incidentTable.clear();
     }
 
-    // Switch the page to one of the month's top days. Same call the date
-    // dial's picker makes; the header line at the top changing to the
-    // back-dated notice is the feedback, as it is for the refresh button up
-    // there, and this card sits below a ten-row table, so the page scrolls up
-    // to where the changed data starts.
-    protected readonly viewedDay = computed(() => this.dataService.context()?.operational_day ?? null);
+    // Switch the page to one of the month's top days. Same call and same
+    // toast as the date dial's picker; this card sits below a ten-row table,
+    // so the page also scrolls up to where the changed data starts.
+    // No marker in the several-days view: every row there is a way into one day.
+    protected readonly viewedDay = computed(() => (this.dataService.isRange() ? null : (this.dataService.context()?.operational_day ?? null)));
 
     viewDay(isoDate: string): void {
-        this.dataService.select(parseIsoDate(isoDate));
+        const date = parseIsoDate(isoDate);
+        this.dataService.select(date);
+        this.messageService.add({ severity: 'success', summary: 'สลับวัน', detail: `เลือกวัน: ${formatBuddhistDay(date)}` });
         window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // Same toast as the date dial's วันปัจจุบัน, which does the same thing.
+    protected resetToCurrent(): void {
+        this.dataService.selectCurrent();
+        this.messageService.add({ severity: 'success', summary: 'วันปัจจุบัน', detail: 'กำลังดูข้อมูลวันนี้' });
     }
 
     protected readonly longDate = computed(() => formatThaiLongDate(this.dataService.selectedDate()));
@@ -677,6 +837,54 @@ export class IncidentHistoryComponent implements OnInit {
             month: 'long',
             day: 'numeric'
         });
+    }
+
+    // Everything the page shows as numbers, as one CSV: the choice, then the
+    // per-day counts (several days only), then each breakdown table under its
+    // own heading with the columns on screen. With a BOM, as the flood
+    // export has, so Excel on Windows reads the Thai.
+    exportCsv(): void {
+        const range = this.dataService.isRange() ? this.dataService.range() : null;
+        const cell = (value: unknown) => {
+            const text = String(value ?? '');
+            return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+        };
+        const line = (...values: unknown[]) => values.map(cell).join(',');
+        const columns = this.statColumns();
+        const lines: string[] = [line('สรุปผลทั้งหมด', range ? this.rangeLabel() : this.longDate()), ''];
+
+        if (range) {
+            lines.push(line('จำนวนเหตุการณ์ต่อวัน'), line('วันที่', 'จำนวน'));
+            for (const day of range.per_day) lines.push(line(this.shortIsoDate(day.operational_day), day.count));
+            lines.push(line('รวม', range.per_day.reduce((sum, day) => sum + day.count, 0)), '');
+        }
+
+        lines.push(line('CBD ที่มีเหตุเกิดมากที่สุด'), line('อันดับ', 'CBD', 'จำนวน', 'สัดส่วน'));
+        this.cbdRanking().forEach((row, i) => lines.push(line(i + 1, row.name, row.count, row.share)));
+        lines.push('');
+
+        const tables: [string, StatRow[]][] = [
+            ['ประเภท', this.callTypeStatistics()],
+            ['ช่องทางการแจ้งเหตุ', this.reportingChannelStatistics()],
+            ['ประเภทของการเจ็บป่วย', this.caseTypeStatistics()],
+            ['ระดับความรุนแรง', this.severityLevelStatistics()],
+            ['CBD 25', this.cbdCategoryStatistics()]
+        ];
+        for (const [title, rows] of tables) {
+            lines.push(line(title), line('ชื่อ', ...columns.map((column) => column.label)));
+            for (const row of rows) lines.push(line(row.name, ...columns.map((column) => row[column.key])));
+            lines.push('');
+        }
+
+        const days = range?.context.days ?? [this.dataService.context()?.operational_day ?? ''];
+        const stamp = (iso: string) => iso.replace(/-/g, '');
+        const name = days.length > 1 ? `summary-${stamp(days[0])}-${stamp(days[days.length - 1])}.csv` : `summary-${stamp(days[0])}.csv`;
+        const url = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = name;
+        link.click();
+        URL.revokeObjectURL(url);
     }
 
     getSeverity(severity: string) {

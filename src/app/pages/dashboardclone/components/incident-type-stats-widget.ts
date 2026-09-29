@@ -4,6 +4,7 @@ import { SkeletonModule } from 'primeng/skeleton';
 import { TooltipModule } from 'primeng/tooltip';
 import { IncidentBreakdowns, IncidentTypeStats } from '../dispatch.types';
 import { formatThaiLongDate, formatThaiShortDate } from '../services/date-utils';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 interface StatCard {
     label: string;
@@ -52,7 +53,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
 @Component({
     standalone: true,
     selector: 'app-incident-type-stats',
-    imports: [SkeletonModule, ButtonModule, TooltipModule],
+    imports: [SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective],
     host: {
         // Set on the host so it inherits to every card. The host is
         // display:contents (the page applies `class="contents"`), which does not
@@ -64,7 +65,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
     styles: `
         /* The comparison line stays one line and one size: where it does not
            fit it is cut with an ellipsis rather than wrapped, which made the
-           row of cards ragged. The full text is in the title. Same rule as
+           row of cards ragged. The full text is in a tooltip. Same rule as
            call-stats-widget on /report/manual-dashboard.
 
            The padding/negative-margin pair is the same trick as the CBD column
@@ -238,8 +239,13 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                              the width of a phone and shares it with the title, so
                              the short form drops the year and the explanation. -->
                         <span class="text-amber-600 dark:text-amber-400 font-medium">
-                            <span class="hidden lg:inline"> กำลังดูแดชบอร์ดวันที่ {{ longDate() }} {{ shiftLabel() }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน</span>
-                            <span class="lg:hidden"> กำลังดูข้อมูลย้อนหลัง: {{ shortDate() }} {{ shiftLabel() }}</span>
+                            @if (rangeLabel(); as range) {
+                                <!-- Several days or a range: which days, all shifts. -->
+                                <span> กำลังดูข้อมูล {{ range }}</span>
+                            } @else {
+                                <span class="hidden lg:inline"> กำลังดูแดชบอร์ดวันที่ {{ longDate() }} {{ shiftLabel() }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน</span>
+                                <span class="lg:hidden"> กำลังดูข้อมูลย้อนหลัง: {{ shortDate() }} {{ shiftLabel() }}</span>
+                            }
                         </span>
                         <!-- The way out, next to the line that says you need one:
                              the same "วันเวลาปัจจุบัน" action the speed dial
@@ -249,7 +255,12 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                              it does.
 
                              Only rendered while back-dated, so it is never a
-                             button offering to reset to where you already are. -->
+                             button offering to reset to where you already are.
+                             It stays until the current board arrives, so it is
+                             held (spinner, no clicks) while that load is on -
+                             otherwise every click restarted the stream and
+                             added another toast. -->
+
                         <p-button
                             icon="pi pi-refresh"
                             severity="warn"
@@ -259,6 +270,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                             pTooltip="กลับไปวันเวลาปัจจุบัน"
                             tooltipPosition="bottom"
                             ariaLabel="กลับไปวันเวลาปัจจุบัน"
+                            [loading]="loading()"
                             (onClick)="resetToCurrent.emit()"
                         />
                     } @else {
@@ -336,16 +348,16 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                         @if (loading()) {
                             <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                         } @else {
-                            <div class="font-medium text-7xl">{{ totalCount() }}</div>
+                            <div class="font-medium" [class]="countSize(totalCount())">{{ totalCount() }}</div>
                         }
                     </div>
                 </div>
                 @if (loading()) {
                     <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                 } @else {
-                    <div class="text-sm diff-line" [title]="diffText(totalDiff()) + ' เทียบกับเมื่อวาน'">
+                    <div class="text-sm diff-line" [appTruncateTooltip]="diffText(totalDiff()) + ' ' + compareLabel()">
                         <span [class]="diffClass(totalDiff())">{{ diffText(totalDiff()) }}</span>
-                        <span> เทียบกับเมื่อวาน</span>
+                        <span> {{ compareLabel() }}</span>
                     </div>
                 }
             </div>
@@ -366,7 +378,7 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                             @if (loading()) {
                                 <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                             } @else {
-                                <div class="text-surface-900 dark:text-surface-0 font-medium text-7xl">{{ card.count }}</div>
+                                <div class="text-surface-900 dark:text-surface-0 font-medium" [class]="countSize(card.count)">{{ card.count }}</div>
                             }
                         </div>
                     </div>
@@ -377,9 +389,9 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                              line gets, and at base size it wrapped. Where even
                              text-sm does not fit, .diff-line cuts it with an
                              ellipsis. -->
-                        <div class="text-sm diff-line" [title]="diffText(card.diff) + ' เทียบกับเมื่อวาน'">
+                        <div class="text-sm diff-line" [appTruncateTooltip]="diffText(card.diff) + ' ' + compareLabel()">
                             <span [class]="diffClass(card.diff)">{{ diffText(card.diff) }}</span>
-                            <span> เทียบกับเมื่อวาน</span>
+                            <span> {{ compareLabel() }}</span>
                         </div>
                     }
                 </div>
@@ -537,6 +549,14 @@ export class IncidentTypeStatsWidget {
     // turns the same line from a caption into a warning.
     historical = input<boolean>(false);
 
+    // Set while the board shows several days or a range: the days, in words,
+    // for the amber line in place of the one shift's date.
+    rangeLabel = input<string | null>(null);
+
+    // What the cards' +N / -N is against: the same shift yesterday, or for a
+    // range the period of the same span just before it.
+    compareLabel = input<string>('เทียบกับเมื่อวาน');
+
     // Emitted rather than handled here: the day/shift selection lives in
     // DispatchDataService, which the page owns and this widget - inputs only,
     // no injected state - deliberately does not reach into.
@@ -677,6 +697,14 @@ export class IncidentTypeStatsWidget {
     // number takes the card's own text colour: 8.4:1 at worst in light mode,
     // 7.5:1 in dark. The categorical meaning lives in the card colour now,
     // which is where this board puts it.
+    // The cards were sized for one shift, three digits at most. A month's
+    // total has four and a year's five, and at text-7xl those run under the
+    // next card - so a longer number steps down a size, and a shift's numbers
+    // keep the size they always had.
+    countSize(count: number): string {
+        return count >= 10000 ? 'text-5xl' : count >= 1000 ? 'text-6xl' : 'text-7xl';
+    }
+
     diffClass(diff: number): string {
         return diff === 0 ? 'font-medium' : 'font-black';
     }

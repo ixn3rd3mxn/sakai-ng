@@ -11,6 +11,17 @@ export const AppPreset = definePreset(Aura, {
         }
     },
     components: {
+        // An "on" float label sits across the field's top border, half on the
+        // card and half on the field. Stock Aura fills it with the field's
+        // colour only, which is invisible in light mode (both white) but in
+        // dark mode draws a darker box above the border (field surface.950 on
+        // a surface.900 card). Split at the border, each half matches what is
+        // behind it.
+        floatlabel: {
+            on: {
+                active: { background: 'linear-gradient(to bottom, {content.background} 50%, {form.field.background} 50%)' }
+            }
+        },
         tag: {
             colorScheme: {
                 dark: {

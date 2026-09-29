@@ -3,6 +3,7 @@ import { ProgressSpinnerModule } from 'primeng/progressspinner';
 import { SkeletonModule } from 'primeng/skeleton';
 import { Agent, AgentStatus } from '../agents.types';
 import { AgentsDataService } from '../services/agents-data.service';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 interface StatusStyle {
     label: string;
@@ -42,7 +43,7 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
 @Component({
     standalone: true,
     selector: 'app-agent-status-widget',
-    imports: [SkeletonModule, ProgressSpinnerModule],
+    imports: [SkeletonModule, ProgressSpinnerModule, TruncateTooltipDirective],
     styles: `
         /* The placeholder cards are untinted, but the real ones are not, so
            the skeletons are tinted with the text colour for the same reason
@@ -204,7 +205,7 @@ const STATUS: Record<AgentStatus, StatusStyle> = {
                         <!-- The name is the answer to "who is on duty", so it leads.
                              When it is missing the extension takes its place rather
                              than leaving a blank line. -->
-                        <div class="text-surface-900 dark:text-surface-0 font-medium text-2xl truncate" [title]="agent.name ?? agent.extension">
+                        <div class="text-surface-900 dark:text-surface-0 font-medium text-2xl truncate" [appTruncateTooltip]="agent.name ?? agent.extension">
                             {{ agent.name ?? agent.extension }}
                         </div>
                         <div class="text-sm mt-1 opacity-90">{{ agent.role }}</div>

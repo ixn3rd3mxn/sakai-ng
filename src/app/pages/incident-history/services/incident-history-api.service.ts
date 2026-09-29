@@ -2,7 +2,8 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { IncidentHistoryResponse, LookupsResponse } from '../incident-history.types';
+import { IncidentHistoryResponse, IncidentRangeResponse, IncidentRangeSelection, LookupsResponse } from '../incident-history.types';
+import { formatDateParam } from '../../dashboardclone/services/date-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
 import { resilientEventSource } from '@/app/core/sse-reconnect';
 
@@ -27,6 +28,18 @@ export class IncidentHistoryApiService {
 
     getHistory(date?: string): Observable<IncidentHistoryResponse> {
         return this.http.get<IncidentHistoryResponse>(`${API_BASE_URL}/incident-history`, { params: this.buildParams(date) });
+    }
+
+    // Several days or a range: a plain GET, since the days asked about are
+    // finished and do not change.
+    getRange(selection: IncidentRangeSelection): Observable<IncidentRangeResponse> {
+        let params = new HttpParams();
+        if (selection.kind === 'range') {
+            params = params.set('date_from', formatDateParam(selection.from)).set('date_to', formatDateParam(selection.to));
+        } else {
+            for (const day of selection.dates) params = params.append('dates', formatDateParam(day));
+        }
+        return this.http.get<IncidentRangeResponse>(`${API_BASE_URL}/incident-history/range`, { params });
     }
 
     // Backend re-pushes the "incident-history" event only when the payload

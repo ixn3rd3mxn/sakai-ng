@@ -103,6 +103,15 @@ export interface DashboardSummary {
     recent_incidents: RecentIncidentItem[];
 }
 
+/** The board over several days or a range (GET /dashboard/summary/range):
+ *  the same widget data summed over the days, the cards' diff against the
+ *  previous period of the same span, and the per-day counts for the chart
+ *  that stands in for บันทึกล่าสุด. */
+export interface DashboardRangeSummary extends Omit<DashboardSummary, 'context'> {
+    context: { days: string[]; day_count: number; previous_days: string[]; server_now: string };
+    per_day: { operational_day: string; count: number }[];
+}
+
 export type CallTypeCode = 'NY' | 'RM' | 'LDN' | 'IST' | 'PRS';
 
 export interface IncidentCreateRequest {

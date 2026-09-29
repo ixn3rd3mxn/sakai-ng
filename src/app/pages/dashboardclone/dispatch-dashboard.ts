@@ -1,5 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { ScrollTopModule } from 'primeng/scrolltop';
+import { ToastModule } from 'primeng/toast';
+import { MessageService } from 'primeng/api';
 import { SeverityStatisticsWidget } from './components/severity-statistics-widget';
 import { IncidentTypeStatsWidget } from './components/incident-type-stats-widget';
 import { RecentIncidentsWidget } from './components/recent-incidents-widget';
@@ -8,11 +10,15 @@ import { DailyIncidentSummaryWidget } from './components/daily-incident-summary-
 import { DispatchActionDial } from './components/dispatch-action-dial';
 import { SHIFT_CODE_TO_LABEL, TimePeriod } from './dispatch.types';
 import { DispatchDataService } from './services/dispatch-data.service';
+import { IncidentRangeTrend } from '../incident-history/components/incident-range-trend';
+import { formatBuddhistDay } from './services/date-utils';
 
 @Component({
     selector: 'app-dispatch-dashboard',
-    imports: [IncidentTypeStatsWidget, RecentIncidentsWidget, FrequentCbdCasesWidget, DailyIncidentSummaryWidget, SeverityStatisticsWidget, ScrollTopModule, DispatchActionDial],
-    providers: [DispatchDataService],
+    imports: [IncidentTypeStatsWidget, RecentIncidentsWidget, FrequentCbdCasesWidget, DailyIncidentSummaryWidget, SeverityStatisticsWidget, IncidentRangeTrend, ScrollTopModule, ToastModule, DispatchActionDial],
+    // One toast for the page: the action dial and the heading's refresh
+    // button both report through it.
+    providers: [DispatchDataService, MessageService],
     template: `
         <div class="grid grid-cols-12 gap-1">
             <!-- The day and shift being shown - and, when it is a back-dated
@@ -26,7 +32,9 @@ import { DispatchDataService } from './services/dispatch-data.service';
                 [shift]="selectedTimePeriod().name"
                 [selectedDate]="dataService.selectedDate()"
                 [historical]="!dataService.isCurrent()"
-                (resetToCurrent)="dataService.selectCurrent()"
+                [rangeLabel]="rangeLabel()"
+                [compareLabel]="dataService.isRange() ? 'เทียบกับช่วงก่อน' : 'เทียบกับเมื่อวาน'"
+                (resetToCurrent)="resetToCurrent()"
                 class="contents"
             >
                 <!-- Projected into the widget's two columns rather than placed
@@ -34,15 +42,30 @@ import { DispatchDataService } from './services/dispatch-data.service';
                      แจ้งเหตุ breakdown cards *above* these panels - and those
                      cards live in the widget, which owns their data. -->
                 <div leftPanel>
-                    <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
+                    <!-- Over several days "latest" means nothing; how the days
+                         went takes its place - the summary page's own chart. -->
+                    @if (dataService.isRange()) {
+                        <app-incident-range-trend
+                            [days]="dataService.range()?.per_day ?? []"
+                            [continuous]="dataService.rangeSelection()?.kind === 'range'"
+                            [loading]="dataService.loading()"
+                        />
+                    } @else {
+                        <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
+                    }
                     <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
                 </div>
                 <div rightPanel>
                     <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
-                    <app-daily-incident-summary [summary]="summary()?.daily_summary ?? null" [loading]="dataService.loading()" />
+                    <app-daily-incident-summary
+                        [summary]="summary()?.daily_summary ?? null"
+                        [loading]="dataService.loading()"
+                        [title]="dataService.isRange() ? 'ผลรวมทั้งหมดต่อช่วงที่เลือก' : 'ผลรวมทั้งหมดต่อวัน'"
+                    />
                 </div>
             </app-incident-type-stats>
         </div>
+        <p-toast />
         <p-scrolltop />
         <app-dispatch-action-dial />
     `,
@@ -73,8 +96,32 @@ import { DispatchDataService } from './services/dispatch-data.service';
 })
 export class EmergencyDispatchDashboard {
     protected dataService = inject(DispatchDataService);
+    private messageService = inject(MessageService);
 
-    protected summary = this.dataService.summary;
+    // The shift's board or the range's - the widgets read the same shapes.
+    protected summary = this.dataService.board;
+
+    // The heading's words for the days chosen, e.g. "01/09/2569 – 28/09/2569
+    // (28 วัน)" or "วันที่ 8, 9/09/2569" - as on /report/summary.
+    protected readonly rangeLabel = computed(() => {
+        const selection = this.dataService.rangeSelection();
+        if (!selection) return null;
+        if (selection.kind === 'range') {
+            const days = Math.round((selection.to.getTime() - selection.from.getTime()) / 86_400_000) + 1;
+            return `${formatBuddhistDay(selection.from)} – ${formatBuddhistDay(selection.to)} (${days} วัน)`;
+        }
+        const dates = selection.dates;
+        const first = dates[0];
+        const sameMonth = dates.every((d) => d.getMonth() === first.getMonth() && d.getFullYear() === first.getFullYear());
+        if (sameMonth && dates.length <= 5) return `วันที่ ${dates.map((d) => d.getDate()).join(', ')}/${formatBuddhistDay(first).slice(3)}`;
+        return `${dates.length} วัน (${formatBuddhistDay(first)} – ${formatBuddhistDay(dates[dates.length - 1])})`;
+    });
 
     protected selectedTimePeriod = computed<TimePeriod>(() => ({ name: SHIFT_CODE_TO_LABEL[this.dataService.selectedShift()] }));
+
+    // Same toast as the dial's วันเวลาปัจจุบัน, which does the same thing.
+    protected resetToCurrent(): void {
+        this.dataService.selectCurrent();
+        this.messageService.add({ severity: 'success', summary: 'รีเซ็ตเป็นปัจจุบัน', detail: 'กำลังดูข้อมูลปัจจุบัน' });
+    }
 }

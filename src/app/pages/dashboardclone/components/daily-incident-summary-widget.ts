@@ -21,7 +21,7 @@ function sameSummary(a: DailySummary | null, b: DailySummary | null): boolean {
     selector: 'app-daily-incident-summary',
     imports: [ChartModule, SkeletonModule],
     template: `<div class="card" style="margin-bottom: 0.25rem">
-        <div class="font-semibold text-xl mb-4">ผลรวมทั้งหมดต่อวัน</div>
+        <div class="font-semibold text-xl mb-4">{{ title() }}</div>
         <!-- One square box holding all three states, so the card never changes
              height as the skeleton gives way to the chart.
              The square is driven by *width* - w-full capped at max-w-90, with
@@ -54,6 +54,9 @@ export class DailyIncidentSummaryWidget {
     // Set by the dashboard while the stream has not yet delivered a
     // snapshot for the current selection.
     loading = input<boolean>(false);
+    // ผลรวมทั้งหมดต่อวัน, or for several days ผลรวมทั้งหมดต่อช่วงที่เลือก - the
+    // same three shifts, summed over the days.
+    title = input<string>('ผลรวมทั้งหมดต่อวัน');
 
     // Compared by value, not by reference.
     //

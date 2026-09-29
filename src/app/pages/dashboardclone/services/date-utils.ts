@@ -28,6 +28,23 @@ export function formatThaiLongDate(date: Date | undefined): string {
     return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+// Today as the dispatch centre counts it - the operational day, which rolls
+// over at 08:30 (see backend libs.shift) - from the server's clock (a
+// payload's `server_now`), so a wrong or foreign clock on this machine does
+// not move it. The browser's own clock only until the server has answered.
+export function currentOperationalDay(serverNow?: string | null): Date {
+    const now = serverNow ? new Date(serverNow) : new Date();
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (now.getHours() * 60 + now.getMinutes() < 8 * 60 + 30) day.setDate(day.getDate() - 1);
+    return day;
+}
+
+// "07/09/2569" - day and month padded, Buddhist-era year, as the flood
+// intake and summary pages write a date in running text and toasts.
+export function formatBuddhistDay(date: Date): string {
+    return `${`${date.getDate()}`.padStart(2, '0')}/${`${date.getMonth() + 1}`.padStart(2, '0')}/${toBuddhistYear(date)}`;
+}
+
 // "7 ก.ย." - the same date with the year dropped, for narrow screens where the
 // long form does not fit.
 export function formatThaiShortDate(date: Date | undefined): string {

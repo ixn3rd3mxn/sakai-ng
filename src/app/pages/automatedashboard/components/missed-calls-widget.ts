@@ -5,6 +5,7 @@ import { SkeletonModule } from 'primeng/skeleton';
 import { TooltipModule } from 'primeng/tooltip';
 import { MissedCallEntry } from '../call-log.types';
 import { PageFillerRow, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 const PAGE_SIZE = 8;
 
@@ -15,7 +16,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
 @Component({
     standalone: true,
     selector: 'app-missed-calls',
-    imports: [TableModule, SkeletonModule, ButtonModule, TooltipModule],
+    imports: [TableModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
@@ -24,7 +25,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
             <div class="flex items-baseline gap-2 min-w-0">
                 <div class="font-semibold text-xl">สายที่ไม่ได้รับ</div>
                 @if (enabled() && health()) {
-                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
+                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate" [appTruncateTooltip]="health()">{{ health() }}</span>
                 }
             </div>
             <!-- Switches the card off for this browser - see CardVisibilityService

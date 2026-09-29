@@ -11,7 +11,11 @@ function getPreferredDarkTheme(platformId: object): boolean {
 
 const LAYOUT_CONFIG_STORAGE_KEY = 'layoutConfig';
 
-function getStoredLayoutConfig(platformId: object): Partial<LayoutConfig> | null {
+// Before light and dark mode each had their own surface, one `surface` key
+// covered both. Still read so an existing choice carries over to both modes.
+type StoredLayoutConfig = Partial<LayoutConfig> & { surface?: string | null };
+
+function getStoredLayoutConfig(platformId: object): StoredLayoutConfig | null {
     if (!isPlatformBrowser(platformId)) {
         return null;
     }
@@ -39,22 +43,34 @@ function getStoredStaticMenuDesktopInactive(platformId: object): boolean {
     }
 }
 
+// What the palette window's "ค่าเริ่มต้น" button restores. darkTheme is not
+// here: it has its own topbar toggle and defaults to the OS preference.
+export const DEFAULT_LAYOUT_CONFIG: Omit<LayoutConfig, 'darkTheme'> = {
+    preset: 'Aura',
+    primary: 'blue',
+    surfaceLight: 'slate',
+    surfaceDark: 'zinc',
+    menuMode: 'static'
+};
+
 function getInitialLayoutConfig(platformId: object): LayoutConfig {
     const stored = getStoredLayoutConfig(platformId);
 
     return {
-        preset: stored?.preset ?? 'Aura',
-        primary: stored?.primary ?? 'blue',
-        surface: stored?.surface ?? null,
+        preset: stored?.preset ?? DEFAULT_LAYOUT_CONFIG.preset,
+        primary: stored?.primary ?? DEFAULT_LAYOUT_CONFIG.primary,
+        surfaceLight: stored?.surfaceLight ?? stored?.surface ?? DEFAULT_LAYOUT_CONFIG.surfaceLight,
+        surfaceDark: stored?.surfaceDark ?? stored?.surface ?? DEFAULT_LAYOUT_CONFIG.surfaceDark,
         darkTheme: stored?.darkTheme ?? getPreferredDarkTheme(platformId),
-        menuMode: stored?.menuMode ?? 'static'
+        menuMode: stored?.menuMode ?? DEFAULT_LAYOUT_CONFIG.menuMode
     };
 }
 
 export interface LayoutConfig {
     preset: string;
     primary: string;
-    surface: string | undefined | null;
+    surfaceLight: string;
+    surfaceDark: string;
     darkTheme: boolean;
     menuMode: string;
 }
@@ -93,7 +109,8 @@ export class LayoutService {
 
     getPrimary = computed(() => this.layoutConfig().primary);
 
-    getSurface = computed(() => this.layoutConfig().surface);
+    // The surface for the mode currently on screen.
+    getSurface = computed(() => (this.layoutConfig().darkTheme ? this.layoutConfig().surfaceDark : this.layoutConfig().surfaceLight));
 
     isOverlay = computed(() => this.layoutConfig().menuMode === 'overlay');
 

@@ -7,6 +7,7 @@ import { TagModule } from 'primeng/tag';
 import { CallLogEntry, CallStatus } from '../call-log.types';
 import { formatDuration } from '../format-utils';
 import { PageFillerRow, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 
 // Wording matches the stat cards above the table on purpose - "รับสาย" and
 // "ไม่ได้รับสาย" mean the same thing in both places, so a reader can tie a row
@@ -31,7 +32,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
 @Component({
     standalone: true,
     selector: 'app-call-log',
-    imports: [TableModule, SkeletonModule, ButtonModule, TagModule, TooltipModule],
+    imports: [TableModule, SkeletonModule, ButtonModule, TagModule, TooltipModule, TruncateTooltipDirective],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
@@ -40,7 +41,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
             <div class="flex items-baseline gap-2 min-w-0">
                 <div class="font-semibold text-xl">ประวัติการรับสาย</div>
                 @if (enabled() && health()) {
-                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate">{{ health() }}</span>
+                    <span class="text-sm text-surface-500 dark:text-surface-400 truncate" [appTruncateTooltip]="health()">{{ health() }}</span>
                 }
             </div>
             <!-- Switches the card off for this browser - see CardVisibilityService
@@ -157,7 +158,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                         <!-- Extension in place of a missing name, same rule as
                              the agent board: a handled call must never show a
                              blank operator just because a reference row is
-                             absent. title carries the full string, since a long
+                             absent. The tooltip carries the full string, since a long
                              Thai name is the first thing this column truncates. -->
                         <!-- A dash when the call never reached a desk: a
                              queue-full row carries the queue in destination,
@@ -165,7 +166,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                              a call nobody took. Otherwise the extension stands
                              in for a missing name, as on the agent board. -->
                         @if (call.reached_agent) {
-                            <td class="truncate" [title]="call.agent ?? call.extension">{{ call.agent ?? call.extension }}</td>
+                            <td class="truncate" [appTruncateTooltip]="call.agent ?? call.extension">{{ call.agent ?? call.extension }}</td>
                         } @else {
                             <td class="text-surface-400 dark:text-surface-500">—</td>
                         }

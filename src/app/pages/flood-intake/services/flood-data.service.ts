@@ -8,6 +8,7 @@ import {
     FloodFilterState,
     FloodLookupsResponse,
     FloodShift,
+    FloodSortOrder,
     FloodTab
 } from '../flood-intake.types';
 import { OptionGroup } from '../../../shared/recent-picks';
@@ -180,8 +181,18 @@ export class FloodDataService implements OnDestroy {
         this.patch({ dateFrom: null, dateTo: null, dates });
     }
 
+    // The amphoe/tambon pair behaves as it does in the drawer. Picking or
+    // clearing the amphoe drops the tambon, which may belong to another one.
     setDistrict(districtCode: string | null): void {
-        this.patch({ districtCode });
+        this.patch({ districtCode, subdistrictCode: null });
+    }
+
+    // Picking a tambon fills its amphoe in, since every tambon carries one;
+    // clearing it leaves the amphoe as it was.
+    setSubdistrict(subdistrictCode: string | null): void {
+        const subdistrict = this.subdistrictByCode(subdistrictCode);
+        if (subdistrict) this.patch({ subdistrictCode: subdistrict.subdistrict_code, districtCode: subdistrict.district_code });
+        else this.patch({ subdistrictCode: null });
     }
 
     setShift(shift: FloodShift | null): void {
@@ -192,13 +203,17 @@ export class FloodDataService implements OnDestroy {
         this.patch({ agentId });
     }
 
+    setOrder(order: FloodSortOrder): void {
+        this.patch({ order });
+    }
+
     clearFilters(): void {
         this.patch({ ...EMPTY_FILTERS });
     }
 
     readonly hasActiveFilters = computed(() => {
         const f = this._filters();
-        return !!(f.search || f.dateFrom || f.dateTo || f.dates.length || f.districtCode || f.shift || f.agentId || f.tab !== 'all');
+        return !!(f.search || f.dateFrom || f.dateTo || f.dates.length || f.districtCode || f.subdistrictCode || f.shift || f.agentId || f.tab !== 'all');
     });
 
     exportUrl(): string {

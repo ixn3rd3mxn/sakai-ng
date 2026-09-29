@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import date as date_cls
+from datetime import date as date_cls, timedelta
 from typing import Optional
 
 import httpx
@@ -349,6 +349,20 @@ def get_summary(date: Optional[date_cls] = Query(None), shift: Optional[str] = Q
     _require_lookups()
     ctx = _resolve(date, shift)
     return aggregations.build_summary(ctx)
+
+
+@app.get("/api/dashboard/summary/range")
+def get_summary_range(
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+    dates: Optional[list[date_cls]] = Query(None),
+):
+    """The dashboard's widgets over several operational days rather than one
+    shift, with the cards' diff against the previous period. Same parameters
+    and limits as /api/incident-history/range; a plain GET for the same
+    reason."""
+    _require_lookups()
+    return aggregations.build_summary_range(_range_days(date_from, date_to, dates), now_local())
 
 
 def _sse_data(payload: dict) -> str:
@@ -702,6 +716,37 @@ def get_incident_history(date: Optional[date_cls] = Query(None)):
     return aggregations.build_incident_history(ctx.operational_day, ctx.is_current, ctx.server_now)
 
 
+@app.get("/api/incident-history/range")
+def get_incident_history_range(
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+    dates: Optional[list[date_cls]] = Query(None),
+):
+    """The summary page over several operational days: `dates` for a set of
+    separate days, or `date_from`..`date_to` (inclusive) for a range. A plain
+    GET, not a stream - the days asked about are finished."""
+    _require_lookups()
+    return aggregations.build_incident_range(_range_days(date_from, date_to, dates), now_local())
+
+
+def _range_days(date_from: Optional[date_cls], date_to: Optional[date_cls], dates: Optional[list[date_cls]]) -> list[date_cls]:
+    """The operational days a range request names - `dates`, or every day
+    from `date_from` to `date_to` inclusive - refused as a 400 when missing,
+    backwards or over RANGE_MAX_DAYS. Shared by the summary page's and the
+    dashboard's range endpoints."""
+    if dates:
+        days = sorted(set(dates))
+    elif date_from and date_to:
+        if date_to < date_from:
+            raise HTTPException(status_code=400, detail="date_to is before date_from")
+        days = [date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1)]
+    else:
+        raise HTTPException(status_code=400, detail="send dates, or date_from and date_to")
+    if len(days) > aggregations.RANGE_MAX_DAYS:
+        raise HTTPException(status_code=400, detail=f"at most {aggregations.RANGE_MAX_DAYS} days")
+    return days
+
+
 @app.get("/api/incident-history/stream")
 async def stream_incident_history(request: Request, date: Optional[date_cls] = Query(None)):
     """Same wake-up/dedup mechanics as `stream_summary` above, but scoped to
@@ -842,12 +887,14 @@ def _flood_filters(
     date_to: Optional[date_cls],
     dates: Optional[list[date_cls]],
     district_code: Optional[str],
+    subdistrict_code: Optional[str],
     shift: Optional[str],
     agent_id: Optional[str],
     status: Optional[str],
     search: Optional[str],
     limit: int,
     offset: int,
+    order: Optional[str] = None,
 ) -> flood_cases.CaseFilters:
     return flood_cases.CaseFilters(
         tab=tab or flood_cases.TAB_ALL,
@@ -855,10 +902,12 @@ def _flood_filters(
         date_to=date_to,
         dates=dates,
         district_code=district_code,
+        subdistrict_code=subdistrict_code,
         shift=shift,
         agent_id=agent_id,
         status=status,
         search=search,
+        order=order or flood_cases.ORDER_DESC,
         limit=limit,
         offset=offset,
     )
@@ -913,15 +962,18 @@ def get_flood_cases(
     date_to: Optional[date_cls] = Query(None),
     dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
+    subdistrict_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    order: Optional[str] = Query(None),
     limit: int = Query(flood_cases.DEFAULT_LIMIT),
     offset: int = Query(0),
 ):
     filters = _flood_filters(
-        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search, limit, offset
+        tab, date_from, date_to, dates, district_code, subdistrict_code, shift, agent_id, status, search, limit, offset,
+        order,
     )
     try:
         return flood_cases.list_cases(filters)
@@ -937,10 +989,12 @@ async def stream_flood_cases(
     date_to: Optional[date_cls] = Query(None),
     dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
+    subdistrict_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    order: Optional[str] = Query(None),
     limit: int = Query(flood_cases.DEFAULT_LIMIT),
     offset: int = Query(0),
 ):
@@ -958,7 +1012,8 @@ async def stream_flood_cases(
     three EMS report pages rebuild their aggregations.
     """
     filters = _flood_filters(
-        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search, limit, offset
+        tab, date_from, date_to, dates, district_code, subdistrict_code, shift, agent_id, status, search, limit, offset,
+        order,
     )
 
     async def event_generator():
@@ -1003,6 +1058,7 @@ def export_flood_cases(
     date_to: Optional[date_cls] = Query(None),
     dates: Optional[list[date_cls]] = Query(None),
     district_code: Optional[str] = Query(None),
+    subdistrict_code: Optional[str] = Query(None),
     shift: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -1016,7 +1072,7 @@ def export_flood_cases(
     been sent on.
     """
     filters = _flood_filters(
-        tab, date_from, date_to, dates, district_code, shift, agent_id, status, search,
+        tab, date_from, date_to, dates, district_code, subdistrict_code, shift, agent_id, status, search,
         flood_cases.MAX_LIMIT, 0,
     )
     try:
@@ -1112,9 +1168,17 @@ def update_flood_case(case_id: str, body: FloodCaseUpdateIn):
         # exclude_unset: a field the client left out is not written, a field
         # it sent as null is cleared. That distinction is what lets two
         # operators finish different parts of one case at the same time.
-        result = flood_cases.apply_update(case_id, body.model_dump(exclude_unset=True))
+        payload = body.model_dump(exclude_unset=True)
+        base = payload.pop("base", None)
+        result = flood_cases.apply_update(case_id, payload, base=base)
     except flood_cases.FloodCaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except flood_cases.FloodCaseConflict as exc:
+        # The stored case rides along so the drawer can merge it and put the
+        # clash to the operator without another round trip.
+        raise HTTPException(
+            status_code=409, detail={"message": str(exc), "case": exc.case, "fields": exc.fields}
+        ) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="ไม่พบเคสนี้")
 

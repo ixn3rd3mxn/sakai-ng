@@ -169,9 +169,17 @@ export interface FloodFilterState {
     // the one date control is in one of three modes at a time.
     dates: string[];
     districtCode: string | null;
+    // Always a tambon of districtCode when both are set - the data service
+    // keeps the pair consistent, as the drawer does.
+    subdistrictCode: string | null;
     shift: FloodShift | null;
     agentId: string | null;
+    // Which way the table runs by time. Sorted by the server, since past
+    // the row limit the browser only holds one end of the set.
+    order: FloodSortOrder;
 }
+
+export type FloodSortOrder = 'desc' | 'asc';
 
 export const EMPTY_FILTERS: FloodFilterState = {
     tab: 'all',
@@ -180,8 +188,10 @@ export const EMPTY_FILTERS: FloodFilterState = {
     dateTo: null,
     dates: [],
     districtCode: null,
+    subdistrictCode: null,
     shift: null,
-    agentId: null
+    agentId: null,
+    order: 'desc'
 };
 
 // The body POST/PATCH accept. Only district, subdistrict and chief_complaint
@@ -191,8 +201,12 @@ export const EMPTY_FILTERS: FloodFilterState = {
  * A partial edit: only the fields present are written, so two operators
  * finishing different parts of one case cannot overwrite each other. A
  * field sent as null is cleared; a field left out is left alone.
+ *
+ * `base` is what the form started from for those same fields. If one of
+ * them has since been changed by someone else, the server answers 409 with
+ * the stored case instead of writing over it.
  */
-export type FloodCasePatch = Partial<FloodCaseInput>;
+export type FloodCasePatch = Partial<FloodCaseInput> & { base?: Partial<FloodCaseInput> };
 
 export interface FloodCaseInput {
     district: string;

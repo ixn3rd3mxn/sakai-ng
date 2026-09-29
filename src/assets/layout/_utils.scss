@@ -29,6 +29,34 @@
     }
 }
 
+/* Tooltips that show the rest of a truncated label (appTruncateTooltip,
+   shared/truncate-tooltip.directive.ts). The theme caps every tooltip at
+   12.5rem, which wrapped a full CBD name onto 2-3 lines with room to spare.
+   25rem holds the longest one (CBD23, ~360px) on one line and still breaks
+   anything longer at a readable measure instead of running across the
+   screen; on a phone the screen is the cap. Longer text wraps - never cut,
+   since showing all of it is the point. Two classes to beat .p-tooltip
+   whatever order the styles load in. */
+.p-tooltip.truncate-tooltip {
+    max-width: min(25rem, calc(100vw - 2rem));
+}
+
+/* The value shown in a closed p-select, from a #selectedItem template, for
+   the ones that give it appTruncateTooltip. PrimeNG's .p-select-label
+   already cuts a long value with an ellipsis, but the tooltip checks the
+   element it sits on, so this span does the cutting itself - same one line
+   and ellipsis as the label, nothing looks different. padding-block /
+   margin-block: room for Thai marks inside the clip - see "Thai marks and
+   clipped text" below. */
+.p-select-label > .select-value {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-block: 0.4em;
+    margin-block: -0.4em;
+}
+
 /* Select popups opened by a field carrying CenteredPanelDirective (see
    shared/centered-panel.directive.ts, which puts this class on the list via
    panelStyleClass). The directive sizes the list to its field's width and
@@ -42,6 +70,9 @@
       (SelectItem's template), with no class to hook. The span is a flex
       item, and a flex item refuses to shrink below its text unless
       min-width says it may - the ellipsis never appears otherwise.
+
+      padding-block / margin-block: room for Thai marks inside the clip -
+      see "Thai marks and clipped text" below.
 
    2. Never wider than the screen, from the moment the list is created. The
       directive sizes the list on show, but PrimeNG appends it to body at
@@ -59,7 +90,53 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        padding-block: 0.4em;
+        margin-block: -0.4em;
     }
+}
+
+/* Thai marks and clipped text.
+
+   html's line-height is 1.2 (_core.scss), and Tailwind's preflight gives
+   inputs font: inherit, so a line of text - in a div, a span or an input -
+   is a 1.2em box. In Sarabun that box runs from 1.02em above the baseline
+   to 0.18em below. Thai stacks marks past both edges: a tone mark over an
+   upper vowel (ที่, ปี้) reaches 1.25em, a lower vowel (ุ ู) 0.33em, and
+   0.54em under ฎ/ฏ. Drawn loose that is harmless - the marks just paint
+   outside the box. Anything that clips at the line box cuts them in half.
+
+   Two things clip there:
+
+   - overflow: hidden on a box with no padding of its own, which is every
+     one-line ellipsis. The fix is padding-block: 0.4em with margin-block:
+     -0.4em on the clipping box - the padding moves the clip edge out past
+     the marks, the margin hands the same space back, so nothing around it
+     moves. Used on the select lists above and the flood intake table.
+
+   - <input>. The browser clips the text to an inner box exactly one line
+     tall, and CSS cannot reach that box. The fix is
+     .thai-input below: a line tall enough for the marks (1.9em), paid for
+     out of the vertical padding (0.35em each side), so the field is the
+     same height as before - 1.9em + 2 x (0.5rem - 0.35em) = 1.2em + 1rem -
+     and the text sits on the same baseline. Two classes so it outranks
+     PrimeNG's own .p-inputtext padding. For pInputText inputs and, via
+     inputStyleClass, the input inside p-autocomplete.
+
+     The placeholder needs its own rule. Chrome draws it in a separate box
+     that it pins to line-height: normal with !important - 1.3em in
+     Sarabun, so the line-height above never reaches it - and clips that
+     box with overflow: hidden. A lower vowel (กู้ in "ประสานกู้ชีพ") hangs
+     past its bottom edge. Letting it overflow vertically draws the marks
+     into the field's padding, still inside the border. Horizontally it
+     stays clipped (clip, not hidden, since hidden would turn the visible
+     axis into auto), so a long placeholder is cut where it always was. */
+.p-inputtext.thai-input {
+    line-height: 1.9;
+    padding-block: calc(var(--p-inputtext-padding-y) - 0.35em);
+}
+.p-inputtext.thai-input::placeholder {
+    overflow-x: clip;
+    overflow-y: visible;
 }
 
 /* A box with the vertical metrics of a p-tag but no tag: the incident tables

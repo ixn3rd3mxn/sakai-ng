@@ -37,8 +37,10 @@ export class FloodApiService {
         if (filters.dateTo) params = params.set('date_to', filters.dateTo);
         for (const day of filters.dates) params = params.append('dates', day);
         if (filters.districtCode) params = params.set('district_code', filters.districtCode);
+        if (filters.subdistrictCode) params = params.set('subdistrict_code', filters.subdistrictCode);
         if (filters.shift) params = params.set('shift', filters.shift);
         if (filters.agentId) params = params.set('agent_id', filters.agentId);
+        if (filters.order === 'asc') params = params.set('order', 'asc');
         return params;
     }
 

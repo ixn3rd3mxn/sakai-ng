@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, computed, inject, signal, OnInit, viewChild } from '@angular/core';
 import { SpeedDialModule } from 'primeng/speeddial';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -6,25 +6,30 @@ import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { FormsModule } from '@angular/forms';
 import { MenuItem, MessageService, ConfirmationService } from 'primeng/api';
-import { ToastModule } from 'primeng/toast';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { MessageModule } from 'primeng/message';
-import { DatePickerModule } from 'primeng/datepicker';
+import { DatePicker, DatePickerModule } from 'primeng/datepicker';
 import { TooltipModule } from 'primeng/tooltip';
-import { CallTypeCode, IncidentCreateRequest, SHIFT_CODE_TO_LABEL, SHIFT_LABEL_TO_CODE, SelectOption, TimePeriod } from '../dispatch.types';
+import { CallTypeCode, IncidentCreateRequest, SHIFT_CODE_TO_LABEL, SHIFT_LABEL_TO_CODE, SelectOption, ShiftCode, TimePeriod } from '../dispatch.types';
 import { DispatchApiService } from '../services/dispatch-api.service';
 import { DispatchDataService } from '../services/dispatch-data.service';
-import { formatDateParam, parseIsoDate } from '../services/date-utils';
+import { formatBuddhistDay, formatDateParam, parseIsoDate } from '../services/date-utils';
+
+type DateMode = 'single' | 'multiple' | 'range';
 import { BuddhistYearDirective } from '../../../shared/buddhist-year.directive';
+import { DatePickerBoundsDirective } from '../../../shared/datepicker-bounds.directive';
 import { CenteredPanelDirective } from '../../../shared/centered-panel.directive';
+import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
 import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
 
 @Component({
     standalone: true,
     selector: 'app-dispatch-action-dial',
-    imports: [ToastModule, SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule, TooltipModule, BuddhistYearDirective, CenteredPanelDirective],
-    template: `<p-toast />
-    <p-confirmdialog />
+    imports: [SpeedDialModule, DialogModule, ButtonModule, SelectModule, SelectButtonModule, FormsModule, ConfirmDialogModule, MessageModule, DatePickerModule, TooltipModule, BuddhistYearDirective, DatePickerBoundsDirective, CenteredPanelDirective, TruncateTooltipDirective],
+    template: `
+    <!-- PrimeNG's natural size everywhere except phones in portrait - see
+         .save-confirm-dialog in the styles below. -->
+    <p-confirmdialog styleClass="save-confirm-dialog" />
     <!-- Two controls, not one three-item menu. Saving is what this page is for
     and it was buried a tap deep behind a fan shared with two settings actions;
     the two that change which day you are looking at are occasional, so they
@@ -56,43 +61,71 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
 
     <!-- A button, not a one-item speed dial: there is no menu to open, so the
     fan animation would be a frame of delay in front of the only thing it can
-    do. 50px to match the dial trigger above it. -->
-    <p-button
-        icon="pi pi-pencil"
-        styleClass="save-fab"
-        [rounded]="true"
-        [raised]="true"
-        pTooltip=""
-        tooltipPosition="left"
-        ariaLabel="บันทึกข้อมูล"
-        [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10, width: '50px', height: '50px' }"
-        (onClick)="openSaveDialog()"
-    />
+    do. 50px to match the dial trigger above it.
 
-    <p-dialog header="สลับวัน" [(visible)]="displayDateTime" [breakpoints]="{ '1400px': '21vw', '1100px': '29vw', '960px': '33vw', '500px': '75vw' }" [style]="{ width: '18vw' }" [modal]="true">
-        <div class="flex gap-4">
-            <div class="flex flex-col gap-1 flex-1 min-w-0"><div class="font-semibold">เลือกเวร</div><p-select [(ngModel)]="tempSelectedTime" [options]="timeOptions" optionLabel="name" placeholder="เลือกเวร" class="w-full" appendTo="body" /></div>
-            <div class="flex flex-col gap-1 flex-1 min-w-0">
-                <div class="font-semibold">เลือกวัน</div>
-                <!-- centeredPanel: the popup is wider than this input, so it is
-                     centred under it (on a phone, on the screen) rather than hung
-                     off its left edge. See CenteredPanelDirective. -->
-                <p-datepicker
-                    buddhistYear
-                    centeredPanel
-                    [(ngModel)]="tempSelectedDate"
-                    [minDate]="minDate"
-                    [maxDate]="maxDate"
-                    [readonlyInput]="true"
-                    dateFormat="dd/mm/yy"
-                    placeholder="เลือกวัน"
-                    class="w-full"
-                    appendTo="body"
-                />
+    The always-true @if is on purpose. p-button's <button> is a top-level
+    node of its template, so it lands in the DOM bare - no classes, no fixed
+    position - one step before its bindings are applied. When the page is
+    re-entered through the router, the browser styles it in that bare state,
+    and then Button's background/border/shadow transitions fade it to green.
+    That fade is the flash on returning to this page. The dial above never
+    does it because SpeedDial keeps its trigger inside an *ngIf, and a node
+    inside a control-flow block is only created when its bindings are applied.
+    This block does the same for this button. -->
+    @if (true) {
+        <p-button
+            icon="pi pi-pencil"
+            styleClass="save-fab"
+            [rounded]="true"
+            [raised]="true"
+            pTooltip=""
+            tooltipPosition="left"
+            ariaLabel="บันทึกข้อมูล"
+            [style]="{ position: 'fixed', right: '1rem', bottom: '1rem', zIndex: 10, width: '50px', height: '50px' }"
+            (onClick)="openSaveDialog()"
+        />
+    }
+
+    <!-- The same dialog as /report/summary's สลับวัน - modes, calendar always
+         open, presets - plus the shift, which only one day has: the board is
+         one shift of one day, or several days with all their shifts. No
+         width: the calendar decides it; maxWidth keeps it on a phone. -->
+    <p-dialog header="สลับวัน" [(visible)]="displayDateTime" [style]="{ maxWidth: '92vw' }" [modal]="true" (onShow)="onDateDialogShow()">
+        <div class="flex flex-col gap-3">
+            <p-selectbutton [options]="dateModes" optionLabel="label" optionValue="value" [ngModel]="dateMode" (ngModelChange)="setDateMode($event)" [allowEmpty]="false" size="small" />
+            @if (dateMode === 'single') {
+                <p-selectbutton [options]="timeOptions" optionLabel="name" optionValue="name" [(ngModel)]="tempShiftName" [allowEmpty]="false" size="small" />
+            }
+            <div class="flex flex-col gap-1">
+                <p-datepicker buddhistYear inline [selectionMode]="dateMode" [(ngModel)]="tempDateValue" [minDate]="minDate" [maxDate]="maxDate" />
+                @if (dateMode === 'range') {
+                    <!-- Under the calendar they fill; ยืนยัน applies as usual.
+                         The last one takes what the row has left. -->
+                    <div class="flex flex-wrap gap-1 mt-1">
+                        @for (preset of datePresets; track preset.label; let last = $last) {
+                            <p-button
+                                [label]="preset.label"
+                                size="small"
+                                severity="secondary"
+                                [outlined]="true"
+                                [fluid]="last"
+                                [style.flex]="last ? '1 1 auto' : null"
+                                (onClick)="applyDatePreset(preset.range())"
+                            />
+                        }
+                    </div>
+                }
             </div>
         </div>
         <ng-template #footer>
-            <p-button label="รีเซ็ต" severity="secondary" (click)="resetDateTime()" />
+            <!-- The pair that changes the pick on the left, the pair that
+                 closes the dialog on the right - the same footer as the other
+                 สลับวัน. Neither on the left applies anything; ยืนยัน does. -->
+            <span class="mr-auto flex gap-2">
+                <p-button label="ล้าง" [text]="true" (click)="clearDatePick()" />
+                <p-button label="วันนี้" [text]="true" (click)="pickToday()" />
+            </span>
+            <p-button label="ยกเลิก" severity="secondary" (click)="displayDateTime = false" />
             <p-button label="ยืนยัน" (click)="confirmDateTime()" />
         </ng-template>
     </p-dialog>
@@ -108,7 +141,7 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
         </ng-template>
     </p-dialog>
 
-    <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '30vw', '1100px': '40vw', '960px': '44vw', '500px': '89vw' }" [style]="{ width: '25vw' }" [modal]="true">
+    <p-dialog header="บันทึกข้อมูล" [(visible)]="display" [breakpoints]="{ '1400px': '30vw', '1100px': '40vw', '960px': '52vw', '500px': '89vw' }" [style]="{ width: '24vw' }" [modal]="true">
         <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <div class="font-semibold">ประเภท</div>
@@ -190,7 +223,20 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
                             class="w-full"
                             appendTo="body"
                             [invalid]="isCbdInvalid"
-                        />
+                        >
+                            <!-- Same bare span PrimeNG renders (layout/_utils.scss
+                                 cuts it with an ellipsis), plus the tooltip for a
+                                 name that does not fit the list. -->
+                            <ng-template #item let-option>
+                                <span [appTruncateTooltip]="option.name">{{ option.name }}</span>
+                            </ng-template>
+                            <!-- The chosen name in the closed field: same ellipsis
+                                 as PrimeNG's own, plus the tooltip when it is cut
+                                 (.select-value, layout/_utils.scss). -->
+                            <ng-template #selectedItem let-option>
+                                <span class="select-value" [appTruncateTooltip]="option.name">{{ option.name }}</span>
+                            </ng-template>
+                        </p-select>
                     </div>
                     @if (isCbdInvalid) {
                         <p-message severity="error" size="small" variant="simple">โปรดเลือก CBD</p-message>
@@ -199,7 +245,14 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
                 <div class="flex flex-col gap-1">
                     <div class="font-semibold">ระดับความรุนแรง</div>
                     <div class="w-full">
-                        <p-select centeredPanel [(ngModel)]="severity" [options]="severityOptions" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [invalid]="isSeverityInvalid" />
+                        <p-select centeredPanel [(ngModel)]="severity" [options]="severityOptions" optionLabel="name" placeholder="เลือกระดับความรุนแรง" class="w-full" appendTo="body" [showClear]="true" [invalid]="isSeverityInvalid">
+                            <ng-template #item let-option>
+                                <span [appTruncateTooltip]="option.name">{{ option.name }}</span>
+                            </ng-template>
+                            <ng-template #selectedItem let-option>
+                                <span class="select-value" [appTruncateTooltip]="option.name">{{ option.name }}</span>
+                            </ng-template>
+                        </p-select>
                     </div>
                     @if (isSeverityInvalid) {
                         <p-message severity="error" size="small" variant="simple">โปรดเลือกระดับความรุนแรง</p-message>
@@ -294,6 +347,26 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
             transform: rotate(90deg);
         }
 
+        /* ยืนยันการบันทึก on a phone. Sized to its own text, the longest CBD
+           or severity line pushed it out until it touched both edges of the
+           screen - on every phone tested in portrait (iPhone SE to 16, Pixel
+           9 Pro Fold, Galaxy Z Fold 6). There it takes the บันทึกข้อมูล
+           dialog's phone width (its 500px breakpoint), so it opens at the
+           same width as the form it confirms and long lines wrap inside it.
+           Everywhere wider it keeps PrimeNG's natural size.
+
+           A rule here, not p-confirmdialog's [breakpoints]: in PrimeNG 21
+           that input does nothing. ConfirmDialog aims its media query at
+           .p-dialog[its own id], but never puts that id on the dialog it
+           renders, nor passes breakpoints down to it. styleClass does reach
+           the dialog. Not under :host - the dialog is rendered by
+           ConfirmDialog, outside this component's template. */
+        @media screen and (max-width: 500px) {
+            ::ng-deep .p-dialog.save-confirm-dialog {
+                width: 89vw;
+            }
+        }
+
         /* Shared by all three button groups in this dialog. PrimeNG lays a
            SelectButton out as a nowrap flex row sized to its content, with the
            inner radii stripped to fake one segmented control. These groups
@@ -355,22 +428,51 @@ import { RecentPicksStore, groupByRecent } from '../../../shared/recent-picks';
             flex: 1 1 calc(33.333% - 0.167rem);
         }
     `,
-    providers: [MessageService, ConfirmationService]
+    // MessageService comes from EmergencyDispatchDashboard, which owns the
+    // <p-toast /> - the heading's refresh button reports through it too.
+    providers: [ConfirmationService]
 })
 export class DispatchActionDial implements OnInit {
     private messageService = inject(MessageService);
     private confirmationService = inject(ConfirmationService);
     private api = inject(DispatchApiService);
+    // The app is zoneless: a reply that sets plain fields - pickToday's - has
+    // to say that the dialog needs drawing again.
+    private readonly cdr = inject(ChangeDetectorRef);
     private dataService = inject(DispatchDataService);
 
     menuItems: MenuItem[] | null = null;
 
     displayDateTime: boolean = false;
     displaySaveWarning: boolean = false;
-    tempSelectedDate: Date | undefined;
-    tempSelectedTime: TimePeriod | undefined;
     minDate: Date | undefined;
     maxDate: Date | undefined;
+
+    // สลับวัน: the same three modes as /report/summary's.
+    readonly dateModes: { label: string; value: DateMode }[] = [
+        { label: 'วันเดียว', value: 'single' },
+        { label: 'หลายวัน', value: 'multiple' },
+        { label: 'ช่วงวันที่', value: 'range' }
+    ];
+    dateMode: DateMode = 'single';
+    // In the shape the picker's mode expects: a Date, a Date[], or [from, to].
+    tempDateValue: Date | Date[] | null = null;
+    // The shift, วันเดียว only: เช้า / บ่าย / ดึก.
+    tempShiftName: string | null = null;
+    // The shift the dialog opened on - the board's - which a mode switch goes
+    // back to along with clearing the dates.
+    private openedShiftName: string | null = null;
+
+    // Each ends today and starts no earlier than the first day with data.
+    readonly datePresets: { label: string; range: () => [Date, Date] }[] = [
+        { label: 'เดือนนี้', range: () => this.monthsBack(0) },
+        { label: 'เดือนที่แล้ว', range: () => this.lastMonth() },
+        { label: '3 เดือนล่าสุด', range: () => this.monthsBack(2) },
+        { label: 'ปีนี้', range: () => this.clampToMin(new Date(this.today().getFullYear(), 0, 1), this.today()) }
+    ];
+
+    private readonly datePicker = viewChild(DatePicker);
+    private readonly calendar = viewChild(BuddhistYearDirective);
 
     // Buddhist-era rendering (and keeping the popup one size across its
     // day/month/year views) lives in BuddhistYearDirective - see the
@@ -513,7 +615,7 @@ export class DispatchActionDial implements OnInit {
         { name: 'CBD20 เด็ก ทารก' },
         { name: 'CBD21 ถูกทำร้าย / บาดเจ็บ' },
         { name: 'CBD22 ไฟไหม้ / อุบัติเหตุจากการลวก / ไฟช็อต' },
-        { name: 'CBD23 ตกน้ำ / จมน้ำ / บาดเจ็บเหตุด้าน้ำ / บาดเจ็บทางน้ำ' },
+        { name: 'CBD23 ตกน้ำ / จมน้ำ / บาดเจ็บเหตุดำน้ำ / บาดเจ็บทางน้ำ' },
         { name: 'CBD24 พลัดตก หกล้ม' },
         { name: 'CBD25 อุบัติเหตุจราจร' }
     ];
@@ -681,74 +783,173 @@ export class DispatchActionDial implements OnInit {
 
     resetAndOpenSaveDialog() {
         this.dataService.selectCurrent();
+        this.messageService.add({ severity: 'success', summary: 'รีเซ็ตเป็นปัจจุบัน', detail: 'กำลังดูข้อมูลปัจจุบัน' });
 
         this.displaySaveWarning = false;
         this.display = true;
     }
 
+    // Opens on what the board shows: the range and its mode, or the day and
+    // shift. Up to today each time, so a board left open overnight still
+    // reaches the new day.
     openDateTimeDialog() {
-        this.tempSelectedDate = this.dataService.selectedDate();
-        this.tempSelectedTime = { name: SHIFT_CODE_TO_LABEL[this.dataService.selectedShift()] };
+        this.maxDate = this.today();
+        const range = this.dataService.rangeSelection();
+        if (range?.kind === 'range') {
+            this.dateMode = 'range';
+            this.tempDateValue = [range.from, range.to];
+        } else if (range?.kind === 'days') {
+            this.dateMode = 'multiple';
+            this.tempDateValue = [...range.dates];
+        } else {
+            this.dateMode = 'single';
+            this.tempDateValue = this.dataService.selectedDate();
+        }
+        this.openedShiftName = SHIFT_CODE_TO_LABEL[this.dataService.selectedShift()];
+        this.tempShiftName = this.openedShiftName;
         this.displayDateTime = true;
     }
 
-    resetDateTime() {
-        // The "current" date/shift is resolved server-side, same source of
-        // truth as everything else - never computed here.
-        this.api.getContext().subscribe((ctx) => {
-            this.tempSelectedDate = parseIsoDate(ctx.operational_day);
-            this.tempSelectedTime = { name: SHIFT_CODE_TO_LABEL[ctx.shift] };
-        });
-    }
-
-    confirmDateTime() {
-        if (this.tempSelectedDate && this.tempSelectedTime) {
-            const chosenDate = this.tempSelectedDate;
-            const shiftCode = SHIFT_LABEL_TO_CODE[this.tempSelectedTime.name];
-
-            // Choosing the day and shift that are current *right now* means
-            // "follow the board", not "pin me to these values". Pinning them
-            // looks identical until the clock crosses a shift boundary, at
-            // which point the selection stops following it: at 16:30 the board
-            // sits on the finished morning shift, flips to is_current:false,
-            // and waits for someone to notice the warning. The dialog opens
-            // pre-filled with the current day and shift, so confirming without
-            // changing anything used to be enough to freeze a live board.
-            //
-            // Which day and shift are current is resolved server-side, same
-            // source of truth as resetDateTime above - never computed here.
-            this.api.getContext().subscribe({
-                next: (ctx) => {
-                    if (formatDateParam(chosenDate) === ctx.operational_day && shiftCode === ctx.shift) {
-                        this.dataService.selectCurrent();
-                    } else {
-                        this.dataService.select(chosenDate, shiftCode);
-                    }
-                },
-                // Pin it, which is what this always did. The board then shows
-                // the historical warning if the guess was wrong, rather than
-                // silently claiming to be live.
-                error: () => this.dataService.select(chosenDate, shiftCode)
-            });
-
-            this.messageService.add({
-                severity: 'success',
-                summary: 'สลับวัน',
-                detail: `เลือกวัน: ${this.tempSelectedDate.toLocaleDateString('th-TH')} เวลา: ${this.tempSelectedTime.name}`
-            });
-            this.displayDateTime = false;
-        } else {
-            this.messageService.add({
-                severity: 'error',
-                summary: 'ข้อมูลไม่สมบูรณ์',
-                detail: 'โปรดเลือกวันที่และเวลา'
-            });
+    // As /report/summary's dialog and the flood intake's วันที่ filter: each
+    // mode keeps its value in a different shape, so a switch clears it - a
+    // half-picked range inside the picker too - and starts on the day grid.
+    // The shift goes back to where the dialog started too, rather than a pick
+    // made before the detour surviving into the next วันเดียว unnoticed.
+    setDateMode(mode: DateMode) {
+        if (mode === this.dateMode) return;
+        this.dateMode = mode;
+        this.tempDateValue = null;
+        this.tempShiftName = this.openedShiftName;
+        const picker = this.datePicker();
+        if (picker) {
+            picker.writeControlValue(null);
+            picker.setCurrentView('date');
         }
     }
 
+    // Back to the day grid on the month of the value each time it opens, and
+    // re-measured now that it is laid out in the dialog.
+    onDateDialogShow() {
+        const picker = this.datePicker();
+        if (picker) {
+            picker.setCurrentView('date');
+            picker.updateUI();
+        }
+        this.calendar()?.remeasure();
+    }
+
+    applyDatePreset([from, to]: [Date, Date]) {
+        this.tempDateValue = [from, to];
+        this.datePicker()?.setCurrentView('date');
+    }
+
+    // Back to the current day and shift - resolved server-side, same source
+    // of truth as everything else, never computed here.
+    // The board as it is now: วันเดียว, today and the shift on now - from any
+    // mode, since "now" on this board is one shift. What the old รีเซ็ต did.
+    // Which day and shift are current is resolved server-side, never
+    // computed here.
+    pickToday() {
+        this.api.getContext().subscribe((ctx) => {
+            this.setDateMode('single');
+            this.tempDateValue = parseIsoDate(ctx.operational_day);
+            // The shift on now becomes the one a mode switch returns to.
+            this.openedShiftName = SHIFT_CODE_TO_LABEL[ctx.shift];
+            this.tempShiftName = this.openedShiftName;
+            this.datePicker()?.setCurrentView('date');
+            this.cdr.markForCheck();
+        });
+    }
+
+    clearDatePick() {
+        this.tempDateValue = null;
+        // A half-picked range is held inside the picker; clear it there too.
+        this.datePicker()?.writeControlValue(null);
+    }
+
+    confirmDateTime() {
+        const value = this.tempDateValue;
+        const days = Array.isArray(value) ? value.filter((d): d is Date => !!d) : value ? [value] : [];
+        if (!days.length || (this.dateMode === 'single' && !this.tempShiftName)) {
+            this.messageService.add({ severity: 'error', summary: 'ข้อมูลไม่สมบูรณ์', detail: 'โปรดเลือกวันที่และเวลา' });
+            return;
+        }
+
+        const fmt = formatBuddhistDay;
+        let detail: string;
+        if (this.dateMode === 'range') {
+            // A range with only its start picked means that one day - all
+            // three shifts of it, as any several-days board is.
+            const [from, to = from] = days;
+            this.dataService.selectRange({ kind: 'range', from, to });
+            detail = `เลือกช่วง: ${fmt(from)} – ${fmt(to)}`;
+        } else if (this.dateMode === 'multiple') {
+            const sorted = [...days].sort((a, b) => a.getTime() - b.getTime());
+            this.dataService.selectRange({ kind: 'days', dates: sorted });
+            detail = sorted.length === 1 ? `เลือกวัน: ${fmt(sorted[0])}` : `เลือก ${sorted.length} วัน`;
+        } else {
+            this.selectShift(days[0], SHIFT_LABEL_TO_CODE[this.tempShiftName!]);
+            detail = `เลือกวัน: ${fmt(days[0])} เวลา: ${this.tempShiftName}`;
+        }
+        this.messageService.add({ severity: 'success', summary: 'สลับวัน', detail });
+        this.displayDateTime = false;
+    }
+
+    // One day and shift.
+    //
+    // Choosing the day and shift that are current *right now* means "follow
+    // the board", not "pin me to these values". Pinning them looks identical
+    // until the clock crosses a shift boundary, at which point the selection
+    // stops following it: at 16:30 the board sits on the finished morning
+    // shift, flips to is_current:false, and waits for someone to notice the
+    // warning. The dialog opens pre-filled with the current day and shift, so
+    // confirming without changing anything used to be enough to freeze a live
+    // board.
+    //
+    // Which day and shift are current is resolved server-side, same source of
+    // truth as pickToday above - never computed here.
+    private selectShift(chosenDate: Date, shiftCode: ShiftCode) {
+        this.api.getContext().subscribe({
+            next: (ctx) => {
+                if (formatDateParam(chosenDate) === ctx.operational_day && shiftCode === ctx.shift) {
+                    this.dataService.selectCurrent();
+                } else {
+                    this.dataService.select(chosenDate, shiftCode);
+                }
+            },
+            // Pin it, which is what this always did. The board then shows the
+            // historical warning if the guess was wrong, rather than silently
+            // claiming to be live.
+            error: () => this.dataService.select(chosenDate, shiftCode)
+        });
+    }
+
+    private clampToMin(from: Date, to: Date): [Date, Date] {
+        return [this.minDate && from < this.minDate ? this.minDate : from, to];
+    }
+
+    // The 1st of the month `back` months ago, to today.
+    private monthsBack(back: number): [Date, Date] {
+        const today = this.today();
+        return this.clampToMin(new Date(today.getFullYear(), today.getMonth() - back, 1), today);
+    }
+
+    private lastMonth(): [Date, Date] {
+        const today = this.today();
+        return this.clampToMin(new Date(today.getFullYear(), today.getMonth() - 1, 1), new Date(today.getFullYear(), today.getMonth(), 0));
+    }
+
+    // Nothing past today, as on /report/summary: a day that has not come has
+    // no board to show. (This used to be new Date(2027, 12, 31) - month 12 is
+    // January of the next year - so the calendar ran on to 31 Jan 2028.)
     setupDateBoundaries() {
         this.minDate = new Date(2026, 7, 1);
-        this.maxDate = new Date(2027, 12, 31);
+        this.maxDate = this.today();
+    }
+
+    // The centre's operational day, from the server's clock in the last board.
+    private today(): Date {
+        return this.dataService.currentOperationalDay();
     }
 
     ngOnInit() {

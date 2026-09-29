@@ -120,6 +120,12 @@ class FloodCaseUpdateIn(FloodCaseCreateIn):
     subdistrict: Optional[str] = None  # type: ignore[assignment]
     chief_complaint: Optional[str] = None  # type: ignore[assignment]
 
+    # The values the form started from, for the fields it is sending. A
+    # field stored differently from its `base` was changed by someone else
+    # after this form loaded, and the save is refused rather than written
+    # over it (see `flood_cases.apply_update`). Absent means unchecked.
+    base: Optional[FloodCaseUpdateIn] = None
+
 
 class FloodCaseStatusIn(BaseModel):
     """Body for the status-only updates.
