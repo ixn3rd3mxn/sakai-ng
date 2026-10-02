@@ -5,6 +5,7 @@ import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { parseIsoDate } from '../../dashboardclone/services/date-utils';
 import { TopDayItem } from '../incident-history.types';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 interface Bucket {
     label: string;
@@ -28,9 +29,13 @@ const longDay = (d: Date) => d.toLocaleDateString('th-TH', { day: 'numeric', mon
 @Component({
     selector: 'app-incident-range-trend',
     standalone: true,
-    imports: [ChartModule, SkeletonModule, DecimalPipe],
+    imports: [ChartModule, SkeletonModule, DecimalPipe, TableEmptyState],
     template: `
-        <div class="card" style="margin-bottom: 0.25rem">
+        <!-- With a height given, the card is pinned to it and the chart takes
+             whatever the heading and note leave; without one, the chart is
+             its own 18rem and the card grows around it. The chart box needs a
+             definite height either way - Chart.js reads it on creation. -->
+        <div class="card" style="margin-bottom: 0.25rem; display: flex; flex-direction: column" [style.height]="height()">
             <div class="flex flex-wrap justify-between items-baseline gap-x-4 gap-y-1 mb-4">
                 <div class="font-semibold text-xl">จำนวนเหตุการณ์ตามช่วงเวลา</div>
                 @if (!loading()) {
@@ -39,14 +44,21 @@ const longDay = (d: Date) => d.toLocaleDateString('th-TH', { day: 'numeric', mon
                     </div>
                 }
             </div>
-            <div style="height: 18rem">
-                @if (loading()) {
+            <div [style.height]="height() ? null : '18rem'" [style.flex]="height() ? '1 1 0' : null" style="min-height: 0">
+                @if (failed()) {
+                    <app-table-empty-state class="h-full" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                } @else if (loading()) {
                     <p-skeleton width="100%" height="100%" />
+                } @else if (total() === 0) {
+                    <!-- Chart.js draws bare axes for all-zero bars, which reads
+                         as a broken card - same empty state as
+                         เคส CBD ที่เกิดเหตุบ่อยที่สุด. -->
+                    <app-table-empty-state class="h-full" icon="pi-chart-bar" title="ยังไม่มีการบันทึกข้อมูล" subtitle="จำนวนเหตุการณ์ในแต่ละวันจะแสดงที่นี่" />
                 } @else {
                     <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="block h-full" />
                 }
             </div>
-            @if (!loading() && groupingNote()) {
+            @if (!loading() && total() > 0 && groupingNote()) {
                 <div class="text-sm text-muted-color mt-3">{{ groupingNote() }}</div>
             }
         </div>
@@ -80,6 +92,14 @@ export class IncidentRangeTrend {
     // number: grouping them into weeks would invent days nobody asked about.
     readonly continuous = input(true);
     readonly loading = input(false);
+    // The source could not be reached for the selection on screen. Wins over
+    // `loading`, which stays up meanwhile: the card says so instead of a
+    // skeleton that would never end. Cleared, back to the skeleton, once
+    // the connection is back - see the page's data service.
+    readonly failed = input(false);
+    // The whole card's height, for a page where this card stands in for
+    // another and should be the same size; null keeps the chart at 18rem.
+    readonly height = input<string | null>(null);
 
     protected readonly total = computed(() => this.days().reduce((sum, day) => sum + day.count, 0));
 

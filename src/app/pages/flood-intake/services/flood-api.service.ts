@@ -13,7 +13,7 @@ import {
     FloodLookupsResponse
 } from '../flood-intake.types';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { StreamEvents, resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -59,8 +59,9 @@ export class FloodApiService {
     //
     // Reconnection is not left to the browser: EventSource gives up for good
     // on a response that is not a stream, which is what a backend restart
-    // hands it. See the comment on `resilientEventSource`.
-    streamCases(filters: FloodFilterState): Observable<FloodCasesResponse> {
+    // hands it. See the comment on `resilientEventSource`, which `events`
+    // is handed to: it hears the connection fail and connect.
+    streamCases(filters: FloodFilterState, events?: StreamEvents): Observable<FloodCasesResponse> {
         return new Observable<FloodCasesResponse>((subscriber) => {
             const query = this.buildParams(filters).toString();
             // Runs for every source the helper opens, not only the first: a
@@ -74,7 +75,7 @@ export class FloodApiService {
                         // ignore malformed frames
                     }
                 });
-            });
+            }, events);
         });
     }
 

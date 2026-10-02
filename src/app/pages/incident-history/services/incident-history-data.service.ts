@@ -1,7 +1,9 @@
 import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
-import { BehaviorSubject, EMPTY, Subscription, catchError, map, switchMap, takeWhile } from 'rxjs';
+import { BehaviorSubject, Subscription, map, switchMap, takeWhile } from 'rxjs';
+import { retryUntilReachable } from '@/app/core/retry-until-reachable';
 import { IncidentHistoryResponse, IncidentRangeResponse, IncidentRangeSelection, LookupsResponse } from '../incident-history.types';
 import { IncidentHistoryApiService } from './incident-history-api.service';
+import { StreamEvents } from '@/app/core/sse-reconnect';
 import { currentOperationalDay, formatDateParam, parseIsoDate } from '../../dashboardclone/services/date-utils';
 
 // Owns the single date selection for the incident history page and the live
@@ -30,6 +32,27 @@ export class IncidentHistoryDataService implements OnDestroy {
 
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
+
+    // The source could not be reached for the current request: the day's
+    // stream or the range request failed before any answer. The tables say
+    // so rather than sitting on a skeleton for good or reading as "nothing
+    // recorded". `loading` is left alone, so the rest of the page keeps its
+    // skeleton instead of showing the last request's numbers under the new
+    // heading. Both keep retrying underneath; once one gets through - the
+    // stream connects, or the network comes back for the range - the
+    // skeleton is back until the data lands. Nobody has to ask again.
+    private readonly _failed = signal<boolean>(false);
+    readonly failed = this._failed.asReadonly();
+    private readonly connection: StreamEvents = {
+        error: () => {
+            if (this._loading()) this._failed.set(true);
+        },
+        // Connected again after failing: back to the skeleton until the
+        // first frame, which can take a moment on a heavy request. Before
+        // that the message stays up - the retries through an outage are not
+        // shown one by one.
+        open: () => this._failed.set(false)
+    };
 
     // Set when a range is asked for, not when it arrives: the tables switch
     // to the range columns (as skeletons) at once rather than showing the
@@ -75,7 +98,7 @@ export class IncidentHistoryDataService implements OnDestroy {
             .pipe(
                 switchMap((request) =>
                     request.kind === 'day'
-                        ? this.api.streamHistory(request.date ?? undefined).pipe(
+                        ? this.api.streamHistory(request.date ?? undefined, this.connection).pipe(
                               // A finished day cannot change, so the connection is
                               // dropped as soon as the server says the day is not
                               // current. The `true` keeps that final frame rather
@@ -84,24 +107,27 @@ export class IncidentHistoryDataService implements OnDestroy {
                               map((snapshot) => ({ day: snapshot }))
                           )
                         : this.api.getRange(request).pipe(
-                              map((range) => ({ range })),
-                              // A failed request must not end the page's one
-                              // subscription; the skeleton just comes down.
-                              catchError(() => {
-                                  this._loading.set(false);
-                                  return EMPTY;
-                              })
+                              // Asked again until it answers, as the day's
+                              // stream reconnects; it never errors out, so the
+                              // page's one subscription cannot end on it.
+                              retryUntilReachable(
+                                  () => this._failed.set(true),
+                                  () => this._failed.set(false)
+                              ),
+                              map((range) => ({ range }))
                           )
                 )
             )
             .subscribe((result) => {
                 if ('day' in result) this._history.set(result.day);
                 else this._range.set(result.range);
+                this._failed.set(false);
                 this._loading.set(false);
             });
     }
 
     select(date: Date): void {
+        this._failed.set(false);
         this._loading.set(true);
         this._rangeSelection.set(null);
         this.request$.next({ kind: 'day', date: formatDateParam(date) });
@@ -112,12 +138,14 @@ export class IncidentHistoryDataService implements OnDestroy {
     selectRange(selection: IncidentRangeSelection): void {
         const single = selection.kind === 'days' ? (selection.dates.length === 1 ? selection.dates[0] : null) : formatDateParam(selection.from) === formatDateParam(selection.to) ? selection.from : null;
         if (single) return this.select(single);
+        this._failed.set(false);
         this._loading.set(true);
         this._rangeSelection.set(selection);
         this.request$.next(selection);
     }
 
     selectCurrent(): void {
+        this._failed.set(false);
         this._loading.set(true);
         this._rangeSelection.set(null);
         this.request$.next({ kind: 'day', date: null });

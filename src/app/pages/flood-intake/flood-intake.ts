@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -12,7 +12,7 @@ import { InputIconModule } from 'primeng/inputicon';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { SkeletonModule } from 'primeng/skeleton';
-import { TableModule } from 'primeng/table';
+import { Table, TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { ToastModule } from 'primeng/toast';
 import { TooltipModule } from 'primeng/tooltip';
@@ -28,6 +28,7 @@ import { FloodDataService } from './services/flood-data.service';
 import { FloodDraftService } from './services/flood-draft.service';
 import { TruncateTooltipDirective } from '../../shared/truncate-tooltip.directive';
 import { OpenBelowDirective } from '../../shared/open-below.directive';
+import { TableEmptyState } from '../../shared/table-empty-state';
 // Header drag-to-reorder is off for now - see the <p-table> in the template.
 // import { ReorderableColumnFixDirective } from '../../shared/reorderable-column-fix.directive';
 
@@ -40,6 +41,8 @@ interface TabDefinition {
 // is already struggling helps nobody. The `online` event covers the case where
 // the link comes back before the next tick.
 const OUTBOX_RETRY_MS = 20_000;
+
+const NARROW_PHONE = '(max-width: 360px)';
 
 @Component({
     selector: 'app-flood-intake',
@@ -63,7 +66,8 @@ const OUTBOX_RETRY_MS = 20_000;
         // ReorderableColumnFixDirective,
         FloodCaseFormDrawer,
         FloodColumnSettings,
-        FloodDateFilter
+        FloodDateFilter,
+        TableEmptyState
     ],
     providers: [FloodDataService, FloodDraftService, FloodColumnsService, MessageService, ConfirmationService],
     styles: [
@@ -90,6 +94,13 @@ const OUTBOX_RETRY_MS = 20_000;
                clamped so nothing can push past it. */
             :host ::ng-deep .flood-table .p-datatable-tbody > tr {
                 height: 57px;
+            }
+
+            /* The empty row stands in for the eight skeleton rows
+               (skeletonRows), so the table does not shrink when loading
+               ends with nothing to list. */
+            :host ::ng-deep .flood-table .p-datatable-tbody > tr.flood-empty-row {
+                height: calc(8 * 57px);
             }
             :host ::ng-deep .flood-table .p-datatable-thead > tr > th {
                 padding: 0.6rem 0.75rem;
@@ -186,6 +197,33 @@ const OUTBOX_RETRY_MS = 20_000;
                 white-space: nowrap;
             }
 
+            /* On a phone the paginator does not fit on one line, and left to
+               wrap it broke between the page buttons. The page report gets a
+               line of its own instead, with the buttons whole beneath it. */
+            @media (max-width: 639px) {
+                :host ::ng-deep .flood-table .p-paginator-current {
+                    flex-basis: 100%;
+                    justify-content: center;
+                }
+            }
+
+            /* The empty row's message, held in the part of the table that is
+               on screen. The row spans every column, so centred on the row
+               it sat off screen once the table was scrolled sideways (a tab
+               switch keeps the scroll) and the row looked blank. Sticky at
+               the cell's left padding, as wide as the scroll box less both
+               paddings: centred in view at any scroll. cqi reads the scroll
+               box's width, which the container-type makes available. */
+            :host ::ng-deep .flood-table .p-datatable-table-container {
+                container-type: inline-size;
+            }
+            .empty-message {
+                position: sticky;
+                left: 0.75rem;
+                width: calc(100cqi - 1.5rem);
+                text-align: center;
+            }
+
             .cell-sub {
                 font-size: 0.75rem;
                 line-height: 1.1rem;
@@ -232,7 +270,7 @@ const OUTBOX_RETRY_MS = 20_000;
     template: `
         <p-toast />
 
-        <div class="card">
+        <div class="card table-card">
             <div class="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
                     <div class="font-semibold text-xl">รับแจ้งขอความช่วยเหลืออุทกภัย</div>
@@ -284,10 +322,16 @@ const OUTBOX_RETRY_MS = 20_000;
                      hand already is. -->
                 <div class="flex items-center gap-2">
                     <flood-column-settings />
+                    <!-- Icon only on a narrow phone, like the ⚙ beside it:
+                         with the label the three buttons are wider than the
+                         card there, and รับแจ้งใหม่ broke onto two lines. -->
                     <button
                         pButton
                         type="button"
-                        label="Export"
+                        [label]="narrowPhone() ? '' : 'Export'"
+                        [attr.aria-label]="narrowPhone() ? 'Export' : null"
+                        [pTooltip]="narrowPhone() ? 'Export' : ''"
+                        tooltipPosition="bottom"
                         icon="pi pi-download"
                         class="p-button-outlined"
                         [disabled]="dataService.total() === 0"
@@ -311,8 +355,15 @@ const OUTBOX_RETRY_MS = 20_000;
                 }
             </div>
 
-            <div class="flex flex-wrap gap-2 mb-3">
-                <p-iconfield class="grow min-w-[16rem]">
+            <!-- Two even columns on a phone, search across both: left to
+                 wrap, the fixed-width selects each took a line of their own
+                 and ended at a different place. เจ้าหน้าที่รับแจ้ง takes both
+                 columns - its label and names do not fit in one - so เวร and
+                 ล้างตัวกรอง move after it to share the last line (order-1).
+                 At 360px and under they take a line each, where ล้างตัวกรอง
+                 no longer fits in half. From sm up they wrap as one row at their own widths. -->
+            <div class="grid grid-cols-2 gap-2 mb-3 sm:flex sm:flex-wrap">
+                <p-iconfield class="col-span-2 grow sm:min-w-[16rem]">
                     <p-inputicon class="pi pi-search" />
                     <input
                         #searchInput
@@ -344,8 +395,15 @@ const OUTBOX_RETRY_MS = 20_000;
                         [options]="orderOptions"
                         optionLabel="label"
                         optionValue="value"
-                        styleClass="w-44"
-                    />
+                        styleClass="w-44 max-sm:w-full"
+                    >
+                        <!-- Cut on a phone of 360px and under, where the field
+                             is half the row; the tooltip has the whole of it
+                             (.select-value, layout/_utils.scss). -->
+                        <ng-template #selectedItem let-option>
+                            <span class="select-value" [appTruncateTooltip]="option.label">{{ option.label }}</span>
+                        </ng-template>
+                    </p-select>
                     <label for="flood_order">เรียงลำดับข้อมูล</label>
                 </p-floatlabel>
 
@@ -365,7 +423,7 @@ const OUTBOX_RETRY_MS = 20_000;
                         [filter]="true"
                         [resetFilterOnHide]="true"
                         filterBy="label"
-                        styleClass="w-40"
+                        styleClass="w-40 max-sm:w-full"
                     />
                     <label for="flood_district">อำเภอ</label>
                 </p-floatlabel>
@@ -389,12 +447,12 @@ const OUTBOX_RETRY_MS = 20_000;
                         [filter]="true"
                         [resetFilterOnHide]="true"
                         filterBy="label"
-                        styleClass="w-40"
+                        styleClass="w-40 max-sm:w-full"
                     />
                     <label for="flood_subdistrict">ตำบล</label>
                 </p-floatlabel>
 
-                <p-floatlabel variant="on">
+                <p-floatlabel variant="on" class="max-sm:order-1 max-[360px]:col-span-2">
                     <p-select
                         openBelow
                         inputId="flood_shift"
@@ -404,12 +462,12 @@ const OUTBOX_RETRY_MS = 20_000;
                         optionLabel="label"
                         optionValue="code"
                         [showClear]="true"
-                        styleClass="w-32"
+                        styleClass="w-32 max-sm:w-full"
                     />
                     <label for="flood_shift">เวร</label>
                 </p-floatlabel>
 
-                <p-floatlabel variant="on">
+                <p-floatlabel variant="on" class="max-sm:col-span-2">
                     <p-select
                         openBelow
                         inputId="flood_agent"
@@ -425,7 +483,7 @@ const OUTBOX_RETRY_MS = 20_000;
                         [filter]="true"
                         [resetFilterOnHide]="true"
                         filterBy="agent_name"
-                        styleClass="w-52"
+                        styleClass="w-52 max-sm:w-full"
                         panelStyleClass="agent-filter-panel"
                     >
                         <!-- Same bare span PrimeNG renders (.agent-filter-panel cuts
@@ -451,7 +509,7 @@ const OUTBOX_RETRY_MS = 20_000;
                     type="button"
                     label="ล้างตัวกรอง"
                     icon="pi pi-filter-slash"
-                    class="p-button-outlined"
+                    class="p-button-outlined max-sm:w-full max-sm:order-1 max-[360px]:col-span-2"
                     (click)="clearFilters()"
                 ></button>
             </div>
@@ -512,14 +570,15 @@ const OUTBOX_RETRY_MS = 20_000;
             <p-table
                 #caseTable
                 styleClass="flood-table"
-                [value]="dataService.loading() ? skeletonRows : dataService.cases()"
+                [value]="showSkeleton() ? skeletonRows : dataService.failed() ? [] : dataService.cases()"
                 [selection]="selected()"
                 (selectionChange)="selected.set($event)"
                 dataKey="case_id"
                 stripedRows
                 [rows]="10"
                 [rowHover]="true"
-                [paginator]="!dataService.loading()"
+                [paginator]="true"
+                [class.table-loading]="showSkeleton()"
                 [showCurrentPageReport]="true"
                 currentPageReportTemplate="แสดง {first} - {last} จาก {totalRecords} เคส"
                 responsiveLayout="scroll"
@@ -549,7 +608,7 @@ const OUTBOX_RETRY_MS = 20_000;
                 </ng-template>
 
                 <ng-template #body let-item let-rowIndex="rowIndex">
-                    @if (dataService.loading()) {
+                    @if (showSkeleton()) {
                         <tr>
                             <td><p-skeleton width="1.2rem" /></td>
                             <td><p-skeleton width="1.5rem" /></td>
@@ -674,13 +733,19 @@ const OUTBOX_RETRY_MS = 20_000;
                 </ng-template>
 
                 <ng-template #emptymessage>
-                    <tr>
+                    <!-- As tall as the loading table (.flood-empty-row above);
+                         blank like the report tables' (.table-empty-row). -->
+                    <tr class="table-empty-row flood-empty-row">
                         <!-- The four fixed columns plus whatever is shown. -->
-                        <td [attr.colspan]="columns.visible().length + 4" class="text-center py-6 text-surface-500">
-                            @if (dataService.hasActiveFilters()) {
-                                ไม่พบเคสที่ตรงกับตัวกรอง
+                        <td [attr.colspan]="columns.visible().length + 4">
+                            @if (dataService.failed()) {
+                                <app-table-empty-state class="empty-message" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                            } @else if (dataService.hasActiveFilters()) {
+                                <app-table-empty-state class="empty-message" icon="pi-filter-slash" title="ไม่พบเคสที่ตรงกับตัวกรอง" subtitle="ลองปรับหรือล้างตัวกรอง">
+                                    <p-button label="ล้างตัวกรอง" icon="pi pi-filter-slash" size="small" (onClick)="clearFilters()" />
+                                </app-table-empty-state>
                             } @else {
-                                ยังไม่มีการรับแจ้ง
+                                <app-table-empty-state class="empty-message" icon="pi-inbox" title="ยังไม่มีการรับแจ้ง" subtitle="เคสที่รับแจ้งจะแสดงที่นี่" />
                             }
                         </td>
                     </tr>
@@ -736,6 +801,7 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
     private readonly searchInput = viewChild<any>('searchInput');
     private readonly drawer = viewChild(FloodCaseFormDrawer);
     private readonly dateFilterRef = viewChild.required(FloodDateFilter);
+    private readonly caseTable = viewChild.required<Table>('caseTable');
 
     // The header's date line while its ↻ is clearing it: kept on screen, with
     // the ↻ spinning, until the table has reloaded without the dates - the
@@ -779,14 +845,39 @@ export class FloodIntakeComponent implements OnInit, OnDestroy {
         return live ? this.tabs : this.tabs.filter((t) => t.key !== 'today' && t.key !== 'current_shift');
     });
 
+    // 360px and under (Galaxy S, a Fold's cover screen): too narrow for the
+    // header's buttons with Export's label.
+    readonly narrowPhone = signal(typeof window !== 'undefined' && !!window.matchMedia?.(NARROW_PHONE).matches);
+
     readonly selected = signal<FloodCase[]>([]);
     readonly skeletonRows = Array.from({ length: 8 }, () => ({}) as FloodCase);
+    // The table's skeleton. A failed connection ends it even though
+    // `loading` stays up - see FloodDataService.failed - and the table shows
+    // its "cannot connect" state instead.
+    readonly showSkeleton = computed(() => this.dataService.loading() && !this.dataService.failed());
 
     private retryTimer: ReturnType<typeof setInterval> | null = null;
     private flushing = false;
     private readonly onlineHandler = () => this.flushOutbox();
 
     constructor() {
+        if (typeof window !== 'undefined' && window.matchMedia) {
+            const query = window.matchMedia(NARROW_PHONE);
+            const onChange = (event: MediaQueryListEvent) => this.narrowPhone.set(event.matches);
+            query.addEventListener('change', onChange);
+            inject(DestroyRef).onDestroy(() => query.removeEventListener('change', onChange));
+        }
+
+        // Back to page 1 whenever loading starts, i.e. on every filter change.
+        // The paginator stays up while loading, and the table keeps its page
+        // across value changes: an operator on page 3 would see the eight
+        // skeleton rows land on page 1 and an empty page 3 under them. Keyed
+        // on loading, not on the cases, because the list is a live stream -
+        // a tick must not throw the operator back to page 1.
+        effect(() => {
+            if (this.dataService.loading()) this.caseTable().first = 0;
+        });
+
         // The reload a ↻ started has landed (or there was nothing to reload):
         // the date line can go.
         effect(() => {

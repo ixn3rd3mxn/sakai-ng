@@ -67,6 +67,7 @@ const MODES: { label: string; value: DateMode }[] = [
             type="button"
             icon="pi pi-calendar"
             label="วันที่"
+            class="max-sm:w-full"
             [class.p-button-outlined]="!hasValue()"
             (click)="open($event)"
         ></button>

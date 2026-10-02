@@ -13,6 +13,7 @@ import {
 } from '../flood-intake.types';
 import { OptionGroup } from '../../../shared/recent-picks';
 import { FloodApiService } from './flood-api.service';
+import { StreamEvents } from '@/app/core/sse-reconnect';
 
 // Mirrors REPORTER_SHORTCUTS / DDPM_SHORTCUTS / CREW_SHORTCUTS in
 // backend/libs/flood_cases.py. Change both together.
@@ -47,6 +48,24 @@ export class FloodDataService implements OnDestroy {
 
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
+
+    // The stream failed before its first frame for the current filters. The
+    // table says so rather than sitting on a skeleton for good. `loading` is
+    // left alone, so the tab counts keep their skeletons. The stream keeps
+    // retrying underneath; once it connects, the skeleton is back until the
+    // first frame.
+    private readonly _failed = signal<boolean>(false);
+    readonly failed = this._failed.asReadonly();
+    private readonly connection: StreamEvents = {
+        error: () => {
+            if (this._loading()) this._failed.set(true);
+        },
+        // Connected again after failing: back to the skeleton until the
+        // first frame, which can take a moment on a heavy request. Before
+        // that the message stays up - the retries through an outage are not
+        // shown one by one.
+        open: () => this._failed.set(false)
+    };
 
     private readonly _filters = signal<FloodFilterState>({ ...EMPTY_FILTERS });
     readonly filters = this._filters.asReadonly();
@@ -127,10 +146,11 @@ export class FloodDataService implements OnDestroy {
                 // and 250ms is imperceptible on a dropdown.
                 debounceTime(250),
                 distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
-                switchMap((filters) => this.api.streamCases(filters))
+                switchMap((filters) => this.api.streamCases(filters, this.connection))
             )
             .subscribe((snapshot) => {
                 this._snapshot.set(snapshot);
+                this._failed.set(false);
                 this._loading.set(false);
             });
     }
@@ -143,6 +163,7 @@ export class FloodDataService implements OnDestroy {
         // (clearing the date picker after choosing only a start date did this).
         if (JSON.stringify(next) === JSON.stringify(this.filters$.value)) return;
         this._filters.set(next);
+        this._failed.set(false);
         this._loading.set(true);
         this.filters$.next(next);
     }

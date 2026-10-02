@@ -6,7 +6,7 @@ import { DashboardRangeSummary, DashboardSummary, IncidentCreateRequest, Inciden
 import { IncidentRangeSelection } from '../../incident-history/incident-history.types';
 import { formatDateParam } from './date-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { StreamEvents, resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -56,7 +56,9 @@ export class DispatchApiService {
     // total for a whole night that way. `resilientEventSource` treats that
     // terminal state as one more thing to retry; see its comment for the
     // console trace that led here.
-    streamSummary(date?: string, shift?: ShiftCode): Observable<DashboardSummary> {
+    //
+    // `events` hears the connection fail and connect (see resilientEventSource).
+    streamSummary(date?: string, shift?: ShiftCode, events?: StreamEvents): Observable<DashboardSummary> {
         return new Observable<DashboardSummary>((subscriber) => {
             const query = this.buildParams(date, shift).toString();
             const url = query ? `${API_BASE_URL}/dashboard/stream?${query}` : `${API_BASE_URL}/dashboard/stream`;
@@ -74,7 +76,7 @@ export class DispatchApiService {
                         // ignore malformed frames
                     }
                 });
-            });
+            }, events);
         });
     }
 

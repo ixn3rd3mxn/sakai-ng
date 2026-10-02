@@ -276,6 +276,19 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                     } @else {
                         <span class="text-muted-color whitespace-nowrap">{{ shiftLabel() }} {{ longDate() }}</span>
                     }
+                    <!-- The board's one word on its connection, said once for
+                         every card and chart below rather than in each: the
+                         cards show "—" while nothing could be fetched, and
+                         keep their numbers when the stream drops later - which
+                         is when this line matters most, because frozen numbers
+                         look exactly like live ones. -->
+                    @if (failed()) {
+                        <span class="text-red-600 dark:text-red-400 font-medium">
+                            ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้ · ระบบจะเชื่อมต่อใหม่อัตโนมัติ
+                        </span>
+                    } @else if (staleSince(); as since) {
+                        <span class="text-amber-600 dark:text-amber-400 font-medium">ล่าสุด {{ since }} กำลังลองใหม่</span>
+                    }
                 </div>
                 <!-- Sized for a wall monitor read from across the room, where
                      only the 7xl numbers are legible and the labels are not. The
@@ -345,14 +358,18 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                              below already carries the hierarchy the fade was
                              doing. Matches the labels on the automate board. -->
                         <span class="block font-medium mb-4 stat-label">ผลรวมทั้งหมด</span>
-                        @if (loading()) {
+                        @if (failed()) {
+                            <div class="font-medium" [class]="countSize(0)">—</div>
+                        } @else if (loading()) {
                             <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                         } @else {
                             <div class="font-medium" [class]="countSize(totalCount())">{{ totalCount() }}</div>
                         }
                     </div>
                 </div>
-                @if (loading()) {
+                @if (failed()) {
+                    <div class="text-sm diff-line">&nbsp;</div>
+                } @else if (loading()) {
                     <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                 } @else {
                     <div class="text-sm diff-line" [appTruncateTooltip]="diffText(totalDiff()) + ' ' + compareLabel()">
@@ -375,14 +392,18 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                                  board is read from furthest away. The automate
                                  board's labels carry no muted class either. -->
                             <span class="block font-medium mb-4 stat-label">{{ card.label }}</span>
-                            @if (loading()) {
+                            @if (failed()) {
+                                <div class="font-medium" [class]="countSize(0)">—</div>
+                            } @else if (loading()) {
                                 <p-skeleton width="min(7rem, 100%)" height="4.5rem" />
                             } @else {
                                 <div class="text-surface-900 dark:text-surface-0 font-medium" [class]="countSize(card.count)">{{ card.count }}</div>
                             }
                         </div>
                     </div>
-                    @if (loading()) {
+                    @if (failed()) {
+                        <div class="text-sm diff-line">&nbsp;</div>
+                    } @else if (loading()) {
                         <p-skeleton width="min(11rem, 100%)" height="1.25rem" />
                     } @else {
                         <!-- text-sm: "-105 เทียบกับเมื่อวาน" is the widest this
@@ -455,7 +476,17 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                  skeleton is 2.5rem, which is text-4xl's line box. -->
 
             <div class="grid grid-cols-3 gap-1">
-                @if (loading()) {
+                @if (failed()) {
+                    <!-- The placeholders' boxes with "—" for the count; the
+                         label is unknown without a payload, so its line is
+                         held by an unseen skeleton. -->
+                    @for (placeholder of CHANNEL_PLACEHOLDERS; track placeholder) {
+                        <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(4rem, 100%)" height="1.4em" animation="none" style="visibility: hidden" /></span>
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">—</div>
+                        </div>
+                    }
+                } @else if (loading()) {
                     @for (placeholder of CHANNEL_PLACEHOLDERS; track placeholder) {
                         <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
                             <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(4rem, 100%)" height="1.4em" /></span>
@@ -475,7 +506,17 @@ const BREAKDOWN_ICONS: Record<string, string> = {
                 }
             </div>
             <div class="grid grid-cols-2 gap-1">
-                @if (loading()) {
+                @if (failed()) {
+                    <!-- The placeholders' boxes with "—" for the count; the
+                         label is unknown without a payload, so its line is
+                         held by an unseen skeleton. -->
+                    @for (placeholder of CASE_PLACEHOLDERS; track placeholder) {
+                        <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
+                            <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(6rem, 100%)" height="1.4em" animation="none" style="visibility: hidden" /></span>
+                            <div class="text-surface-900 dark:text-surface-0 font-medium text-4xl">—</div>
+                        </div>
+                    }
+                } @else if (loading()) {
                     @for (placeholder of CASE_PLACEHOLDERS; track placeholder) {
                         <div class="card tinted-card mb-0 h-full" [style.--card-hue]="'var(--p-' + featureTint.color + '-500)'" [style.--card-mix]="featureTint.mix + '%'">
                             <span class="block mb-2 stat-label stat-label-sm"><p-skeleton width="min(6rem, 100%)" height="1.4em" /></span>
@@ -511,6 +552,13 @@ export class IncidentTypeStatsWidget {
     // Without this the cards render `?? 0`, which is indistinguishable
     // from a shift that genuinely had no incidents.
     loading = input<boolean>(false);
+
+    /** Nothing could be fetched for the selection on screen: the counts show
+     *  "—" and the header says why, instead of skeletons that never end. */
+    failed = input<boolean>(false);
+    /** HH:MM the live stream dropped while its numbers were on screen, or
+     *  null. The numbers stay; the header says how old they are. */
+    staleSince = input<string | null>(null);
 
     // The แจ้งเหตุ count cut by channel and by case type. Null until the first
     // payload lands, same as `stats`.

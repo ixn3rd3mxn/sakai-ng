@@ -1,12 +1,7 @@
 # main
-fastapi[standard]
-fastapi==0.136.1
-
-pymongo==4.17.0
-sse-starlette==3.4.2
-httpx==0.28.1
-python-dotenv==1.2.3
-# certifi==2026.7.22
+fastapi[all]
+pymongo
+sse_starlette
 tzdata
 
-pydantic==2.13.4
+# certifi==2026.7.22

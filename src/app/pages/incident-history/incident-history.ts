@@ -17,7 +17,8 @@ import { IncidentHourlyChart } from './components/incident-hourly-chart';
 import { TooltipModule } from 'primeng/tooltip';
 import { TruncateTooltipDirective } from '../../shared/truncate-tooltip.directive';
 import { formatBuddhistDay, formatThaiLongDate, formatThaiShortDate, parseIsoDate } from '../dashboardclone/services/date-utils';
-import { PageFillerRow, isPageFiller, padToPage, pageFillers } from '../dashboardclone/services/page-filler';
+import { PageFillerRow, emptyStateAnchor, isPageFiller, padToPage, pageFillers } from '../dashboardclone/services/page-filler';
+import { TableEmptyState } from '../../shared/table-empty-state';
 
 // A breakdown-table row in either view: the name plus whichever numeric
 // columns statColumns() lists.
@@ -47,7 +48,8 @@ interface CbdRankRow {
         TruncateTooltipDirective,
         ScrollTopModule,
         SkeletonModule,
-        ToastModule
+        ToastModule,
+        TableEmptyState
     ],
     // One toast for the page: the date dial, the header refresh button and
     // the top-days list all report through it.
@@ -57,42 +59,51 @@ interface CbdRankRow {
              incident-type-stats-widget.ts): the day being shown, and the
              back-dated warning when it is one, on a line of its own above the
              cards - not inside the first card. No shift here - this page is
-             day-scoped (see incident-history-date-dial.ts). -->
+             day-scoped (see incident-history-date-dial.ts).
+             The reset button is 2rem tall against the title's 1.75rem line,
+             so its wrapper is centred with 0.125rem trimmed off each side (on
+             the wrapper: p-button's own style input only reaches the inner
+             button) - showing it
+             must not push the cards below down. -->
         <div class="flex flex-wrap items-baseline gap-x-2 mb-4">
             <span class="font-semibold text-xl">สรุปผลทั้งหมด</span>
             @if (dataService.isRange()) {
                 <!-- Several days or a range: the same warning colour and the
                      same way back as a back-dated day. -->
                 <span class="text-amber-600 dark:text-amber-400 font-medium"> กำลังดูข้อมูล {{ rangeLabel() }}</span>
-                <p-button
-                    icon="pi pi-refresh"
-                    severity="warn"
-                    [text]="true"
-                    [rounded]="true"
-                    size="small"
-                    pTooltip="กลับไปวันปัจจุบัน"
-                    tooltipPosition="bottom"
-                    ariaLabel="กลับไปวันปัจจุบัน"
-                    [loading]="dataService.loading()"
-                    (onClick)="resetToCurrent()"
-                />
+                <span class="flex" style="align-self: center; margin-block: -0.125rem">
+                    <p-button
+                        icon="pi pi-refresh"
+                        severity="warn"
+                        [text]="true"
+                        [rounded]="true"
+                        size="small"
+                        pTooltip="กลับไปวันปัจจุบัน"
+                        tooltipPosition="bottom"
+                        ariaLabel="กลับไปวันปัจจุบัน"
+                        [loading]="dataService.loading()"
+                        (onClick)="resetToCurrent()"
+                    />
+                </span>
             } @else if (!dataService.isCurrent()) {
                 <span class="text-amber-600 dark:text-amber-400 font-medium">
                     <span class="hidden lg:inline"> กำลังดูประวัติวันที่ {{ longDate() }} ลักษณะข้อมูลจะไม่เป็นปัจจุบัน</span>
                     <span class="lg:hidden"> กำลังดูข้อมูลย้อนหลัง: {{ shortDate() }}</span>
                 </span>
-                <p-button
-                    icon="pi pi-refresh"
-                    severity="warn"
-                    [text]="true"
-                    [rounded]="true"
-                    size="small"
-                    pTooltip="กลับไปวันปัจจุบัน"
-                    tooltipPosition="bottom"
-                    ariaLabel="กลับไปวันปัจจุบัน"
-                    [loading]="dataService.loading()"
-                    (onClick)="resetToCurrent()"
-                />
+                <span class="flex" style="align-self: center; margin-block: -0.125rem">
+                    <p-button
+                        icon="pi pi-refresh"
+                        severity="warn"
+                        [text]="true"
+                        [rounded]="true"
+                        size="small"
+                        pTooltip="กลับไปวันปัจจุบัน"
+                        tooltipPosition="bottom"
+                        ariaLabel="กลับไปวันปัจจุบัน"
+                        [loading]="dataService.loading()"
+                        (onClick)="resetToCurrent()"
+                    />
+                </span>
             } @else {
                 <span class="text-muted-color whitespace-nowrap">{{ longDate() }}</span>
             }
@@ -111,12 +122,13 @@ interface CbdRankRow {
                 [days]="dataService.range()?.per_day ?? []"
                 [continuous]="dataService.rangeSelection()?.kind === 'range'"
                 [loading]="dataService.loading()"
+                [failed]="dataService.failed()"
             />
         } @else {
-            <app-incident-hourly-chart [incidents]="dataService.history()?.incidents ?? []" [loading]="dataService.loading()" />
+            <app-incident-hourly-chart [incidents]="dataService.history()?.incidents ?? []" [loading]="dataService.loading()" [failed]="dataService.failed()" />
         }
 
-        <div class="card" style="margin-bottom: 0.25rem">
+        <div class="card table-card" style="margin-bottom: 0.25rem">
             <div class="flex justify-between items-center mb-4">
                 <div>
                     <div class="font-semibold text-xl">รายการเหตุการณ์</div>
@@ -132,6 +144,7 @@ interface CbdRankRow {
             <p-table
                 #incidentTable
                 [value]="incidentRows()"
+                [class.table-loading]="showSkeleton()"
                 stripedRows
                 dataKey="incident_id"
                 [rows]="PAGE_SIZE"
@@ -142,7 +155,7 @@ interface CbdRankRow {
             >
                 <ng-template #header>
                     <tr>
-                        <th style="min-width: 8rem">
+                        <th style="min-width: 11rem">
                             <div class="flex justify-between items-center">
                                 {{ dataService.isRange() ? 'วันที่ / เวลา' : 'เวลา' }}
                                 <p-columnFilter field="hour" matchMode="in" display="menu" [showMatchModes]="false" [showOperator]="false" [showAddButton]="false">
@@ -278,8 +291,8 @@ interface CbdRankRow {
                         </th>
                     </tr>
                 </ng-template>
-                <ng-template #body let-incident>
-                    @if (dataService.loading()) {
+                <ng-template #body let-incident let-rowIndex="rowIndex">
+                    @if (showSkeleton()) {
                         <tr>
                             <td><p-skeleton width="min(4rem, 80%)" /></td>
                             <td><p-skeleton width="min(6rem, 80%)" /></td>
@@ -289,6 +302,30 @@ interface CbdRankRow {
                             <!-- In a tag-sized box (.tag-box, _utils.scss) so a
                                  loading row is as tall as a loaded one. -->
                             <td><span class="tag-box"><p-skeleton width="min(4rem, 80%)" /></span></td>
+                        </tr>
+                    } @else if (isPageFiller(incident) && emptyState(incidentTable); as empty) {
+                        <!-- Nothing recorded, or nothing left by the column
+                             filters: the page of fillers drawn blank, with the
+                             empty state over the middle of it, so the table stays
+                             the size it was while loading - see .table-empty-row
+                             in _utils.scss. -->
+                        <tr class="table-empty-row">
+                            <td colspan="6" [class.table-empty-anchor]="rowIndex === emptyAnchor.row">
+                                <span class="tag-box"></span>
+                                @if (rowIndex === emptyAnchor.row) {
+                                    <div class="table-empty-overlay" [style.top]="emptyAnchor.top">
+                                        @if (empty === 'error') {
+                                            <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                        } @else if (empty === 'filter') {
+                                            <app-table-empty-state icon="pi-filter-slash" title="ไม่พบเหตุการณ์ที่ตรงกับตัวกรอง" subtitle="ลองปรับหรือล้างตัวกรอง">
+                                                <p-button label="ล้างตัวกรอง" icon="pi pi-filter-slash" size="small" (onClick)="clear(incidentTable)" />
+                                            </app-table-empty-state>
+                                        } @else {
+                                            <app-table-empty-state icon="pi-inbox" title="ยังไม่มีการบันทึกข้อมูล" subtitle="เหตุการณ์ที่บันทึกในช่วงเวลาที่เลือกจะแสดงที่นี่" />
+                                        }
+                                    </div>
+                                }
+                            </td>
                         </tr>
                     } @else if (isPageFiller(incident)) {
                         <!-- Pads a short page to PAGE_SIZE rows so the paginator
@@ -336,17 +373,12 @@ interface CbdRankRow {
                     </tr>
                     }
                 </ng-template>
-                <ng-template #emptymessage>
-                    <tr>
-                        <td colspan="6">ยังไม่มีการบันทึกข้อมูล</td>
-                    </tr>
-                </ng-template>
             </p-table>
         </div>
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">{{ dataService.isRange() ? 'วันที่บันทึกสูงสุดในช่วงที่เลือก' : 'วันที่บันทึกสูงสุดในเดือนนี้' }}</div>
-        <p-table [value]="dataService.loading() ? skeletonDayRows : topDays()" stripedRows [rowHover]="true" styleClass="mt-4">
+        <p-table [value]="showSkeleton() ? skeletonDayRows : topDayRows()" stripedRows [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width: 7rem">อันดับ</th>
@@ -356,12 +388,51 @@ interface CbdRankRow {
                 </tr>
             </ng-template>
             <ng-template #body let-item let-rowIndex="rowIndex">
-                @if (dataService.loading()) {
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="1.5rem" /></td>
                         <td><p-skeleton width="min(12rem, 90%)" /></td>
                         <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         <td></td>
+                    </tr>
+                } @else if (isPageFiller(item) && (dataService.failed() || !topDays().length)) {
+                    <!-- Nothing to rank: the skeleton's rows drawn blank, with
+                         the empty state over the middle of them, so the card
+                         stays the size it was while loading. Each holds the
+                         same skeleton bar, unseen and still, so a blank row is
+                         exactly a skeleton row's height - see .table-empty-row
+                         in _utils.scss. -->
+                    <tr class="table-empty-row">
+                        <td colspan="4" [class.table-empty-anchor]="rowIndex === dayEmptyAnchor.row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === dayEmptyAnchor.row) {
+                                <div class="table-empty-overlay" [style.top]="dayEmptyAnchor.top">
+                                    @if (dataService.failed()) {
+                                        <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                    } @else {
+                                        <app-table-empty-state icon="pi-inbox" title="ยังไม่มีการบันทึกข้อมูล" subtitle="{{ dataService.isRange() ? 'วันที่มีการบันทึกมากที่สุดในช่วงที่เลือกจะแสดงที่นี่' : 'วันที่มีการบันทึกมากที่สุดในเดือนนี้จะแสดงที่นี่' }}" />
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                } @else if (isPageFiller(item)) {
+                    <!-- Fills the list out to its five rows, as the paginated
+                         tables fill out a page, so the card is the same size
+                         whatever the month holds. The last cell lays the dash
+                         over an unseen copy of the สลับเวลา button
+                         (.button-height): the button sets a real row's height,
+                         and a bare dash would leave a filler shorter. -->
+                    <tr>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>
+                            <span class="button-height">
+                                <span>-</span>
+                                <p-button icon="pi pi-arrow-right" severity="secondary" [text]="true" [rounded]="true" size="small" aria-hidden="true" />
+                            </span>
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -393,11 +464,6 @@ interface CbdRankRow {
                     </tr>
                 }
             </ng-template>
-            <ng-template #emptymessage>
-                <tr>
-                    <td colspan="4">ยังไม่มีข้อมูล</td>
-                </tr>
-            </ng-template>
         </p-table>
     </div>
 
@@ -406,7 +472,7 @@ interface CbdRankRow {
          ones that never happened. -->
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">CBD ที่มีเหตุเกิดมากที่สุด</div>
-        <p-table [value]="dataService.loading() ? skeletonCbdRankRows : cbdRanking()" stripedRows [rowHover]="true" styleClass="mt-4">
+        <p-table [value]="showSkeleton() ? skeletonCbdRankRows : cbdRankRows()" stripedRows [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width: 7rem">อันดับ</th>
@@ -416,12 +482,42 @@ interface CbdRankRow {
                 </tr>
             </ng-template>
             <ng-template #body let-item let-rowIndex="rowIndex">
-                @if (dataService.loading()) {
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="1.5rem" /></td>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         <td><p-skeleton width="min(3rem, 80%)" /></td>
+                    </tr>
+                } @else if (isPageFiller(item) && (dataService.failed() || !cbdRanking().length)) {
+                    <!-- Nothing to rank: the skeleton's rows drawn blank, with
+                         the empty state over the middle of them, so the card
+                         stays the size it was while loading. Each holds the
+                         same skeleton bar, unseen and still, so a blank row is
+                         exactly a skeleton row's height - see .table-empty-row
+                         in _utils.scss. -->
+                    <tr class="table-empty-row">
+                        <td colspan="4" [class.table-empty-anchor]="rowIndex === cbdRankEmptyAnchor.row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === cbdRankEmptyAnchor.row) {
+                                <div class="table-empty-overlay" [style.top]="cbdRankEmptyAnchor.top">
+                                    @if (dataService.failed()) {
+                                        <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                    } @else {
+                                        <app-table-empty-state icon="pi-inbox" title="ไม่มีเหตุการณ์ที่ระบุ CBD" subtitle="CBD ที่เกิดเหตุมากที่สุดจะแสดงที่นี่" />
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                } @else if (isPageFiller(item)) {
+                    <!-- Fills the ranking out to its ten rows, as the paginated
+                         tables fill out a page. -->
+                    <tr>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
                     </tr>
                 } @else {
                     <tr>
@@ -435,17 +531,12 @@ interface CbdRankRow {
                     </tr>
                 }
             </ng-template>
-            <ng-template #emptymessage>
-                <tr>
-                    <td colspan="4">ไม่มีเหตุการณ์ที่ระบุ CBD</td>
-                </tr>
-            </ng-template>
         </p-table>
     </div>
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ประเภท</div>
-        <p-table [value]="dataService.loading() ? skeletonCallTypeRows : callTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="showSkeleton() || dataService.failed() ? skeletonCallTypeRows : callTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:206px">ชื่อ</th>
@@ -454,13 +545,26 @@ interface CbdRankRow {
                     }
                 </tr>
             </ng-template>
-            <ng-template #body let-item>
-                @if (dataService.loading()) {
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         @for (column of statColumns(); track column.key) {
                             <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         }
+                    </tr>
+                } @else if (dataService.failed()) {
+                    <!-- The skeleton's rows drawn blank, with the message over
+                         the middle of them - see .table-empty-row. -->
+                    <tr class="table-empty-row">
+                        <td [attr.colspan]="statColumns().length + 1" [class.table-empty-anchor]="rowIndex === anchorFor(skeletonCallTypeRows).row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === anchorFor(skeletonCallTypeRows).row) {
+                                <div class="table-empty-overlay" [style.top]="anchorFor(skeletonCallTypeRows).top">
+                                    <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -476,7 +580,7 @@ interface CbdRankRow {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ช่องทางการแจ้งเหตุ</div>
-        <p-table [value]="dataService.loading() ? skeletonChannelRows : reportingChannelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="showSkeleton() || dataService.failed() ? skeletonChannelRows : reportingChannelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:206px">ชื่อ</th>
@@ -485,13 +589,26 @@ interface CbdRankRow {
                     }
                 </tr>
             </ng-template>
-            <ng-template #body let-item>
-                @if (dataService.loading()) {
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         @for (column of statColumns(); track column.key) {
                             <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         }
+                    </tr>
+                } @else if (dataService.failed()) {
+                    <!-- The skeleton's rows drawn blank, with the message over
+                         the middle of them - see .table-empty-row. -->
+                    <tr class="table-empty-row">
+                        <td [attr.colspan]="statColumns().length + 1" [class.table-empty-anchor]="rowIndex === anchorFor(skeletonChannelRows).row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === anchorFor(skeletonChannelRows).row) {
+                                <div class="table-empty-overlay" [style.top]="anchorFor(skeletonChannelRows).top">
+                                    <app-table-empty-state [compact]="true" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -507,7 +624,7 @@ interface CbdRankRow {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ประเภทของการเจ็บป่วย</div>
-        <p-table [value]="dataService.loading() ? skeletonCaseTypeRows : caseTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="showSkeleton() || dataService.failed() ? skeletonCaseTypeRows : caseTypeStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:206px">ชื่อ</th>
@@ -516,13 +633,26 @@ interface CbdRankRow {
                     }
                 </tr>
             </ng-template>
-            <ng-template #body let-item>
-                @if (dataService.loading()) {
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         @for (column of statColumns(); track column.key) {
                             <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         }
+                    </tr>
+                } @else if (dataService.failed()) {
+                    <!-- The skeleton's rows drawn blank, with the message over
+                         the middle of them - see .table-empty-row. -->
+                    <tr class="table-empty-row">
+                        <td [attr.colspan]="statColumns().length + 1" [class.table-empty-anchor]="rowIndex === anchorFor(skeletonCaseTypeRows).row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === anchorFor(skeletonCaseTypeRows).row) {
+                                <div class="table-empty-overlay" [style.top]="anchorFor(skeletonCaseTypeRows).top">
+                                    <app-table-empty-state [compact]="true" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -538,7 +668,7 @@ interface CbdRankRow {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">ระดับความรุนแรง</div>
-        <p-table [value]="dataService.loading() ? skeletonSeverityRows : severityLevelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
+        <p-table [value]="showSkeleton() || dataService.failed() ? skeletonSeverityRows : severityLevelStatistics()" stripedRows [scrollable]="true" [rowHover]="true" scrollHeight="400px" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:206px">ชื่อ</th>
@@ -547,13 +677,26 @@ interface CbdRankRow {
                     }
                 </tr>
             </ng-template>
-            <ng-template #body let-item>
-                @if (dataService.loading()) {
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         @for (column of statColumns(); track column.key) {
                             <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         }
+                    </tr>
+                } @else if (dataService.failed()) {
+                    <!-- The skeleton's rows drawn blank, with the message over
+                         the middle of them - see .table-empty-row. -->
+                    <tr class="table-empty-row">
+                        <td [attr.colspan]="statColumns().length + 1" [class.table-empty-anchor]="rowIndex === anchorFor(skeletonSeverityRows).row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === anchorFor(skeletonSeverityRows).row) {
+                                <div class="table-empty-overlay" [style.top]="anchorFor(skeletonSeverityRows).top">
+                                    <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -569,7 +712,7 @@ interface CbdRankRow {
 
     <div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">CBD 25</div>
-        <p-table [value]="dataService.loading() ? skeletonCbdRows : cbdCategoryStatistics()" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
+        <p-table [value]="showSkeleton() || dataService.failed() ? skeletonCbdRows : cbdCategoryStatistics()" stripedRows [scrollable]="true" [rowHover]="true" styleClass="mt-4">
             <ng-template #header>
                 <tr>
                     <th style="min-width:206px">ชื่อ</th>
@@ -578,13 +721,26 @@ interface CbdRankRow {
                     }
                 </tr>
             </ng-template>
-            <ng-template #body let-item>
-                @if (dataService.loading()) {
+            <ng-template #body let-item let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton width="min(14rem, 90%)" /></td>
                         @for (column of statColumns(); track column.key) {
                             <td><p-skeleton width="min(2.5rem, 80%)" /></td>
                         }
+                    </tr>
+                } @else if (dataService.failed()) {
+                    <!-- The skeleton's rows drawn blank, with the message over
+                         the middle of them - see .table-empty-row. -->
+                    <tr class="table-empty-row">
+                        <td [attr.colspan]="statColumns().length + 1" [class.table-empty-anchor]="rowIndex === anchorFor(skeletonCbdRows).row">
+                            <p-skeleton animation="none" style="visibility: hidden" />
+                            @if (rowIndex === anchorFor(skeletonCbdRows).row) {
+                                <div class="table-empty-overlay" [style.top]="anchorFor(skeletonCbdRows).top">
+                                    <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else {
                     <tr>
@@ -651,6 +807,22 @@ interface CbdRankRow {
             width: 0;
             min-width: 100%;
         }
+        /* A top-days filler's last cell: the dash and an unseen copy of the
+           สลับเวลา button stacked in one grid cell, so the cell - and the
+           row - is the button's height, as a real row's is. visibility, not
+           display: the button still takes its space, but is not seen,
+           clicked or tabbed to. */
+        .button-height {
+            display: inline-grid;
+            align-items: center;
+        }
+        .button-height > * {
+            grid-area: 1 / 1;
+        }
+        .button-height > p-button {
+            visibility: hidden;
+        }
+
         .p-datatable-frozen-tbody {
             font-weight: bold;
         }
@@ -712,6 +884,9 @@ export class IncidentHistoryComponent implements OnInit {
     });
     private static readonly CBD_RANK_LIMIT = 10;
     protected readonly skeletonCbdRankRows = IncidentHistoryComponent.placeholders<CbdRankRow>(IncidentHistoryComponent.CBD_RANK_LIMIT);
+    protected readonly cbdRankEmptyAnchor = emptyStateAnchor(IncidentHistoryComponent.CBD_RANK_LIMIT);
+    // Filled out to the ranking's ten rows with "-" fillers (page-filler.ts).
+    protected readonly cbdRankRows = computed(() => padToPage(this.dataService.failed() ? [] : this.cbdRanking(), IncidentHistoryComponent.CBD_RANK_LIMIT));
 
     private readonly incidents = computed(() => (this.dataService.isRange() ? this.dataService.range()?.incidents : this.dataService.history()?.incidents) ?? []);
 
@@ -755,6 +930,11 @@ export class IncidentHistoryComponent implements OnInit {
         return Array.from({ length: count }, () => ({}) as T);
     }
 
+    // The skeleton for the three tables that say when the source cannot be
+    // reached (the incident list, top days, CBD ranking): a failure ends it
+    // even though `loading` stays up - see IncidentHistoryDataService.failed.
+    protected readonly showSkeleton = computed(() => this.dataService.loading() && !this.dataService.failed());
+
     protected readonly PAGE_SIZE = 10;
     protected readonly isPageFiller = isPageFiller;
     protected readonly skeletonIncidentRows = IncidentHistoryComponent.placeholders<IncidentHistoryItem>(this.PAGE_SIZE);
@@ -764,19 +944,40 @@ export class IncidentHistoryComponent implements OnInit {
     // column filters run inside the table and drop fillers, whose fields
     // match nothing, so a filtered result is padded in padFilteredRows.
     protected readonly incidentRows = computed<(IncidentHistoryItem | PageFillerRow)[]>(() =>
-        this.dataService.loading() ? this.skeletonIncidentRows : padToPage(this.incidents(), this.PAGE_SIZE)
+        this.showSkeleton() ? this.skeletonIncidentRows : padToPage(this.dataService.failed() ? [] : this.incidents(), this.PAGE_SIZE)
     );
 
     // Runs after the table has filtered but before it renders (onFilter is
     // emitted at the end of the filter pass). `filteredValue` is the array the
     // table renders from, so fillers pushed onto it complete the last page.
     // Null means no filter is active and the padded value is in use. An empty
-    // result stays empty: "no match" is worth more there than a page of dashes.
+    // result gets a whole page too, drawn blank under the "no match" state
+    // (emptyState) so the table keeps its height.
     padFilteredRows(table: Table): void {
         const filtered = table.filteredValue as (IncidentHistoryItem | PageFillerRow)[] | null;
-        if (filtered?.length) filtered.push(...pageFillers(filtered.length, this.PAGE_SIZE));
+        if (filtered) filtered.push(...pageFillers(filtered.length, this.PAGE_SIZE));
     }
+
+    // What a page with no incidents on it says: the source could not be
+    // reached, nothing recorded in the period, or records the column filters
+    // have all hidden - the last with a way out. Only asked of
+    // filler rows, so never while the skeleton is up.
+    protected emptyState(table: Table): 'error' | 'none' | 'filter' | null {
+        if (this.dataService.failed()) return 'error';
+        if (this.incidents().length === 0) return 'none';
+        const filtered = table.filteredValue as (IncidentHistoryItem | PageFillerRow)[] | null;
+        return filtered?.every(isPageFiller) ? 'filter' : null;
+    }
+    protected readonly emptyAnchor = emptyStateAnchor(this.PAGE_SIZE);
     protected readonly skeletonDayRows = IncidentHistoryComponent.placeholders<TopDayItem>(5); // top_days limit
+    protected readonly dayEmptyAnchor = emptyStateAnchor(this.skeletonDayRows.length);
+    // Filled out to the list's five rows with "-" fillers (page-filler.ts).
+    protected readonly topDayRows = computed(() => padToPage(this.dataService.failed() ? [] : this.topDays(), this.skeletonDayRows.length));
+    // Where a stat table's "cannot connect" sits over its blank rows - the
+    // middle of however many rows its skeleton has (page-filler.ts).
+    protected anchorFor(rows: unknown[]) {
+        return emptyStateAnchor(rows.length);
+    }
     protected readonly skeletonCallTypeRows = IncidentHistoryComponent.placeholders<StatRow>(6); // 5 call types + total
     protected readonly skeletonChannelRows = IncidentHistoryComponent.placeholders<StatRow>(3);
     protected readonly skeletonCaseTypeRows = IncidentHistoryComponent.placeholders<StatRow>(2);

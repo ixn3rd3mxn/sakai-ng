@@ -10,7 +10,7 @@ import {CommonModule} from "@angular/common";
     imports: [CommonModule, ButtonModule, StyleClassModule, AppConfigurator],
     template: `
         <div class="flex gap-4 top-8 right-8" [ngClass]="{'fixed':float()}">
-            <p-button type="button" (onClick)="toggleDarkMode()" [rounded]="true" [icon]="isDarkTheme() ? 'pi pi-moon' : 'pi pi-sun'" severity="secondary" />
+            <p-button type="button" (onClick)="toggleDarkMode($event)" [rounded]="true" [icon]="isDarkTheme() ? 'pi pi-moon' : 'pi pi-sun'" severity="secondary" />
             <p-button type="button" (onClick)="toggleFullscreen()" [rounded]="true" [icon]="isFullscreen() ? 'pi pi-window-minimize' : 'pi pi-window-maximize'" severity="secondary" class="hidden! xl:inline-flex!" />
             <div class="relative">
                 <p-button icon="pi pi-palette" pStyleClass="@next" enterFromClass="hidden" enterActiveClass="animate-scalein" leaveToClass="hidden" leaveActiveClass="animate-fadeout" [hideOnOutsideClick]="true" type="button" rounded />
@@ -34,7 +34,11 @@ export class AppFloatingConfigurator {
         });
     }
 
-    toggleDarkMode() {
+    toggleDarkMode(event: Event) {
+        // Kept from the document so the palette window's outside-click check
+        // never sees it: with a surface per mode, flipping modes while the
+        // window is open is how you compare them.
+        event.stopPropagation();
         this.LayoutService.layoutConfig.update((state) => ({ ...state, darkTheme: !state.darkTheme }));
     }
 

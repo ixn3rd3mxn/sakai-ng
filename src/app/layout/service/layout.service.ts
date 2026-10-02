@@ -118,16 +118,28 @@ export class LayoutService {
 
     private initialized = false;
 
+    private appliedDarkTheme: boolean | undefined;
+
     constructor() {
         effect(() => {
             const config = this.layoutConfig();
 
             if (!this.initialized || !config) {
                 this.initialized = true;
+                this.appliedDarkTheme = config?.darkTheme;
                 this.toggleDarkMode(config);
                 return;
             }
 
+            // Only a light/dark switch gets the view transition. While one runs,
+            // every click lands on <html>, so running it for palette changes
+            // made the palette window read a quick second click as an outside
+            // click and close.
+            if (config.darkTheme === this.appliedDarkTheme) {
+                return;
+            }
+
+            this.appliedDarkTheme = config.darkTheme;
             this.handleDarkModeTransition(config);
         });
 

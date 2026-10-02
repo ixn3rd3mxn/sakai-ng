@@ -1,6 +1,7 @@
 import { Component, computed, input } from '@angular/core';
 import { SkeletonModule } from 'primeng/skeleton';
 import { SeverityItem } from '../dispatch.types';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 const FALLBACK_LABELS = ['แดง', 'เหลือง', 'เขียว', 'ขาว', 'ดำ'];
 
@@ -41,7 +42,7 @@ const SEVERITY_TONE: Record<string, string> = {
 @Component({
     standalone: true,
     selector: 'app-severity-statistics',
-    imports: [SkeletonModule],
+    imports: [SkeletonModule, TableEmptyState],
     styles: `
         /* The list is inset from the card's own padding, the title is not.
 
@@ -192,7 +193,26 @@ const SEVERITY_TONE: Record<string, string> = {
             <span>ระดับความรุนแรง</span>
             <span>จำนวน</span>
         </div>
-        @if (loading()) {
+        @if (failed()) {
+            <!-- The skeleton's five rows, unseen and still, hold the card at
+                 its height while the message sits over them - the list has
+                 no empty state, but it does need to say it cannot get the
+                 numbers rather than wait for good. -->
+            <div class="relative">
+                <div style="visibility: hidden">
+                    @for (row of rows(); track row.name) {
+                        <div class="sev-row">
+                            <div class="flex items-baseline justify-between gap-2">
+                                <p-skeleton width="min(4rem, 100%)" height="1.25rem" animation="none" />
+                                <p-skeleton width="2rem" height="2.25rem" animation="none" />
+                            </div>
+                            <div [class]="'sev-track ' + row.tone"></div>
+                        </div>
+                    }
+                </div>
+                <app-table-empty-state class="absolute inset-0" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+            </div>
+        } @else if (loading()) {
             <!-- Same five rows in the same boxes as the real list, so the card
                  does not change height when the numbers land. -->
             @for (row of rows(); track row.name) {
@@ -243,6 +263,11 @@ export class SeverityStatisticsWidget {
     // Set by the dashboard while the stream has not yet delivered a snapshot
     // for the current selection.
     loading = input<boolean>(false);
+
+    // The source could not be reached for the selection on screen. Wins over
+    // `loading`, which stays up meanwhile. Cleared, back to the skeleton,
+    // once the connection is back - see DispatchDataService.
+    failed = input<boolean>(false);
 
     /** The five levels in triage order, each with its share of the largest.
      *

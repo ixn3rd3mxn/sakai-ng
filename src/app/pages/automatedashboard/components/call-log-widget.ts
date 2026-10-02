@@ -6,8 +6,9 @@ import { TooltipModule } from 'primeng/tooltip';
 import { TagModule } from 'primeng/tag';
 import { CallLogEntry, CallStatus } from '../call-log.types';
 import { formatDuration } from '../format-utils';
-import { PageFillerRow, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
+import { PageFillerRow, emptyStateAnchor, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
 import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 // Wording matches the stat cards above the table on purpose - "รับสาย" and
 // "ไม่ได้รับสาย" mean the same thing in both places, so a reader can tie a row
@@ -32,8 +33,8 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
 @Component({
     standalone: true,
     selector: 'app-call-log',
-    imports: [TableModule, SkeletonModule, ButtonModule, TagModule, TooltipModule, TruncateTooltipDirective],
-    template: `<div class="card" style="margin-bottom: 0">
+    imports: [TableModule, SkeletonModule, ButtonModule, TagModule, TooltipModule, TruncateTooltipDirective, TableEmptyState],
+    template: `<div class="card table-card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
                  where this page already puts one - beside the heading, not
@@ -93,6 +94,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
         <div class="relative">
         <p-table
             [value]="tableRows()"
+            [class.table-loading]="enabled() && loading()"
             [paginator]="true"
             [rows]="PAGE_SIZE"
             stripedRows
@@ -129,7 +131,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                     <th style="min-width: 10rem;">สถานะ</th>
                 </tr>
             </ng-template>
-            <ng-template #body let-call>
+            <ng-template #body let-call let-rowIndex="rowIndex">
                 @if (loading()) {
                     <tr>
                         <td><p-skeleton /></td>
@@ -140,6 +142,21 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                              row is as tall as a loaded one; a bare skeleton is 1rem,
                              shorter than the status tag every real row carries. -->
                         <td><span class="tag-box"><p-skeleton width="6rem" /></span></td>
+                    </tr>
+                } @else if (isPageFiller(call) && emptyState(); as empty) {
+                    <!-- Nothing to list, or the feed is down: the page of
+                         fillers drawn blank, with the empty state over the
+                         middle of it, so the table stays the size it was while
+                         loading - see .table-empty-row in _utils.scss. -->
+                    <tr class="table-empty-row">
+                        <td colspan="5" [class.table-empty-anchor]="rowIndex === emptyAnchor.row">
+                            <span class="tag-box"></span>
+                            @if (rowIndex === emptyAnchor.row) {
+                                <div class="table-empty-overlay" [style.top]="emptyAnchor.top">
+                                    <app-table-empty-state [icon]="empty.icon" [title]="empty.title" [subtitle]="empty.subtitle" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else if (isPageFiller(call)) {
                     <!-- Pads a short page to PAGE_SIZE rows so the paginator
@@ -182,13 +199,6 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as CallLogEnt
                     </tr>
                 }
             </ng-template>
-            <!-- Only ever the failure case: a day with nothing recorded is a
-                 page of fillers, not an empty table. -->
-            <ng-template #emptymessage>
-                <tr>
-                    <td colspan="5">ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้</td>
-                </tr>
-            </ng-template>
         </p-table>
             @if (!enabled()) {
                 <!-- Same icon-and-line shape as the chart's empty state, so a
@@ -226,8 +236,9 @@ export class CallLogWidget {
     protected readonly isPageFiller = isPageFiller;
 
     // Padded to whole pages so a short page does not move the paginator (see
-    // page-filler.ts). Left empty when the feed is down so the table says so
-    // instead of showing a page of dashes that reads as "no calls today".
+    // page-filler.ts). A page of fillers too when the feed is down - drawn
+    // blank under the error (emptyState), never as dashes that would read as
+    // "no calls today".
     protected readonly tableRows = computed<(CallLogEntry | PageFillerRow)[]>(() => {
         // Switched off: a page of fillers, not skeletons. The table is only a
         // hidden spacer then, and animating skeletons under a placeholder is
@@ -235,8 +246,19 @@ export class CallLogWidget {
         // reports `loading` while off.
         if (!this.enabled()) return padToPage([], PAGE_SIZE);
         if (this.loading()) return SKELETON_ROWS;
-        return this.available() ? padToPage(this.calls(), PAGE_SIZE) : [];
+        return this.available() ? padToPage(this.calls(), PAGE_SIZE) : padToPage([], PAGE_SIZE);
     });
+
+    // What a page with no rows says. The feed being down and a day with
+    // nothing on it must not look the same. Null while switched off (the
+    // table is only a hidden spacer then) or loading.
+    protected readonly emptyState = computed(() => {
+        if (!this.enabled() || this.loading()) return null;
+        if (!this.available()) return { icon: 'pi-exclamation-circle', title: 'ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้', subtitle: 'ระบบจะเชื่อมต่อใหม่อัตโนมัติ' };
+        if (this.calls().length === 0) return { icon: 'pi-inbox', title: 'ยังไม่มีสายเข้า', subtitle: 'สายที่เข้ามาจะแสดงที่นี่' };
+        return null;
+    });
+    protected readonly emptyAnchor = emptyStateAnchor(PAGE_SIZE);
 
     private readonly table = viewChild.required(Table);
 

@@ -5,7 +5,7 @@ import { environment } from '../../../../environments/environment';
 import { IncidentHistoryResponse, IncidentRangeResponse, IncidentRangeSelection, LookupsResponse } from '../incident-history.types';
 import { formatDateParam } from '../../dashboardclone/services/date-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { StreamEvents, resilientEventSource } from '@/app/core/sse-reconnect';
 
 const API_BASE_URL = environment.apiBaseUrl;
 
@@ -48,8 +48,9 @@ export class IncidentHistoryApiService {
     //
     // Reconnection is not left to the browser: EventSource gives up for good
     // on a response that is not a stream, which is what a backend restart
-    // hands it. See the comment on `resilientEventSource`.
-    streamHistory(date?: string): Observable<IncidentHistoryResponse> {
+    // hands it. See the comment on `resilientEventSource`, which `events`
+    // is handed to: it hears the connection fail and connect.
+    streamHistory(date?: string, events?: StreamEvents): Observable<IncidentHistoryResponse> {
         return new Observable<IncidentHistoryResponse>((subscriber) => {
             const query = this.buildParams(date).toString();
             const url = query ? `${API_BASE_URL}/incident-history/stream?${query}` : `${API_BASE_URL}/incident-history/stream`;
@@ -64,7 +65,7 @@ export class IncidentHistoryApiService {
                         // ignore malformed frames
                     }
                 });
-            });
+            }, events);
         });
     }
 }

@@ -7,6 +7,7 @@ import { LayoutService } from '@/app/layout/service/layout.service';
 import { HourlyDataService } from '../services/hourly-data.service';
 import { HourlyBucket } from '../call-stats.types';
 import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 /** True when two payloads describe the same 24 hours.
  *
@@ -48,7 +49,7 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
 @Component({
     standalone: true,
     selector: 'app-hourly-chart',
-    imports: [ChartModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective],
+    imports: [ChartModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective, TableEmptyState],
     template: `<div class="card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <div class="flex items-baseline gap-2 min-w-0">
@@ -117,16 +118,19 @@ function sameBuckets(a: HourlyBucket[] | null, b: HourlyBucket[] | null): boolea
                     <span>ปิดการรับข้อมูลอยู่</span>
                     <p-button label="เปิดการ์ดนี้" icon="pi pi-eye" size="small" (onClick)="enabledChange.emit(true)" />
                 </div>
+            } @else if (cannotConnect()) {
+                <!-- The backend unreachable, or reached but unable to read
+                     its upstream: either way there are no hours to draw, and
+                     a skeleton would wait for good. Retried underneath - see
+                     HourlyDataService. -->
+                <app-table-empty-state class="h-full" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
             } @else if (!chartReady()) {
                 <p-skeleton width="100%" height="100%" />
             } @else if (isEmpty()) {
                 <!-- Chart.js draws axes but no bars for an all-zero stack, which
                      reads as a broken canvas. A quiet day - or the first hour of
                      one - says so in words instead. -->
-                <div class="h-full flex flex-col items-center justify-center gap-3 text-muted-color">
-                    <i class="pi pi-chart-bar text-5xl opacity-30"></i>
-                    <span>ยังไม่มีการบันทึกข้อมูล</span>
-                </div>
+                <app-table-empty-state class="h-full" icon="pi-chart-bar" title="ยังไม่มีการบันทึกข้อมูล" subtitle="จำนวนสายในแต่ละชั่วโมงจะแสดงที่นี่" />
             } @else {
                 <!-- "block" explicitly: PrimeNG sets display:block through a
                      host binding, and h-full is meaningless on an inline box
@@ -150,6 +154,8 @@ export class HourlyChartWidget {
     /** The backend's short line about the hourly feed, or `''` when it is
      *  healthy - the same slot the two tables use for theirs. */
     protected readonly health = this.data.healthMessage;
+
+    protected readonly cannotConnect = computed(() => this.data.failed() || this.data.unavailable());
 
     // Compared by value, not by reference.
     //

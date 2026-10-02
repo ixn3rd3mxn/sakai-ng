@@ -16,6 +16,65 @@
     }
 }
 
+/* A card that ends with a paginated table (.table-card): the paginator is
+   the card's bottom edge, as in PrimeNG v22's paginator demo. Stock, the
+   paginator's own 0.5rem padding sat on top of the card's 1rem - 8px over the
+   page buttons and 24px under them. Without the card's bottom padding it is
+   8px on both sides. Every .table-card keeps its paginator while loading
+   too, so the padding is the same before and after and the card does not
+   change height; :has() only guards a card that has none.
+
+   Matched on .p-paginator, not p-datatable-paginator-bottom: v21's table
+   binds the paginator's class as `cx(...) + ' ' + paginatorStyleClass &&
+   paginatorStyleClass`, which is undefined with no paginatorStyleClass, so
+   that class (and Aura's line under the paginator with it) never appears. */
+.card.table-card:has(.p-paginator) {
+    padding-bottom: 0;
+}
+
+/* The paginator while its table loads (.table-loading on the p-table). The
+   loading table holds one page of skeleton rows, so a live paginator showed
+   a lone "1" that grew into "1 2 3 ..." when the data landed - a count that
+   was never true. Its contents are hidden instead, keeping their space so
+   the paginator is exactly the height it will be, and one skeleton bar
+   stands in for them, the way the skeleton rows stand in for the data.
+
+   A pseudo-element can hold no p-skeleton, so the bar is drawn from the same
+   skeleton tokens. The shimmer is a band a third the width of a 300% layer,
+   slid from fully off the bar's left to fully off its right in the 1.2s of
+   PrimeNG's own skeleton animation. */
+.table-loading .p-paginator {
+    position: relative;
+
+    > * {
+        visibility: hidden;
+    }
+
+    &::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: min(14rem, 100% - 2rem);
+        height: 1rem;
+        transform: translate(-50%, -50%);
+        border-radius: var(--p-skeleton-border-radius);
+        background:
+            linear-gradient(90deg, rgba(255, 255, 255, 0) 33.33%, var(--p-skeleton-animation-background) 50%, rgba(255, 255, 255, 0) 66.67%) 100% 0 / 300% 100% no-repeat,
+            var(--p-skeleton-background);
+        animation: table-paginator-skeleton 1.2s infinite;
+    }
+}
+
+@keyframes table-paginator-skeleton {
+    from {
+        background-position-x: 100%, 0;
+    }
+    to {
+        background-position-x: 0%, 0;
+    }
+}
+
 .p-toast {
     /* Stock width is 25rem, wider than a phone screen, where the toast hung
        off the left edge. Cap it so the 20px gutter PrimeNG gives it on the
@@ -162,4 +221,54 @@
     &::after {
         content: '\200B';
     }
+}
+
+/* A table with nothing to list (TableEmptyState). The paginated tables keep
+   being fed their page of filler rows (page-filler.ts) and draw each as one
+   blank full-width row holding only a .tag-box - so each is exactly as tall
+   as a filler or skeleton row, and the page keeps the size it had while
+   loading. The columns keep their widths too: in all three states they come
+   from the header cells alone, as a filler's dash and a skeleton add nothing
+   to them. No measured heights anywhere; the rows set it in every theme and
+   zoom. /flood/intake has no fillers - its empty row is sized there.
+
+   Blank means no stripe, no hover and no lines between the rows; the last
+   keeps its line as the table's bottom edge. The td takes the background
+   because PrimeNG puts the stripe and the hover on the tr. */
+.p-datatable-tbody > tr.table-empty-row > td {
+    background: var(--p-datatable-row-background);
+}
+.p-datatable-tbody > tr.table-empty-row:not(:last-child) > td {
+    border-bottom-color: transparent;
+}
+
+/* The block sits on one row and overflows onto the blank rows around it,
+   centred on the middle of the page - see emptyStateAnchor in
+   page-filler.ts. Absolute, so it adds nothing to the row's height or the
+   table's width. Only the anchor cell is positioned: a positioned cell in a
+   later row would paint its background over the block. */
+.p-datatable-tbody > tr.table-empty-row > td.table-empty-anchor {
+    position: relative;
+}
+.table-empty-overlay {
+    position: absolute;
+    z-index: 1;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+}
+
+/* Held in the part of the table that is on screen. On a phone these tables
+   are wider than the card and keep their sideways scroll, and a block centred
+   on the whole row would sit off screen. Sticky at the scroll box's left, as
+   wide as the scroll box: centred in view at any scroll. cqi reads that width,
+   which the container-type makes available - set only while the block is
+   there. */
+.p-datatable-table-container:has(.table-empty-overlay) {
+    container-type: inline-size;
+}
+.table-empty-overlay > app-table-empty-state {
+    position: sticky;
+    left: 0;
+    width: 100cqi;
 }

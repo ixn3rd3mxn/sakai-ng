@@ -1,12 +1,12 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, OnDestroy, computed, effect, inject, signal, untracked } from '@angular/core';
-import { Observable, Subscription, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { Observable, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { HourlySummary } from '../call-stats.types';
 import { feedHealthMessage } from '../format-utils';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { StreamEvents, resilientEventSource } from '@/app/core/sse-reconnect';
+import { retryUntilReachable } from '@/app/core/retry-until-reachable';
 import { CallStatsDataService } from './call-stats-data.service';
 
 const API_BASE_URL = environment.apiBaseUrl;
@@ -50,6 +50,25 @@ export class HourlyDataService implements OnDestroy {
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
 
+    // The backend could not be reached for the current selection: the
+    // stream or the day's fetch failed before any answer. `loading` stays up,
+    // and both keep retrying underneath; once one gets through - the stream
+    // connects, or the network comes back for the fetch - the chart is back
+    // on its skeleton until the buckets land.
+    private readonly _failed = signal<boolean>(false);
+    readonly failed = this._failed.asReadonly();
+    private readonly connection: StreamEvents = {
+        error: () => {
+            if (this._loading()) this._failed.set(true);
+        },
+        open: () => this._failed.set(false)
+    };
+
+    /** The backend answered but could not read its upstream feed. Told
+     *  apart from `failed` here, but the chart says the same for both: it
+     *  cannot get the data. */
+    readonly unavailable = computed(() => !this._loading() && this._summary()?.available === false);
+
     /** The 24 buckets, or null while loading or when the feed was unreadable. */
     readonly hourly = computed(() => this._summary()?.hourly ?? null);
 
@@ -78,9 +97,10 @@ export class HourlyDataService implements OnDestroy {
     private open(wanted: boolean, day: string | null): void {
         this.close();
         if (!wanted) return;
-        const source: Observable<HourlySummary | null> = day === null ? this.stream() : this.fetchDay(day);
+        const source: Observable<HourlySummary> = day === null ? this.stream() : this.fetchDay(day);
         this.subscription = source.subscribe((summary) => {
             this._summary.set(summary);
+            this._failed.set(false);
             this._loading.set(false);
         });
     }
@@ -89,6 +109,7 @@ export class HourlyDataService implements OnDestroy {
         this.subscription?.unsubscribe();
         this.subscription = null;
         this._summary.set(null);
+        this._failed.set(false);
         this._loading.set(true);
     }
 
@@ -107,15 +128,21 @@ export class HourlyDataService implements OnDestroy {
                         // ignore malformed frames
                     }
                 });
-            });
+            }, this.connection);
         });
     }
 
-    // A failed historical fetch surfaces as the "no data" state rather than
-    // an error - the same rule the counters follow.
-    private fetchDay(day: string): Observable<HourlySummary | null> {
+    // A failed fetch is asked again until it answers, as the stream
+    // reconnects, and says "cannot connect" meanwhile (`failed`) - not "no
+    // data", which would be false.
+    private fetchDay(day: string): Observable<HourlySummary> {
         const params = new HttpParams().set('day', day);
-        return this.http.get<HourlySummary>(`${API_BASE_URL}/call-stats/hourly`, { params }).pipe(catchError(() => of(null)));
+        return this.http.get<HourlySummary>(`${API_BASE_URL}/call-stats/hourly`, { params }).pipe(
+            retryUntilReachable(
+                () => this._failed.set(true),
+                () => this._failed.set(false)
+            )
+        );
     }
 
     ngOnDestroy(): void {

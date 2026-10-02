@@ -5,7 +5,7 @@ TypeScript: Select TypeScript Version > use Workspace version
 cd backend && conda activate myenv && uvicorn main:app --host xxx.xxx.xxx.xxx
 ng serve --host xxx.xxx.xxx.xxx
 
-conda update conda
+conda self update
 conda update --all --dry-run
 conda update --all
 

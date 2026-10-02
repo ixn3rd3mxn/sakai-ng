@@ -28,3 +28,11 @@ export function pageFillers(count: number, pageSize: number): PageFillerRow[] {
 export function padToPage<T>(rows: T[], pageSize: number): (T | PageFillerRow)[] {
     return [...rows, ...pageFillers(rows.length, pageSize)];
 }
+
+// Where a page of blank fillers puts its empty state (.table-empty-overlay,
+// _utils.scss). Every filler is the same height, so the middle of the page is
+// the middle row's centre on an odd page, and on an even one the edge between
+// the two middle rows - the top of the lower one.
+export function emptyStateAnchor(pageSize: number): { row: number; top: string } {
+    return { row: Math.floor(pageSize / 2), top: pageSize % 2 ? '50%' : '0' };
+}

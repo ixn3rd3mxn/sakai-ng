@@ -1,3 +1,9 @@
+/** How a stream's connection is doing - see `events` on resilientEventSource. */
+export interface StreamEvents {
+    error?: () => void;
+    open?: () => void;
+}
+
 /**
  * Opens an EventSource that comes back from the one failure the browser's own
  * retry never recovers from.
@@ -40,8 +46,14 @@
  * listeners belong to a source, and a rebuilt source starts with none. The
  * returned function tears everything down; use it as the Observable's
  * teardown.
+ *
+ * `events`, if given, hears how the connection is doing while this keeps
+ * retrying underneath, so a page can tell "loading" from "cannot connect":
+ * `error` on every failed attempt (the browser's own retries included),
+ * `open` on every one that connects. A close made here on purpose (a hidden
+ * tab, the teardown) is neither.
  */
-export function resilientEventSource(url: string, attach: (source: EventSource) => void): () => void {
+export function resilientEventSource(url: string, attach: (source: EventSource) => void, events?: StreamEvents): () => void {
     // Doubled on each consecutive failure, capped, and jittered so a fleet of
     // boards that all lost the same backend do not all come back on the same
     // tick and knock it over again.
@@ -90,6 +102,7 @@ export function resilientEventSource(url: string, attach: (source: EventSource) 
         attach(current);
 
         current.addEventListener('open', () => {
+            events?.open?.();
             stableTimer = setTimeout(() => {
                 if (source === current) failures = 0;
             }, STABLE_AFTER_MS);
@@ -97,6 +110,7 @@ export function resilientEventSource(url: string, attach: (source: EventSource) 
 
         current.onerror = () => {
             if (source !== current) return;
+            events?.error?.();
             // CONNECTING is the browser already retrying a network error on
             // its own schedule. Leave it to it - stacking a second reconnect
             // on top would only double the load on a backend that is

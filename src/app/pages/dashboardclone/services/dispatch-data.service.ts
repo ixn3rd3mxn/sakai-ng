@@ -1,9 +1,14 @@
 import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
-import { BehaviorSubject, EMPTY, Subscription, catchError, map, switchMap } from 'rxjs';
+import { BehaviorSubject, Subscription, map, switchMap } from 'rxjs';
+import { retryUntilReachable } from '@/app/core/retry-until-reachable';
 import { DashboardRangeSummary, DashboardSummary, IncidentCreateRequest, ShiftCode } from '../dispatch.types';
 import { IncidentRangeSelection } from '../../incident-history/incident-history.types';
 import { DispatchApiService } from './dispatch-api.service';
+import { StreamEvents } from '@/app/core/sse-reconnect';
 import { currentOperationalDay, formatDateParam, parseIsoDate } from './date-utils';
+
+// HH:MM on the centre's clock, whatever zone the viewing browser is set to.
+const CLOCK = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok' });
 
 interface Selection {
     date: string | null;
@@ -53,6 +58,36 @@ export class DispatchDataService implements OnDestroy {
     private readonly _loading = signal<boolean>(true);
     readonly loading = this._loading.asReadonly();
 
+    // The source could not be reached for the current selection: the
+    // shift's stream or the range request failed before any answer. The
+    // recent-incidents table says so rather than sitting on a skeleton for
+    // good or reading as "nothing recorded". `loading` is left alone, so the
+    // counters keep their skeletons instead of showing the last selection's
+    // numbers. Both keep retrying underneath; once one gets through - the
+    // stream connects, or the network comes back for the range - the
+    // skeleton is back until the data lands. Nobody has to ask again.
+    private readonly _failed = signal<boolean>(false);
+    readonly failed = this._failed.asReadonly();
+    // When the shift's stream dropped after its data was on screen, as
+    // HH:MM - or null while it is live. The board keeps the numbers it has
+    // but must not pass them off as current: on a wall display, frozen
+    // numbers look exactly like live ones. Cleared by the next frame, which
+    // the backend sends the moment the stream reconnects.
+    private readonly _staleSince = signal<string | null>(null);
+    readonly staleSince = this._staleSince.asReadonly();
+
+    private readonly connection: StreamEvents = {
+        error: () => {
+            if (this._loading()) this._failed.set(true);
+            else if (this._staleSince() === null) this._staleSince.set(CLOCK.format(new Date()));
+        },
+        // Connected again after failing: back to the skeleton until the
+        // first frame, which can take a moment on a heavy request. Before
+        // that the message stays up - the retries through an outage are not
+        // shown one by one.
+        open: () => this._failed.set(false)
+    };
+
     readonly context = computed(() => this._summary()?.context ?? null);
     readonly isCurrent = computed(() => !this.isRange() && (this.context()?.is_current ?? true));
     readonly selectedShift = computed<ShiftCode>(() => this.context()?.shift ?? 'morning');
@@ -72,26 +107,31 @@ export class DispatchDataService implements OnDestroy {
             .pipe(
                 switchMap((request) =>
                     request.kind === 'shift'
-                        ? this.api.streamSummary(request.date ?? undefined, request.shift ?? undefined).pipe(map((summary) => ({ summary })))
+                        ? this.api.streamSummary(request.date ?? undefined, request.shift ?? undefined, this.connection).pipe(map((summary) => ({ summary })))
                         : this.api.getSummaryRange(request).pipe(
-                              map((range) => ({ range })),
-                              // A failed request must not end the page's one
-                              // subscription; the skeletons just come down.
-                              catchError(() => {
-                                  this._loading.set(false);
-                                  return EMPTY;
-                              })
+                              // Asked again until it answers, as the shift's
+                              // stream reconnects; it never errors out, so the
+                              // page's one subscription cannot end on it.
+                              retryUntilReachable(
+                                  () => this._failed.set(true),
+                                  () => this._failed.set(false)
+                              ),
+                              map((range) => ({ range }))
                           )
                 )
             )
             .subscribe((result) => {
                 if ('summary' in result) this._summary.set(result.summary);
                 else this._range.set(result.range);
+                this._failed.set(false);
+                this._staleSince.set(null);
                 this._loading.set(false);
             });
     }
 
     select(date: Date, shift: ShiftCode): void {
+        this._failed.set(false);
+        this._staleSince.set(null);
         this._loading.set(true);
         this._rangeSelection.set(null);
         this.request$.next({ kind: 'shift', date: formatDateParam(date), shift });
@@ -101,12 +141,16 @@ export class DispatchDataService implements OnDestroy {
     // days' worth of board - all three shifts - so it stays a range here;
     // only วันเดียว with a shift is the shift board.
     selectRange(selection: IncidentRangeSelection): void {
+        this._failed.set(false);
+        this._staleSince.set(null);
         this._loading.set(true);
         this._rangeSelection.set(selection);
         this.request$.next(selection);
     }
 
     selectCurrent(): void {
+        this._failed.set(false);
+        this._staleSince.set(null);
         this._loading.set(true);
         this._rangeSelection.set(null);
         this.request$.next({ kind: 'shift', date: null, shift: null });

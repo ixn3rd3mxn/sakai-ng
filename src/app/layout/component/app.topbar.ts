@@ -36,7 +36,7 @@ import { AppUpdateService } from '@/app/core/app-update.service';
                         <span class="block! absolute top-1 right-1 w-2 h-2 rounded-full bg-primary"></span>
                     </button>
                 }
-                <button type="button" class="layout-topbar-action" (click)="toggleDarkMode()">
+                <button type="button" class="layout-topbar-action" (click)="toggleDarkMode($event)">
                     <i [ngClass]="{ 'pi ': true, 'pi-moon': layoutService.isDarkTheme(), 'pi-sun': !layoutService.isDarkTheme() }"></i>
                 </button>
                 <button type="button" class="layout-topbar-action hidden! xl:inline-flex!" (click)="toggleFullscreen()">
@@ -96,7 +96,11 @@ export class AppTopbar {
         });
     }
 
-    toggleDarkMode() {
+    toggleDarkMode(event: Event) {
+        // Kept from the document so the palette window's outside-click check
+        // never sees it: with a surface per mode, flipping modes while the
+        // window is open is how you compare them.
+        event.stopPropagation();
         this.layoutService.layoutConfig.update((state) => ({
             ...state,
             darkTheme: !state.darkTheme

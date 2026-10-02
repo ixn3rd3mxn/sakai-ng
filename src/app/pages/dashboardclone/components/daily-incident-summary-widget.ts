@@ -3,6 +3,7 @@ import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { DailySummary } from '../dispatch.types';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 /** True when two payloads describe the same three shift counts.
  *
@@ -19,7 +20,7 @@ function sameSummary(a: DailySummary | null, b: DailySummary | null): boolean {
 @Component({
     standalone: true,
     selector: 'app-daily-incident-summary',
-    imports: [ChartModule, SkeletonModule],
+    imports: [ChartModule, SkeletonModule, TableEmptyState],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">{{ title() }}</div>
         <!-- One square box holding all three states, so the card never changes
@@ -32,13 +33,12 @@ function sameSummary(a: DailySummary | null, b: DailySummary | null): boolean {
              min(card width, 22.5rem) and simply gets smaller when the card
              does, so it can never overflow. -->
         <div class="w-full max-w-90 aspect-square mx-auto flex items-center justify-center">
-            @if (!chartReady()) {
+            @if (failed()) {
+                <app-table-empty-state class="h-full" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+            } @else if (!chartReady()) {
                 <p-skeleton width="100%" height="100%" shape="circle" />
             } @else if (isEmpty()) {
-                <div class="flex flex-col items-center justify-center gap-3 text-muted-color">
-                    <i class="pi pi-chart-pie text-5xl opacity-30"></i>
-                    <span>ยังไม่มีการบันทึกข้อมูล</span>
-                </div>
+                <app-table-empty-state class="h-full" icon="pi-chart-pie" title="ยังไม่มีการบันทึกข้อมูล" subtitle="สัดส่วนเหตุการณ์ในแต่ละเวรจะแสดงที่นี่" />
             } @else {
                 <p-chart type="doughnut" [data]="chartData()" [options]="chartOptions()" [plugins]="chartPlugins" class="block h-full w-full" />
             }
@@ -54,6 +54,12 @@ export class DailyIncidentSummaryWidget {
     // Set by the dashboard while the stream has not yet delivered a
     // snapshot for the current selection.
     loading = input<boolean>(false);
+
+    // The source could not be reached for the selection on screen. Wins over
+    // `loading`, which stays up meanwhile: the card says so instead of a
+    // skeleton that would never end. Cleared, back to the skeleton, once
+    // the connection is back - see the page's data service.
+    failed = input(false);
     // ผลรวมทั้งหมดต่อวัน, or for several days ผลรวมทั้งหมดต่อช่วงที่เลือก - the
     // same three shifts, summed over the days.
     title = input<string>('ผลรวมทั้งหมดต่อวัน');

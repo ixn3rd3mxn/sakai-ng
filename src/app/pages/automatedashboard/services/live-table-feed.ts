@@ -1,7 +1,7 @@
 import { computed, signal } from '@angular/core';
 import { Observable, Subscription } from 'rxjs';
 import { deploySignalListener } from '@/app/core/sse-deploy-signals';
-import { resilientEventSource } from '@/app/core/sse-reconnect';
+import { StreamEvents, resilientEventSource } from '@/app/core/sse-reconnect';
 import { FeedHealth } from '../feed-health.types';
 import { feedHealthMessage } from '../format-utils';
 
@@ -41,8 +41,24 @@ export function liveTableFeed<T extends { health?: FeedHealth }>(url: string, ev
                         // ignore malformed frames
                     }
                 });
-            });
+            }, connection);
         });
+
+    // Before the first payload, the connection decides between the
+    // skeleton and "cannot connect". A failed attempt ends the skeleton with
+    // no payload, which the table reads as its feed being unavailable - the
+    // same message it shows when the backend is up but its upstream is not -
+    // instead of loading for good. An attempt that connects brings the
+    // skeleton back until the payload lands. This feed serves its one table
+    // only, so nothing else is left showing stale data by it.
+    const connection: StreamEvents = {
+        error: () => {
+            if (_summary() === null) _loading.set(false);
+        },
+        open: () => {
+            if (_summary() === null) _loading.set(true);
+        }
+    };
 
     return {
         summary: _summary.asReadonly(),

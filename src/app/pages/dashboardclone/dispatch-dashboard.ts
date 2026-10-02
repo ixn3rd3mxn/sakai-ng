@@ -29,6 +29,8 @@ import { formatBuddhistDay } from './services/date-utils';
                 [stats]="summary()?.incident_type_stats ?? null"
                 [breakdowns]="summary()?.incident_breakdowns ?? null"
                 [loading]="dataService.loading()"
+                [failed]="dataService.failed()"
+                [staleSince]="dataService.staleSince()"
                 [shift]="selectedTimePeriod().name"
                 [selectedDate]="dataService.selectedDate()"
                 [historical]="!dataService.isCurrent()"
@@ -43,23 +45,39 @@ import { formatBuddhistDay } from './services/date-utils';
                      cards live in the widget, which owns their data. -->
                 <div leftPanel>
                     <!-- Over several days "latest" means nothing; how the days
-                         went takes its place - the summary page's own chart. -->
-                    @if (dataService.isRange()) {
-                        <app-incident-range-trend
-                            [days]="dataService.range()?.per_day ?? []"
-                            [continuous]="dataService.rangeSelection()?.kind === 'range'"
+                         went takes its place - the summary page's own chart.
+                         The two share one grid cell and บันทึกล่าสุด stays in it,
+                         invisible, so the cell is always its height and the
+                         chart stretches to fill it: swapping them never moves
+                         the CBD card below, whatever state, width or scrollbar
+                         the table is in. The chart's 0.25rem off is the card
+                         margin both cards carry, already inside the cell. -->
+                    <div class="recent-slot">
+                        @if (dataService.isRange()) {
+                            <app-incident-range-trend
+                                [days]="dataService.range()?.per_day ?? []"
+                                [continuous]="dataService.rangeSelection()?.kind === 'range'"
+                                [loading]="dataService.loading()"
+                                [failed]="dataService.failed()"
+                                height="calc(100% - 0.25rem)"
+                            />
+                        }
+                        <app-recent-incidents
+                            [incidents]="summary()?.recent_incidents ?? []"
                             [loading]="dataService.loading()"
+                            [failed]="dataService.failed()"
+                            [class.slot-sizer]="dataService.isRange()"
+                            [attr.aria-hidden]="dataService.isRange() || null"
                         />
-                    } @else {
-                        <app-recent-incidents [incidents]="summary()?.recent_incidents ?? []" [loading]="dataService.loading()" />
-                    }
-                    <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" />
+                    </div>
+                    <app-frequent-cbd-cases [items]="summary()?.frequent_cbd ?? []" [loading]="dataService.loading()" [failed]="dataService.failed()" />
                 </div>
                 <div rightPanel>
-                    <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" />
+                    <app-severity-statistics [items]="summary()?.severity_stats ?? []" [loading]="dataService.loading()" [failed]="dataService.failed()" />
                     <app-daily-incident-summary
                         [summary]="summary()?.daily_summary ?? null"
                         [loading]="dataService.loading()"
+                        [failed]="dataService.failed()"
                         [title]="dataService.isRange() ? 'ผลรวมทั้งหมดต่อช่วงที่เลือก' : 'ผลรวมทั้งหมดต่อวัน'"
                     />
                 </div>
@@ -70,6 +88,24 @@ import { formatBuddhistDay } from './services/date-utils';
         <app-dispatch-action-dial />
     `,
     styles: [`
+        /* บันทึกล่าสุด and the range chart stacked in one cell - see the
+           template. minmax(0, 1fr) so the table's 32rem min-width scrolls
+           inside its card, as before, rather than widening the column. */
+        .recent-slot {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .recent-slot > * {
+            grid-area: 1 / 1;
+        }
+
+        /* Holds the cell at the table's height while the chart is shown.
+           visibility, not display: it must still take up its space. */
+        .slot-sizer {
+            visibility: hidden;
+        }
+
         /* Third of the three floating controls in this corner, sized and placed
            to match the save button and menu dial in DispatchActionDial: 50px,
            with a 20px icon. The right offset has to clear the save button that

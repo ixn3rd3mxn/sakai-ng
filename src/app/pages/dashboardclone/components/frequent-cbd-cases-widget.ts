@@ -3,6 +3,7 @@ import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { CbdItem } from '../dispatch.types';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 /** True when two payloads describe the same ranking.
  *
@@ -22,7 +23,7 @@ function sameItems(a: CbdItem[], b: CbdItem[]): boolean {
 @Component({
     standalone: true,
     selector: 'app-frequent-cbd-cases',
-    imports: [ChartModule, SkeletonModule],
+    imports: [ChartModule, SkeletonModule, TableEmptyState],
     template: `<div class="card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">เคส CBD ที่เกิดเหตุบ่อยที่สุด</div>
         <!-- The 25rem box lives out here, on a plain block div, rather than on
@@ -36,13 +37,12 @@ function sameItems(a: CbdItem[], b: CbdItem[]): boolean {
              and the entry animation is lost. Sizing the wrapper instead of the
              chart means the height is settled before p-chart even exists. -->
         <div class="h-100">
-            @if (!chartReady()) {
+            @if (failed()) {
+                <app-table-empty-state class="h-full" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+            } @else if (!chartReady()) {
                 <p-skeleton width="100%" height="100%" />
             } @else if (isEmpty()) {
-                <div class="h-full flex flex-col items-center justify-center gap-3 text-muted-color">
-                    <i class="pi pi-chart-bar text-5xl opacity-30"></i>
-                    <span>ยังไม่มีการบันทึกข้อมูล</span>
-                </div>
+                <app-table-empty-state class="h-full" icon="pi-chart-bar" title="ยังไม่มีการบันทึกข้อมูล" subtitle="CBD ที่เกิดเหตุบ่อยจะแสดงที่นี่" />
             } @else {
                 <!-- "block" explicitly: PrimeNG sets display:block through a
                      host binding, and h-full is meaningless on an inline box
@@ -61,6 +61,12 @@ export class FrequentCbdCasesWidget {
     // Set by the dashboard while the stream has not yet delivered a
     // snapshot for the current selection.
     loading = input<boolean>(false);
+
+    // The source could not be reached for the selection on screen. Wins over
+    // `loading`, which stays up meanwhile: the card says so instead of a
+    // skeleton that would never end. Cleared, back to the skeleton, once
+    // the connection is back - see the page's data service.
+    failed = input(false);
 
     // Compared by value, not by reference.
     //

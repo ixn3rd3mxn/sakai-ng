@@ -4,8 +4,9 @@ import { Table, TableModule } from 'primeng/table';
 import { SkeletonModule } from 'primeng/skeleton';
 import { TooltipModule } from 'primeng/tooltip';
 import { MissedCallEntry } from '../call-log.types';
-import { PageFillerRow, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
+import { PageFillerRow, emptyStateAnchor, isPageFiller, padToPage } from '../../dashboardclone/services/page-filler';
 import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 const PAGE_SIZE = 8;
 
@@ -16,8 +17,8 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
 @Component({
     standalone: true,
     selector: 'app-missed-calls',
-    imports: [TableModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective],
-    template: `<div class="card" style="margin-bottom: 0">
+    imports: [TableModule, SkeletonModule, ButtonModule, TooltipModule, TruncateTooltipDirective, TableEmptyState],
+    template: `<div class="card table-card" style="margin-bottom: 0">
         <div class="flex items-center justify-between gap-2 mb-4">
             <!-- Title and feed warning share the left side, so the message sits
                  where this page already puts one - beside the heading, not
@@ -72,6 +73,7 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
         <div class="relative">
         <p-table
             [value]="tableRows()"
+            [class.table-loading]="enabled() && loading()"
             [paginator]="true"
             [rows]="PAGE_SIZE"
             stripedRows
@@ -92,11 +94,26 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
                     <th class="text-right" style="min-width: 8rem;">เวลาที่โทรเข้า</th>
                 </tr>
             </ng-template>
-            <ng-template #body let-call>
+            <ng-template #body let-call let-rowIndex="rowIndex">
                 @if (loading()) {
                     <tr>
                         <td><p-skeleton /></td>
                         <td><span class="tag-box"><p-skeleton width="5rem" /></span></td>
+                    </tr>
+                } @else if (isPageFiller(call) && emptyState(); as empty) {
+                    <!-- Nothing to list, or the feed is down: the page of
+                         fillers drawn blank, with the empty state over the
+                         middle of it, so the table stays the size it was while
+                         loading - see .table-empty-row in _utils.scss. -->
+                    <tr class="table-empty-row">
+                        <td colspan="2" [class.table-empty-anchor]="rowIndex === emptyAnchor.row">
+                            <span class="tag-box"></span>
+                            @if (rowIndex === emptyAnchor.row) {
+                                <div class="table-empty-overlay" [style.top]="emptyAnchor.top">
+                                    <app-table-empty-state [icon]="empty.icon" [title]="empty.title" [subtitle]="empty.subtitle" />
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else if (isPageFiller(call)) {
                     <!-- Pads a short page to PAGE_SIZE rows so the paginator
@@ -125,13 +142,6 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as MissedCall
                         <td class="tabular-nums whitespace-nowrap text-right">{{ call.at }}<span class="tag-box"></span></td>
                     </tr>
                 }
-            </ng-template>
-            <!-- Only ever the failure case: a day with nothing recorded is a
-                 page of fillers, not an empty table. -->
-            <ng-template #emptymessage>
-                <tr>
-                    <td colspan="2">ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้</td>
-                </tr>
             </ng-template>
         </p-table>
             @if (!enabled()) {
@@ -176,8 +186,9 @@ export class MissedCallsWidget {
     protected readonly isPageFiller = isPageFiller;
 
     // Padded to whole pages so a short page does not move the paginator (see
-    // page-filler.ts). Left empty when the feed is down so the table says so
-    // instead of showing a page of dashes that reads as "no missed calls".
+    // page-filler.ts). A page of fillers too when the feed is down - drawn
+    // blank under the error (emptyState), never as dashes that would read as
+    // "no missed calls".
     protected readonly tableRows = computed<(MissedCallEntry | PageFillerRow)[]>(() => {
         // Switched off: a page of fillers, not skeletons. The table is only a
         // hidden spacer then, and animating skeletons under a placeholder is
@@ -185,8 +196,19 @@ export class MissedCallsWidget {
         // reports `loading` while off.
         if (!this.enabled()) return padToPage([], PAGE_SIZE);
         if (this.loading()) return SKELETON_ROWS;
-        return this.available() ? padToPage(this.calls(), PAGE_SIZE) : [];
+        return this.available() ? padToPage(this.calls(), PAGE_SIZE) : padToPage([], PAGE_SIZE);
     });
+
+    // What a page with no rows says. The feed being down and a day with
+    // nothing on it must not look the same. Null while switched off (the
+    // table is only a hidden spacer then) or loading.
+    protected readonly emptyState = computed(() => {
+        if (!this.enabled() || this.loading()) return null;
+        if (!this.available()) return { icon: 'pi-exclamation-circle', title: 'ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้', subtitle: 'ระบบจะเชื่อมต่อใหม่อัตโนมัติ' };
+        if (this.calls().length === 0) return { icon: 'pi-inbox', title: 'ไม่มีสายที่ไม่ได้รับ', subtitle: 'สายที่ไม่ได้รับจะแสดงที่นี่' };
+        return null;
+    });
+    protected readonly emptyAnchor = emptyStateAnchor(PAGE_SIZE);
 
     private readonly table = viewChild.required(Table);
 

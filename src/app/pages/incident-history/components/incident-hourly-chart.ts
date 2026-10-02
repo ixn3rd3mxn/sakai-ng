@@ -3,6 +3,7 @@ import { ChartModule, UIChart } from 'primeng/chart';
 import { SkeletonModule } from 'primeng/skeleton';
 import { LayoutService } from '@/app/layout/service/layout.service';
 import { IncidentHistoryItem } from '../incident-history.types';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 // The operational day, 08:30:00 to the next 08:29:59, in the order it runs:
 // เช้า, บ่าย, then ดึก past midnight. Clock hours in the middle - 09:00-09:59
@@ -78,7 +79,7 @@ const sameSeries = (a: { type: TypeColor; counts: number[] }[], b: { type: TypeC
 @Component({
     selector: 'app-incident-hourly-chart',
     standalone: true,
-    imports: [ChartModule, SkeletonModule],
+    imports: [ChartModule, SkeletonModule, TableEmptyState],
     template: `
         <div class="card" style="margin-bottom: 0.25rem">
             <div class="flex flex-wrap justify-between items-baseline gap-x-4 gap-y-1 mb-4">
@@ -88,8 +89,15 @@ const sameSeries = (a: { type: TypeColor; counts: number[] }[], b: { type: TypeC
                 }
             </div>
             <div style="height: 18rem">
-                @if (loading()) {
+                @if (failed()) {
+                    <app-table-empty-state class="h-full" icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                } @else if (loading()) {
                     <p-skeleton width="100%" height="100%" />
+                } @else if (!peak()) {
+                    <!-- Chart.js draws bare axes for all-zero bars, which reads
+                         as a broken card - same empty state as
+                         เคส CBD ที่เกิดเหตุบ่อยที่สุด. -->
+                    <app-table-empty-state class="h-full" icon="pi-chart-bar" title="ยังไม่มีการบันทึกข้อมูล" subtitle="จำนวนเหตุการณ์ในแต่ละชั่วโมงจะแสดงที่นี่" />
                 } @else {
                     <p-chart type="bar" [data]="chartData()" [options]="chartOptions()" class="block h-full" />
                 }
@@ -129,6 +137,11 @@ export class IncidentHourlyChart {
 
     readonly incidents = input<IncidentHistoryItem[]>([]);
     readonly loading = input(false);
+    // The source could not be reached for the selection on screen. Wins over
+    // `loading`, which stays up meanwhile: the card says so instead of a
+    // skeleton that would never end. Cleared, back to the skeleton, once
+    // the connection is back - see the page's data service.
+    readonly failed = input(false);
 
     // Per type, per slot. Compared by value: today's day streams, and a push
     // that changed some other part of the page must not rebuild (and

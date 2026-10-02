@@ -3,8 +3,9 @@ import { Table, TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { SkeletonModule } from 'primeng/skeleton';
 import { RecentIncidentItem } from '../dispatch.types';
-import { PageFillerRow, isPageFiller, padToPage } from '../services/page-filler';
+import { PageFillerRow, emptyStateAnchor, isPageFiller, padToPage } from '../services/page-filler';
 import { TruncateTooltipDirective } from '../../../shared/truncate-tooltip.directive';
+import { TableEmptyState } from '../../../shared/table-empty-state';
 
 const PAGE_SIZE = 5;
 
@@ -16,15 +17,15 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as RecentInci
 @Component({
     standalone: true,
     selector: 'app-recent-incidents',
-    imports: [TableModule, TagModule, SkeletonModule, TruncateTooltipDirective],
-    template: `<div class="card" style="margin-bottom: 0.25rem">
+    imports: [TableModule, TagModule, SkeletonModule, TruncateTooltipDirective, TableEmptyState],
+    template: `<div class="card table-card" style="margin-bottom: 0.25rem">
         <div class="font-semibold text-xl mb-4">บันทึกล่าสุด</div>
         <!-- Fixed table layout: column widths come from the header cells
              alone, so they no longer follow the longest value on whichever
              page is showing and the columns stay put across pages. The
              min-width is the sum of the columns; below it the table scrolls
              sideways (responsiveLayout) rather than squeezing them. -->
-        <p-table [value]="tableRows()" [paginator]="true" [rows]="PAGE_SIZE" responsiveLayout="scroll" [tableStyle]="{ 'table-layout': 'fixed', 'min-width': '32rem' }">
+        <p-table [value]="tableRows()" [class.table-loading]="showSkeleton()" [paginator]="true" [rows]="PAGE_SIZE" responsiveLayout="scroll" [tableStyle]="{ 'table-layout': 'fixed', 'min-width': '32rem' }">
             <ng-template #header>
                 <tr>
                     <th style="width: 6rem;">เวลา</th>
@@ -33,8 +34,8 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as RecentInci
                     <th style="width: 7rem;">ระดับ</th>
                 </tr>
             </ng-template>
-            <ng-template #body let-incident>
-                @if (loading()) {
+            <ng-template #body let-incident let-rowIndex="rowIndex">
+                @if (showSkeleton()) {
                     <tr>
                         <td><p-skeleton /></td>
                         <td><p-skeleton /></td>
@@ -43,6 +44,26 @@ const SKELETON_ROWS = Array.from({ length: PAGE_SIZE }, () => ({}) as RecentInci
                              row is as tall as a loaded one; a bare skeleton is 1rem,
                              shorter than a badge. -->
                         <td><span class="tag-box"><p-skeleton width="4rem" /></span></td>
+                    </tr>
+                } @else if (isPageFiller(incident) && (failed() || incidents().length === 0)) {
+                    <!-- Nothing recorded yet, or the source cannot be reached:
+                         the page of fillers drawn blank, with the empty state
+                         over the middle of it, so the table stays the size it
+                         was while loading - see .table-empty-row in
+                         _utils.scss. -->
+                    <tr class="table-empty-row">
+                        <td colspan="4" [class.table-empty-anchor]="rowIndex === emptyAnchor.row">
+                            <span class="tag-box"></span>
+                            @if (rowIndex === emptyAnchor.row) {
+                                <div class="table-empty-overlay" [style.top]="emptyAnchor.top">
+                                    @if (failed()) {
+                                        <app-table-empty-state icon="pi-exclamation-circle" title="ไม่สามารถเชื่อมต่อแหล่งข้อมูลได้" subtitle="ระบบจะเชื่อมต่อใหม่อัตโนมัติ" />
+                                    } @else {
+                                        <app-table-empty-state icon="pi-inbox" title="ยังไม่มีการบันทึกข้อมูล" subtitle="เหตุการณ์ที่บันทึกจะแสดงที่นี่" />
+                                    }
+                                </div>
+                            }
+                        </td>
                     </tr>
                 } @else if (isPageFiller(incident)) {
                     <!-- Pads a short page to PAGE_SIZE rows so the paginator
@@ -84,10 +105,18 @@ export class RecentIncidentsWidget {
     // of fact that is not yet known to be true.
     loading = input<boolean>(false);
 
+    /** The source could not be reached for the selection on screen. Wins
+     *  over `loading`: the table says so instead of a skeleton that would
+     *  never end, or "nothing recorded", which would be false. */
+    failed = input<boolean>(false);
+
+    protected readonly showSkeleton = computed(() => this.loading() && !this.failed());
+
     protected readonly PAGE_SIZE = PAGE_SIZE;
     protected readonly isPageFiller = isPageFiller;
+    protected readonly emptyAnchor = emptyStateAnchor(PAGE_SIZE);
 
-    protected readonly tableRows = computed<(RecentIncidentItem | PageFillerRow)[]>(() => (this.loading() ? SKELETON_ROWS : padToPage(this.incidents(), PAGE_SIZE)));
+    protected readonly tableRows = computed<(RecentIncidentItem | PageFillerRow)[]>(() => (this.showSkeleton() ? SKELETON_ROWS : padToPage(this.failed() ? [] : this.incidents(), PAGE_SIZE)));
 
     private readonly table = viewChild.required(Table);
 

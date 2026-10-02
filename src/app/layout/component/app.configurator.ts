@@ -8,6 +8,7 @@ import Nora from '@primeuix/themes/nora';
 import { PrimeNG } from 'primeng/config';
 import { ButtonModule } from 'primeng/button';
 import { SelectButtonModule } from 'primeng/selectbutton';
+import { StyleClassModule } from 'primeng/styleclass';
 import { DEFAULT_LAYOUT_CONFIG, LayoutService } from '@/app/layout/service/layout.service';
 import { AppPreset } from '@/app/theme-preset';
 
@@ -40,8 +41,23 @@ declare type SurfacesType = {
 @Component({
     selector: 'app-configurator',
     standalone: true,
-    imports: [CommonModule, FormsModule, ButtonModule, SelectButtonModule],
+    imports: [CommonModule, FormsModule, ButtonModule, SelectButtonModule, StyleClassModule],
     template: `
+        <!-- Kept a direct child of the host so "@parent" is the panel itself; the
+             topbar and the floating configurator open it with the same classes.
+             Sits beside the "Primary" label, clear of the first swatch row. -->
+        <p-button
+            icon="pi pi-times"
+            ariaLabel="ปิด"
+            severity="secondary"
+            [text]="true"
+            [rounded]="true"
+            size="small"
+            class="absolute top-2 right-2"
+            pStyleClass="@parent"
+            leaveToClass="hidden"
+            leaveActiveClass="animate-fadeout"
+        />
         <div class="flex flex-col gap-4">
             <div>
                 <span class="text-sm text-muted-color font-semibold">Primary</span>
@@ -65,7 +81,7 @@ declare type SurfacesType = {
             </div>
             <div>
                 <!-- Each mode keeps its own surface; this row edits the one on screen. -->
-                <span class="text-sm text-muted-color font-semibold">Surface ({{ layoutService.isDarkTheme() ? 'โหมดมืด' : 'โหมดสว่าง' }})</span>
+                <span class="text-sm text-muted-color font-semibold">Surface {{ layoutService.isDarkTheme() ? 'Light Mode' : 'Dark Mode' }}</span>
                 <div class="pt-2 flex gap-2 flex-wrap justify-start">
                     @for (surface of surfaces; track surface.name) {
                         <button
@@ -91,7 +107,7 @@ declare type SurfacesType = {
                 <span class="text-sm text-muted-color font-semibold">Menu Mode</span>
                 <p-selectbutton [ngModel]="menuMode()" (ngModelChange)="onMenuModeChange($event)" [options]="menuModeOptions" [allowEmpty]="false" size="small" />
             </div>
-            <p-button label="ค่าเริ่มต้น" icon="pi pi-refresh" severity="secondary" [outlined]="true" size="small" [fluid]="true" [disabled]="isDefault()" (onClick)="resetToDefaults()" />
+            <p-button label="ค่าเริ่มต้น" icon="pi pi-refresh" severity="secondary" [outlined]="true" size="small" [fluid]="true" (onClick)="resetToDefaults()" />
         </div>
     `,
     host: {
@@ -456,11 +472,6 @@ export class AppConfigurator {
     onMenuModeChange(event: string) {
         this.layoutService.layoutConfig.update((prev) => ({ ...prev, menuMode: event }));
     }
-
-    isDefault = computed(() => {
-        const config = this.layoutService.layoutConfig();
-        return (Object.keys(DEFAULT_LAYOUT_CONFIG) as (keyof typeof DEFAULT_LAYOUT_CONFIG)[]).every((key) => config[key] === DEFAULT_LAYOUT_CONFIG[key]);
-    });
 
     resetToDefaults() {
         this.layoutService.layoutConfig.update((prev) => ({ ...prev, ...DEFAULT_LAYOUT_CONFIG }));
